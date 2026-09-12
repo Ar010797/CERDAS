@@ -1,0 +1,151 @@
+import React, { useState } from 'react';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import { cn } from '../../lib/utils';
+import {
+  LayoutDashboard,
+  Users,
+  CalendarDays,
+  Settings,
+  LogOut,
+  Menu,
+  X,
+  BookOpen,
+  GraduationCap,
+  ClipboardList,
+  Bell,
+  UserCircle
+} from 'lucide-react';
+
+export const DashboardLayout = () => {
+  const { userData, logout } = useAuth();
+  const navigate = useNavigate();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const adminLinks = [
+    { to: '/admin/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/admin/users', icon: Users, label: 'Kelola Pengguna' },
+    { to: '/admin/students', icon: GraduationCap, label: 'Data Siswa' },
+    { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Pelajaran & Ujian' },
+    { to: '/admin/academic-years', icon: CalendarDays, label: 'Tahun Ajaran' },
+    { to: '/admin/announcements', icon: Bell, label: 'Pengumuman' },
+  ];
+
+  const guruLinks = [
+    { to: '/guru/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/guru/students', icon: GraduationCap, label: 'Siswa Kelas' },
+    { to: '/guru/attendance', icon: ClipboardList, label: 'Absensi' },
+    { to: '/guru/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
+    { to: '/guru/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
+    { to: '/guru/lesson-plans', icon: BookOpen, label: 'E-RPP' },
+    { to: '/guru/settings', icon: Settings, label: 'Pengaturan Kelas' },
+  ];
+
+  const waliMuridLinks = [
+    { to: '/walimurid/dashboard', icon: UserCircle, label: 'Profil Anak & Rapor' },
+  ];
+
+  const links = userData?.role === 'Admin' ? adminLinks : 
+                userData?.role === 'Guru' ? guruLinks : 
+                waliMuridLinks;
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex">
+      {/* Sidebar Desktop */}
+      <aside className="hidden md:flex flex-col w-64 bg-indigo-900 text-white shadow-xl">
+        <div className="p-6 flex items-center space-x-3 border-b border-indigo-800">
+          <GraduationCap className="w-8 h-8 text-indigo-300" />
+          <span className="text-xl font-bold tracking-tight">SI Miftahussalam</span>
+        </div>
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+          {links.map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ease-in-out",
+                  isActive
+                    ? "bg-indigo-600 text-white shadow-md"
+                    : "text-indigo-200 hover:bg-indigo-800 hover:text-white"
+                )
+              }
+            >
+              <link.icon className="w-5 h-5" />
+              <span className="font-medium">{link.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="p-4 border-t border-indigo-800">
+          <div className="mb-4 px-4">
+            <p className="text-sm text-indigo-300 font-medium">Masuk sebagai</p>
+            <p className="text-white font-semibold truncate">{userData?.name}</p>
+            <p className="text-xs text-indigo-400">{userData?.role}</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            <span className="font-medium">Keluar</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Header & Sidebar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-indigo-900 text-white z-50 flex items-center justify-between px-4 shadow-md">
+        <div className="flex items-center space-x-3">
+          <GraduationCap className="w-6 h-6 text-indigo-300" />
+          <span className="text-lg font-bold">SI Miftahussalam</span>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2">
+          {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
+      {isMobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-40 bg-indigo-900 text-white pt-16 flex flex-col">
+          <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+            {links.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors",
+                    isActive ? "bg-indigo-600 text-white" : "text-indigo-200 hover:bg-indigo-800 hover:text-white"
+                  )
+                }
+              >
+                <link.icon className="w-5 h-5" />
+                <span className="font-medium">{link.label}</span>
+              </NavLink>
+            ))}
+          </nav>
+          <div className="p-6 border-t border-indigo-800">
+            <button
+              onClick={handleLogout}
+              className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors"
+            >
+              <LogOut className="w-5 h-5" />
+              <span className="font-medium">Keluar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto pt-16 md:pt-0">
+        <div className="p-6 md:p-8 max-w-7xl mx-auto">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  );
+};

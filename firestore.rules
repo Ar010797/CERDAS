@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Karena sistem login diubah menggunakan custom username & password (bukan Firebase Auth),
+    // kita perlu membuka akses untuk prototype ini. 
+    // PERINGATAN: Di lingkungan produksi, gunakan Firebase Auth dengan custom claims.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
