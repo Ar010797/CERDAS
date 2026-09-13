@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Save, Calendar, FileDown } from 'lucide-react';
+import { Save, Calendar, FileDown, Filter, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import jsPDF from 'jspdf';
@@ -13,12 +13,21 @@ interface Student {
   id: string;
   nisn: string;
   name: string;
+  parentPhone?: string;
 }
 
 type AttendanceStatus = 'Hadir' | 'Izin' | 'Sakit' | 'Alpa';
 
+const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
+
 export default function AttendanceGuru() {
   const { userData } = useAuth();
+  const isAdmin = userData?.role === 'Admin';
+  
+  const [selectedClass, setSelectedClass] = useState(
+    isAdmin ? 'Kelas 1' : (userData?.assigned_class || 'Kelas 1')
+  );
+
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
   const [loading, setLoading] = useState(true);
@@ -27,9 +36,9 @@ export default function AttendanceGuru() {
 
   useEffect(() => {
     const fetchStudents = async () => {
+      setLoading(true);
       try {
-        const assignedClass = userData?.assigned_class || 'Kelas 1';
-        const qStudents = query(collection(db, 'students'), where('classId', '==', assignedClass));
+        const qStudents = query(collection(db, 'students'), where('classId', '==', selectedClass));
         const snap = await getDocs(qStudents);
         const studentsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
         setStudents(studentsData);
@@ -46,10 +55,8 @@ export default function AttendanceGuru() {
         setLoading(false);
       }
     };
-    if (userData) {
-      fetchStudents();
-    }
-  }, [userData]);
+    fetchStudents();
+  }, [selectedClass]);
 
   const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
     setAttendance(prev => ({
@@ -79,7 +86,7 @@ export default function AttendanceGuru() {
       await batch.commit();
       
       if (userData) {
-        await logActivity(userData.name, userData.assigned_class || 'Kelas ?', `Mengisi Absen harian (${todayStr})`);
+        await logActivity(userData.name, userData.assigned_class || 'Admin', `Mengisi Absen harian (${todayStr})`);
       }
       
       alert('Absensi hari ini berhasil disimpan!');
@@ -98,7 +105,7 @@ export default function AttendanceGuru() {
     pdf.setFont("helvetica", "bold");
     pdf.text('REKAP ABSENSI BULANAN', 140, 20, { align: 'center' });
     pdf.setFontSize(10);
-    pdf.text(`Bulan: ${format(new Date(), 'MMMM yyyy', { locale: id })} | ${userData?.assigned_class || ''}`, 140, 26, { align: 'center' });
+    pdf.text(`Bulan: ${format(new Date(), 'MMMM yyyy', { locale: id })} | ${selectedClass}`, 140, 26, { align: 'center' });
     
     // Simulate table data (1-5 dates for example)
     const head = [['Nama Siswa', '1', '2', '3', '4', '5', 'H', 'I', 'S', 'A']];
@@ -130,9 +137,9 @@ export default function AttendanceGuru() {
 
     pdf.text(`Kotayasa, ${format(new Date(), 'dd MMMM yyyy', { locale: id })}`, 220, finalY + 20, { align: 'center' });
     pdf.text('Wali Kelas', 220, finalY + 28, { align: 'center' });
-    pdf.text(`(${userData?.name || '........................'})`, 220, finalY + 45, { align: 'center' });
+    pdf.text(`(${isAdmin ? '........................' : (userData?.name || '........................')})`, 220, finalY + 45, { align: 'center' });
 
-    pdf.save(`Rekap_Absen_${format(new Date(), 'MMM_yyyy')}.pdf`);
+    pdf.save(`Rekap_Absen_${selectedClass.replace(/\s+/g, '_')}_${format(new Date(), 'MMM_yyyy')}.pdf`);
   };
 
   const statusColors = {
@@ -149,17 +156,29 @@ export default function AttendanceGuru() {
           <h1 className="text-2xl font-bold text-slate-800">Absensi Harian</h1>
           <div className="flex items-center space-x-2 text-slate-500 mt-1">
             <Calendar className="w-4 h-4" />
-            <span className="text-sm">{format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })} - {userData?.assigned_class}</span>
+            <span className="text-sm">{format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })}</span>
           </div>
         </div>
         
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-3 flex-wrap sm:flex-nowrap gap-y-2">
+           {isAdmin && (
+               <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm mr-2">
+                 <Filter className="w-4 h-4 text-slate-500" />
+                 <select
+                    value={selectedClass}
+                    onChange={(e) => setSelectedClass(e.target.value)}
+                    className="bg-transparent text-sm font-semibold text-slate-700 outline-none"
+                  >
+                    {CLASSES_LIST.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+               </div>
+           )}
           <button
             onClick={handleExportRekap}
-            className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl transition-colors font-medium text-sm"
+            className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm"
           >
             <FileDown className="w-4 h-4" />
-            <span>Cetak Rekap PDF</span>
+            <span className="hidden sm:inline">Cetak Rekap</span>
           </button>
           <button
             onClick={handleSaveMassal}
@@ -167,14 +186,14 @@ export default function AttendanceGuru() {
             className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm shadow-indigo-200"
           >
             {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
-            <span>{saving ? 'Menyimpan...' : 'Simpan Absen Massal'}</span>
+            <span className="hidden sm:inline">{saving ? 'Menyimpan...' : 'Simpan Absen Massal'}</span>
           </button>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse min-w-[600px]">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100 text-sm text-slate-500">
                 <th className="px-6 py-4 font-medium">Siswa</th>
@@ -191,15 +210,34 @@ export default function AttendanceGuru() {
               ) : students.length === 0 ? (
                 <tr>
                   <td colSpan={2} className="px-6 py-8 text-center text-slate-500">
-                    Belum ada siswa di {userData?.assigned_class}.
+                    Belum ada siswa di {selectedClass}.
                   </td>
                 </tr>
               ) : (
                 students.map((student) => (
                   <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4">
-                      <p className="text-sm font-semibold text-slate-700">{student.name}</p>
-                      <p className="text-xs text-slate-500">{student.nisn}</p>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-800">{student.name}</p>
+                          <p className="text-xs text-slate-400">NISN: {student.nisn}</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (student.parentPhone) {
+                              const status = attendance[student.id];
+                              const waLink = `https://wa.me/${student.parentPhone.replace(/\D/g, '')}?text=Halo%20Bapak/Ibu%20Wali%20Murid%20dari%20${encodeURIComponent(student.name)}.%20Menginformasikan%20bahwa%20hari%20ini%20${encodeURIComponent(student.name)}%20berstatus%20${status}.`;
+                              window.open(waLink, '_blank');
+                            } else {
+                              alert('Nomor HP Wali Murid belum diatur untuk siswa ini');
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors ml-2"
+                          title="Kirim Info via WA"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex space-x-2">
@@ -207,9 +245,9 @@ export default function AttendanceGuru() {
                           <button
                             key={status}
                             onClick={() => handleStatusChange(student.id, status)}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition-all ${
-                              attendance[student.id] === status
-                                ? statusColors[status]
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                              attendance[student.id] === status 
+                                ? statusColors[status] 
                                 : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
                             }`}
                           >

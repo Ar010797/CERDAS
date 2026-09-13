@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import config from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -23,3 +24,8 @@ export const db = firestoreDatabaseId
   : getFirestore(app);
 
 export const auth = getAuth(app);
+export const storage = getStorage(app);
+
+// Secondary app instance for Admin to create users without signing themselves out
+export const adminApp = initializeApp(firebaseConfig, 'AdminApp');
+export const adminAuth = getAuth(adminApp);

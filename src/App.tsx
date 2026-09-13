@@ -5,11 +5,16 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 import Login from './screens/Login';
 import AdminDashboard from './screens/admin/Dashboard';
 import StudentsAdmin from './screens/admin/Students';
+import UsersAdmin from './screens/admin/Users';
+import AcademicYearsAdmin from './screens/admin/AcademicYears';
+import AnnouncementsAdmin from './screens/admin/Announcements';
 import GuruDashboard from './screens/guru/Dashboard';
 import GradesGuru from './screens/guru/Grades';
 import AttendanceGuru from './screens/guru/Attendance';
 import LessonPlansGuru from './screens/guru/LessonPlans';
 import SettingsGuru from './screens/guru/Settings';
+import GalleryGuru from './screens/guru/Gallery';
+import FinanceGuru from './screens/guru/Finance';
 import WaliMuridDashboard from './screens/walimurid/Dashboard';
 import SchedulesScreen from './screens/Schedules';
 
@@ -53,11 +58,16 @@ export default function App() {
             </ProtectedRoute>
           }>
             <Route path="dashboard" element={<AdminDashboard />} />
-            <Route path="users" element={<Placeholder title="Kelola Pengguna" />} />
+            <Route path="users" element={<UsersAdmin />} />
             <Route path="students" element={<StudentsAdmin />} />
+            <Route path="attendance" element={<AttendanceGuru />} />
+            <Route path="grades" element={<GradesGuru />} />
             <Route path="schedules" element={<SchedulesScreen />} />
-            <Route path="academic-years" element={<Placeholder title="Pengaturan Tahun Ajaran" />} />
-            <Route path="announcements" element={<Placeholder title="Pengumuman" />} />
+            <Route path="lesson-plans" element={<LessonPlansGuru />} />
+            <Route path="gallery" element={<GalleryGuru />} />
+            <Route path="finance" element={<FinanceGuru />} />
+            <Route path="academic-years" element={<AcademicYearsAdmin />} />
+            <Route path="announcements" element={<AnnouncementsAdmin />} />
           </Route>
 
           <Route path="/guru" element={
@@ -71,6 +81,8 @@ export default function App() {
             <Route path="grades" element={<GradesGuru />} />
             <Route path="schedules" element={<SchedulesScreen />} />
             <Route path="lesson-plans" element={<LessonPlansGuru />} />
+            <Route path="gallery" element={<GalleryGuru />} />
+            <Route path="finance" element={<FinanceGuru />} />
             <Route path="settings" element={<SettingsGuru />} />
           </Route>
 

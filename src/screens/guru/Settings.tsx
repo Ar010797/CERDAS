@@ -118,7 +118,7 @@ export default function SettingsGuru() {
   };
 
   const handleRemoveSubject = async (subj: string) => {
-    if (!confirm(`Hapus mata pelajaran ${subj}?`)) return;
+    
     setSavingSubjects(true);
     try {
       const updated = subjects.filter(s => s !== subj);

@@ -1,4 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { auth, db } from '../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 export type UserRole = 'Admin' | 'Guru' | 'Wali Murid' | null;
 
@@ -34,24 +37,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Custom auth logic using localStorage instead of Firebase Auth
-    const storedUser = localStorage.getItem('sim_user');
-    if (storedUser) {
-      try {
-        setUserData(JSON.parse(storedUser));
-      } catch (e) {
-        console.error(e);
+    // We listen to Firebase Auth state for Admin & Guru.
+    // For "Wali Murid", we still keep a fallback since they might not be in Firebase Auth
+    // (the prompt asks to migrate Admin/Guru to Firebase Auth, Wali Murid might just use simple NISN login, 
+    // but we can support both).
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Fetch extra profile data from Firestore
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setUserData({
+              uid: firebaseUser.uid,
+              name: data.name || '',
+              username: data.username || '',
+              role: data.role as UserRole,
+              assigned_class: data.assigned_class,
+            });
+          }
+        } catch (error) {
+          console.error("Error fetching user profile:", error);
+        }
+      } else {
+        // Check for Wali Murid fallback in local storage if not logged into Firebase Auth
+        const storedUser = localStorage.getItem('sim_user');
+        if (storedUser) {
+          try {
+            const parsed = JSON.parse(storedUser);
+            if (parsed.role === 'Wali Murid') {
+              setUserData(parsed);
+            } else {
+              setUserData(null);
+            }
+          } catch (e) {
+            setUserData(null);
+          }
+        } else {
+          setUserData(null);
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const login = (data: UserData) => {
     setUserData(data);
-    localStorage.setItem('sim_user', JSON.stringify(data));
+    if (data.role === 'Wali Murid') {
+      localStorage.setItem('sim_user', JSON.stringify(data));
+    }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
     setUserData(null);
     localStorage.removeItem('sim_user');
   };

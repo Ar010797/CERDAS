@@ -1,17 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Sparkles, Save, FileDown, BookOpen } from 'lucide-react';
+import { Sparkles, Save, FileDown, BookOpen, Filter } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 
+const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
+
 export default function LessonPlansGuru() {
   const { userData } = useAuth();
+  const isAdmin = userData?.role === 'Admin';
+  
+  const [selectedClass, setSelectedClass] = useState(
+    isAdmin ? 'Kelas 1' : (userData?.assigned_class || 'Kelas 1')
+  );
   
   const [mataPelajaran, setMataPelajaran] = useState('');
-  const [kelasSemester, setKelasSemester] = useState('');
+  const [kelasSemester, setKelasSemester] = useState(`${selectedClass} / Ganjil`);
   const [alokasiWaktu, setAlokasiWaktu] = useState('');
   const [tujuanPembelajaran, setTujuanPembelajaran] = useState('');
   const [pendahuluan, setPendahuluan] = useState('');
@@ -28,6 +35,10 @@ export default function LessonPlansGuru() {
   });
   
   useEffect(() => {
+    setKelasSemester(`${selectedClass} / Ganjil`);
+  }, [selectedClass]);
+  
+  useEffect(() => {
     const unsubSchool = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (docSnap) => {
       if (docSnap.exists()) {
         setSchoolSettings(docSnap.data() as any);
@@ -42,7 +53,7 @@ export default function LessonPlansGuru() {
       return;
     }
     
-    setKelasSemester(userData?.assigned_class + " / Ganjil");
+    setKelasSemester(`${selectedClass} / Ganjil`);
     setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
     setTujuanPembelajaran(`Melalui model pembelajaran Discovery Learning, siswa mampu memahami, menjelaskan, dan mempraktekkan konsep ${mataPelajaran} dengan disiplin dan penuh tanggung jawab.`);
     setPendahuluan(`1. Guru mengucapkan salam dan memimpin doa.\n2. Mengabsen siswa dan mengecek kebersihan kelas.\n3. Apersepsi: Mengaitkan materi sebelumnya dengan materi ${mataPelajaran} yang akan dipelajari.\n4. Menyampaikan tujuan pembelajaran dan memotivasi siswa.`);
@@ -100,184 +111,239 @@ export default function LessonPlansGuru() {
     
     pdf.line(20, 52, 190, 52);
 
-    let y = 60;
-    const addSection = (title: string, content: string) => {
-      // Check page break
-      if (y > 270) {
-        pdf.addPage();
-        y = 20;
-      }
-      
-      pdf.setFont("helvetica", "bold");
-      pdf.text(title, 20, y);
-      y += 6;
-      pdf.setFont("helvetica", "normal");
-      
-      const splitContent = pdf.splitTextToSize(content, 170);
-      
-      // Check if content fits, if not add page before printing content
-      if (y + (splitContent.length * 5) > 280) {
-         pdf.addPage();
-         y = 20;
-      }
+    let yPos = 60;
+    const lineHeight = 5;
+    const maxWidth = 170;
 
-      pdf.text(splitContent, 20, y);
-      y += (splitContent.length * 5) + 8;
+    const printSection = (title: string, content: string) => {
+      if (yPos > 260) {
+        pdf.addPage();
+        yPos = 20;
+      }
+      pdf.setFont("helvetica", "bold");
+      pdf.text(title, 20, yPos);
+      yPos += lineHeight;
+      
+      pdf.setFont("helvetica", "normal");
+      const lines = pdf.splitTextToSize(content || '-', maxWidth);
+      
+      if (yPos + (lines.length * lineHeight) > 280) {
+        pdf.addPage();
+        yPos = 20;
+      }
+      
+      pdf.text(lines, 20, yPos);
+      yPos += (lines.length * lineHeight) + 8;
     };
 
-    addSection('A. TUJUAN PEMBELAJARAN', tujuanPembelajaran);
-    addSection('B. KEGIATAN PENDAHULUAN', pendahuluan);
-    addSection('C. KEGIATAN INTI', kegiatanInti);
-    addSection('D. KEGIATAN PENUTUP', penutup);
-    addSection('E. PENILAIAN / ASESMEN', penilaian);
+    printSection('A. Tujuan Pembelajaran', tujuanPembelajaran);
+    printSection('B. Kegiatan Pendahuluan', pendahuluan);
+    printSection('C. Kegiatan Inti', kegiatanInti);
+    printSection('D. Kegiatan Penutup', penutup);
+    printSection('E. Penilaian Pembelajaran', penilaian);
 
-    // Signatures
-    if (y > 230) {
+    // Tanda Tangan
+    if (yPos > 230) {
       pdf.addPage();
-      y = 20;
+      yPos = 20;
+    } else {
+      yPos += 10;
     }
-    
-    y += 10;
-    const today = format(new Date(), 'd MMMM yyyy', { locale: id });
-    pdf.text(`Mengetahui,`, 20, y);
-    pdf.text(`.................., ${today}`, 130, y);
-    
-    y += 6;
-    pdf.text(`Kepala Sekolah`, 20, y);
-    pdf.text(`Guru Mata Pelajaran / Wali Kelas`, 130, y);
-    
-    y += 25;
-    pdf.setFont("helvetica", "bold");
-    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 20, y);
-    pdf.text(`${userData?.name || '________________________'}`, 130, y);
-    
-    pdf.setFont("helvetica", "normal");
-    y += 6;
-    pdf.text(`NIP. ${schoolSettings.nipKepalaSekolah || '__________________'}`, 20, y);
-    pdf.text(`NIP. __________________`, 130, y);
 
-    pdf.save(`RPP_${mataPelajaran.replace(/\s+/g, '_')}_${userData?.assigned_class}.pdf`);
+    pdf.setFont("helvetica", "normal");
+    pdf.text('Mengetahui,', 40, yPos, { align: 'center' });
+    pdf.text('Kepala Sekolah', 40, yPos + 6, { align: 'center' });
+    
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 40, yPos + 25, { align: 'center' });
+    pdf.setFont("helvetica", "normal");
+    
+    if(schoolSettings.nipKepalaSekolah) {
+      pdf.text(`NIP. ${schoolSettings.nipKepalaSekolah}`, 40, yPos + 30, { align: 'center' });
+    } else {
+      pdf.text(`NIP. __________________`, 40, yPos + 30, { align: 'center' });
+    }
+
+    pdf.text(`${schoolSettings.namaSekolah || 'Sekolah'}, ${format(new Date(), 'dd MMMM yyyy', { locale: id })}`, 160, yPos, { align: 'center' });
+    pdf.text('Guru Mata Pelajaran', 160, yPos + 6, { align: 'center' });
+    
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`${isAdmin ? '________________________' : (userData?.name || '________________________')}`, 160, yPos + 25, { align: 'center' });
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`NIP. __________________`, 160, yPos + 30, { align: 'center' });
+
+    pdf.save(`RPP_1_Lembar_${mataPelajaran.replace(/\s+/g, '_')}_${selectedClass.replace(/\s+/g, '_')}.pdf`);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-slate-800">E-RPP (Rencana Pelaksanaan Pembelajaran)</h1>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 sm:p-8">
-        <div className="space-y-6">
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-700 rounded-3xl p-6 text-white shadow-lg relative overflow-hidden">
+        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">Mata Pelajaran</label>
-            <div className="flex gap-4">
+            <div className="inline-flex items-center space-x-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-xs text-indigo-100 font-medium mb-2 border border-white/10">
+              <BookOpen className="w-3.5 h-3.5 text-indigo-200" />
+              <span>Modul E-RPP Dapodik</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">E-RPP 1 Lembar</h1>
+            <p className="text-indigo-100 text-sm mt-1 max-w-xl">
+              Susun Rencana Pelaksanaan Pembelajaran (RPP) sesuai standar Dapodik (SE Mendikbud No.14 2019).
+            </p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-md px-3 py-2 rounded-2xl border border-white/20">
+                <Filter className="w-4 h-4 text-white" />
+                <select
+                  value={selectedClass}
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="bg-transparent text-sm font-semibold text-white outline-none [&>option]:text-slate-800"
+                >
+                  {CLASSES_LIST.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={handleGenerateTemplate}
+              className="flex items-center space-x-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold backdrop-blur-md border border-white/20 transition-all"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>Isi Otomatis (AI Draft)</span>
+            </button>
+            <button
+              onClick={exportPDF}
+              className="flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-sm transition-all"
+            >
+              <FileDown className="w-4 h-4" />
+              <span>Cetak PDF</span>
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center space-x-2 bg-white text-indigo-700 hover:bg-indigo-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              <span>{saving ? 'Menyimpan...' : 'Simpan Draft'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+        {/* Identitas Section */}
+        <div className="mb-8">
+          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">Identitas Pembelajaran</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Mata Pelajaran</label>
               <input
                 type="text"
+                placeholder="Contoh: Matematika"
                 value={mataPelajaran}
                 onChange={(e) => setMataPelajaran(e.target.value)}
-                placeholder="Contoh: Matematika"
-                className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 placeholder:font-normal"
               />
-              <button
-                onClick={handleGenerateTemplate}
-                className="flex items-center space-x-2 bg-amber-100 hover:bg-amber-200 text-amber-700 px-6 py-3 rounded-xl transition-colors font-medium whitespace-nowrap"
-              >
-                <Sparkles className="w-5 h-5" />
-                <span className="hidden sm:inline">Generate Template Dapodik</span>
-              </button>
             </div>
-            <p className="text-xs text-slate-500 mt-2">Isi mata pelajaran, lalu klik Generate untuk menyusun RPP 1 Lembar standar Dapodik.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas / Semester</label>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Kelas / Semester</label>
               <input
                 type="text"
+                placeholder="Contoh: Kelas 1 / Ganjil"
                 value={kelasSemester}
                 onChange={(e) => setKelasSemester(e.target.value)}
-                placeholder="Contoh: Kelas 1 / Ganjil"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Alokasi Waktu</label>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Alokasi Waktu</label>
               <input
                 type="text"
+                placeholder="Contoh: 2 x 45 Menit"
                 value={alokasiWaktu}
                 onChange={(e) => setAlokasiWaktu(e.target.value)}
-                placeholder="Contoh: 2 x 45 Menit"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
               />
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">A. Tujuan Pembelajaran</label>
-            <textarea
-              value={tujuanPembelajaran}
-              onChange={(e) => setTujuanPembelajaran(e.target.value)}
-              rows={3}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">B. Kegiatan Pendahuluan</label>
-            <textarea
-              value={pendahuluan}
-              onChange={(e) => setPendahuluan(e.target.value)}
-              rows={4}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">C. Kegiatan Inti</label>
-            <textarea
-              value={kegiatanInti}
-              onChange={(e) => setKegiatanInti(e.target.value)}
-              rows={5}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">D. Kegiatan Penutup</label>
-            <textarea
-              value={penutup}
-              onChange={(e) => setPenutup(e.target.value)}
-              rows={4}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">E. Penilaian / Asesmen</label>
-            <textarea
-              value={penilaian}
-              onChange={(e) => setPenilaian(e.target.value)}
-              rows={3}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none"
-            />
           </div>
         </div>
 
-        <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-4 justify-end">
-          <button
-            onClick={exportPDF}
-            disabled={!mataPelajaran || !tujuanPembelajaran}
-            className="flex items-center justify-center space-x-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-3 rounded-xl transition-colors font-medium disabled:opacity-50"
-          >
-            <FileDown className="w-5 h-5" />
-            <span>Ekspor PDF (A4)</span>
-          </button>
-          
-          <button
-            onClick={handleSave}
-            disabled={saving || !mataPelajaran}
-            className="flex items-center justify-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl transition-colors font-medium shadow-sm shadow-indigo-200 disabled:opacity-50"
-          >
-            {saving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
-            <span>{saving ? 'Menyimpan...' : 'Simpan RPP'}</span>
-          </button>
+        {/* Komponen Inti Section */}
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">Komponen Inti (3 Pilar)</h2>
+          <div className="space-y-6">
+            
+            {/* A. Tujuan Pembelajaran */}
+            <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100">
+              <label className="block text-sm font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <span className="bg-indigo-100 text-indigo-700 w-6 h-6 rounded-md flex items-center justify-center text-xs">A</span>
+                Tujuan Pembelajaran
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Tuliskan tujuan pembelajaran yang ingin dicapai..."
+                value={tujuanPembelajaran}
+                onChange={(e) => setTujuanPembelajaran(e.target.value)}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+              />
+            </div>
+
+            {/* B. Langkah Pembelajaran */}
+            <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100 space-y-4">
+              <label className="block text-sm font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <span className="bg-indigo-100 text-indigo-700 w-6 h-6 rounded-md flex items-center justify-center text-xs">B</span>
+                Langkah-Langkah Kegiatan Pembelajaran
+              </label>
+              
+              <div className="ml-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">1. Kegiatan Pendahuluan (15 Menit)</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Kegiatan awal, apersepsi, motivasi..."
+                    value={pendahuluan}
+                    onChange={(e) => setPendahuluan(e.target.value)}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">2. Kegiatan Inti (60 Menit)</label>
+                  <textarea
+                    rows={4}
+                    placeholder="Model pembelajaran, sintaks, eksplorasi, diskusi..."
+                    value={kegiatanInti}
+                    onChange={(e) => setKegiatanInti(e.target.value)}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">3. Kegiatan Penutup (15 Menit)</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Kesimpulan, refleksi, penugasan, doa..."
+                    value={penutup}
+                    onChange={(e) => setPenutup(e.target.value)}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* C. Penilaian */}
+            <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100">
+              <label className="block text-sm font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <span className="bg-indigo-100 text-indigo-700 w-6 h-6 rounded-md flex items-center justify-center text-xs">C</span>
+                Penilaian Pembelajaran (Assessment)
+              </label>
+              <textarea
+                rows={4}
+                placeholder="Jelaskan instrumen penilaian sikap, pengetahuan, dan keterampilan..."
+                value={penilaian}
+                onChange={(e) => setPenilaian(e.target.value)}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+              />
+            </div>
+
+          </div>
         </div>
       </div>
     </div>

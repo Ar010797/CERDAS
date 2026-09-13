@@ -14,6 +14,7 @@ interface Student {
   classId: string;
   catatanWaliKelas?: string;
   catatanWaliKelasUpdated?: string;
+  parentPhone?: string;
 }
 
 export default function StudentsAdmin() {
@@ -33,7 +34,7 @@ export default function StudentsAdmin() {
   // Modal & Toast States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [formData, setFormData] = useState({ nisn: '', absen_number: '', name: '', gender: 'L', classId: '', catatanWaliKelas: '' });
+  const [formData, setFormData] = useState({ nisn: '', absen_number: '', name: '', gender: 'L', classId: '', catatanWaliKelas: '', parentPhone: '' });
   
   // Delete Confirmation Dialog State
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
@@ -182,6 +183,41 @@ export default function StudentsAdmin() {
     }
   };
 
+  const handleResetData = async () => {
+    // We will handle this using a modal state
+    setIsResetModalOpen(true);
+  };
+  
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+
+  const confirmResetData = async () => {
+    setIsDeleting(true);
+    try {
+      const batch = writeBatch(db);
+      
+      const qStudents = query(collection(db, 'students'), where('classId', '==', selectedClass));
+      const snapStudents = await getDocs(qStudents);
+      
+      for (const st of snapStudents.docs) {
+        batch.delete(st.ref); // Delete student
+        batch.delete(doc(db, 'grades', st.id)); // Delete grades
+        
+        // Delete attendance
+        const qAtt = query(collection(db, 'attendance'), where('studentId', '==', st.id));
+        const snapAtt = await getDocs(qAtt);
+        snapAtt.forEach(d => batch.delete(d.ref));
+      }
+      
+      await batch.commit();
+      showToast(`Seluruh data siswa kelas ${selectedClass} berhasil direset!`, 'success');
+    } catch (error: any) {
+      console.error("Error resetting students:", error);
+      showToast(`Gagal mereset data: ${error.message || 'Terjadi kesalahan sistem'}`, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleOpenModal = (student?: Student) => {
     if (student) {
       setEditingStudent(student);
@@ -191,7 +227,8 @@ export default function StudentsAdmin() {
         name: student.name || '', 
         gender: student.gender || 'L', 
         classId: student.classId || '',
-        catatanWaliKelas: student.catatanWaliKelas || ''
+        catatanWaliKelas: student.catatanWaliKelas || '',
+        parentPhone: student.parentPhone || ''
       });
     } else {
       setEditingStudent(null);
@@ -201,7 +238,8 @@ export default function StudentsAdmin() {
         name: '', 
         gender: 'L', 
         classId: isAdmin && selectedClass !== 'Semua Kelas' ? selectedClass : (userData?.assigned_class || 'Kelas 1'),
-        catatanWaliKelas: ''
+        catatanWaliKelas: '',
+        parentPhone: ''
       });
     }
     setIsModalOpen(true);
@@ -266,6 +304,17 @@ export default function StudentsAdmin() {
             <span>{isImporting ? 'Mengimpor...' : 'Impor Excel'}</span>
           </button>
           
+          {isAdmin && selectedClass !== 'Semua Kelas' && (
+            <button 
+              onClick={handleResetData}
+              disabled={isDeleting || students.length === 0}
+              className="flex items-center space-x-2 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2.5 rounded-xl transition-colors font-medium text-sm disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Reset Data</span>
+            </button>
+          )}
+
           <button 
             onClick={() => handleOpenModal()}
             disabled={isAdmin && selectedClass === 'Semua Kelas'}
@@ -347,6 +396,20 @@ export default function StudentsAdmin() {
                        <td className="px-6 py-4 text-sm text-slate-600 font-medium">{student.classId}</td>
                     )}
                     <td className="px-6 py-4 text-sm text-right space-x-2">
+                      <button
+                        onClick={() => {
+                          if (student.parentPhone) {
+                            const waLink = `https://wa.me/${student.parentPhone.replace(/\D/g, '')}?text=Halo%20Bapak/Ibu%20Wali%20Murid%20dari%20${encodeURIComponent(student.name)}...`;
+                            window.open(waLink, '_blank');
+                          } else {
+                            showToast('Nomor HP Wali Murid belum diatur untuk siswa ini', 'error');
+                          }
+                        }}
+                        className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Kirim Info via WA"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
                       <button 
                         onClick={() => handleOpenModal(student)}
                         className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
@@ -376,6 +439,44 @@ export default function StudentsAdmin() {
           <div className={`flex items-center space-x-3 px-5 py-3.5 rounded-2xl shadow-xl text-white ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
             {toast.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
             <span className="text-sm font-medium">{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation Modal */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Peringatan Fatal!</h2>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              Apakah Anda yakin ingin menghapus SELURUH DATA siswa kelas <strong>{selectedClass}</strong>? Ini akan menghapus data siswa, absensi, dan nilai secara permanen.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsResetModalOpen(false)}
+                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-sm transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={async () => {
+                  await confirmResetData();
+                  setIsResetModalOpen(false);
+                }}
+                disabled={isDeleting}
+                className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+              >
+                {isDeleting ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{isDeleting ? 'Mereset...' : 'Lanjut Reset'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -485,6 +586,17 @@ export default function StudentsAdmin() {
                     {singleClasses.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">No. HP Wali Murid (Untuk WA)</label>
+                <input
+                  type="text"
+                  value={formData.parentPhone}
+                  onChange={(e) => setFormData({...formData, parentPhone: e.target.value})}
+                  placeholder="Contoh: 081234567890"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
+                />
               </div>
 
               <div>

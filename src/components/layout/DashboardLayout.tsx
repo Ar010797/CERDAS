@@ -14,7 +14,9 @@ import {
   GraduationCap,
   ClipboardList,
   Bell,
-  UserCircle
+  UserCircle,
+  Image as ImageIcon,
+  Wallet
 } from 'lucide-react';
 
 export const DashboardLayout = () => {
@@ -31,8 +33,13 @@ export const DashboardLayout = () => {
     { to: '/admin/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/admin/users', icon: Users, label: 'Kelola Pengguna' },
     { to: '/admin/students', icon: GraduationCap, label: 'Data Siswa' },
-    { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Pelajaran & Ujian' },
-    { to: '/admin/academic-years', icon: CalendarDays, label: 'Tahun Ajaran' },
+    { to: '/admin/attendance', icon: ClipboardList, label: 'Absensi Siswa' },
+    { to: '/admin/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
+    { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
+    { to: '/admin/lesson-plans', icon: BookOpen, label: 'E-RPP Guru' },
+    { to: '/admin/gallery', icon: ImageIcon, label: 'Galeri Kelas' },
+    { to: '/admin/finance', icon: Wallet, label: 'Keuangan Kelas' },
+    { to: '/admin/academic-years', icon: CalendarDays, label: 'Tahun Ajaran & KKM' },
     { to: '/admin/announcements', icon: Bell, label: 'Pengumuman' },
   ];
 
@@ -43,6 +50,8 @@ export const DashboardLayout = () => {
     { to: '/guru/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
     { to: '/guru/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/guru/lesson-plans', icon: BookOpen, label: 'E-RPP' },
+    { to: '/guru/gallery', icon: ImageIcon, label: 'Galeri Kelas' },
+    { to: '/guru/finance', icon: Wallet, label: 'Keuangan Kelas' },
     { to: '/guru/settings', icon: Settings, label: 'Pengaturan Kelas' },
   ];
 

@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { collection, query, where, doc, onSnapshot, updateDoc, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { FileDown, CalendarDays, BookOpen, UserCircle, CheckCircle2, Edit2, X, Save, MessageSquare, Clock } from 'lucide-react';
+import { FileDown, CalendarDays, BookOpen, UserCircle, CheckCircle2, Edit2, X, Save, MessageSquare, Clock, Image as ImageIcon, Wallet, Coins } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ScheduleWidget from '../../components/ScheduleWidget';
+import { format } from 'date-fns';
+import { id } from 'date-fns/locale';
 
 export default function WaliMuridDashboard() {
   const { userData } = useAuth();
-  const [activeTab, setActiveTab] = useState<'profil' | 'akademik'>('profil');
+  const [activeTab, setActiveTab] = useState<'profil' | 'akademik' | 'galeri' | 'keuangan'>('profil');
   
   // Real-time data
   const [studentData, setStudentData] = useState<any>(null);
@@ -18,6 +20,11 @@ export default function WaliMuridDashboard() {
   const [subjects, setSubjects] = useState<string[]>([]);
   const [schoolSettings, setSchoolSettings] = useState({ namaSekolah: 'SI Miftahussalam', namaKepalaSekolah: '', nipKepalaSekolah: '' });
   const [loading, setLoading] = useState(true);
+
+  // Extra Data
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [savingTransactions, setSavingTransactions] = useState<any[]>([]);
+  const [kasTransactions, setKasTransactions] = useState<any[]>([]);
 
   // Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -79,14 +86,34 @@ export default function WaliMuridDashboard() {
     };
   }, [userData]);
 
-  // We also need subjects from class
+  // We also need subjects from class, gallery, and finance
   useEffect(() => {
-    if (!studentData?.classId) return;
+    if (!studentData?.classId || !studentData?.id) return;
+    
+    // Subjects
     const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', studentData.classId), (docSnap) => {
       if (docSnap.exists()) setSubjects(docSnap.data().subjects || []);
     });
-    return () => unsubSubjects();
-  }, [studentData?.classId]);
+
+    // Gallery
+    const qGallery = query(collection(db, 'gallery'), where('classId', '==', studentData.classId), orderBy('createdAt', 'desc'));
+    const unsubGallery = onSnapshot(qGallery, (snap) => setPhotos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+    // Tabungan
+    const qSavings = query(collection(db, 'savings'), where('studentId', '==', studentData.id), orderBy('date', 'desc'));
+    const unsubSavings = onSnapshot(qSavings, (snap) => setSavingTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+    // Kas
+    const qKas = query(collection(db, 'kas'), where('classId', '==', studentData.classId), orderBy('date', 'desc'));
+    const unsubKas = onSnapshot(qKas, (snap) => setKasTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+    return () => {
+      unsubSubjects();
+      unsubGallery();
+      unsubSavings();
+      unsubKas();
+    };
+  }, [studentData?.classId, studentData?.id]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,6 +197,14 @@ export default function WaliMuridDashboard() {
     pdf.save(`Rapor_${(studentData?.name || '').replace(/\s+/g, '_')}.pdf`);
   };
 
+  const tabunganBalance = savingTransactions.reduce((acc, curr) => {
+    return curr.type === 'setor' ? acc + curr.amount : acc - curr.amount;
+  }, 0);
+
+  const kasBalance = kasTransactions.reduce((acc, curr) => {
+    return curr.type === 'masuk' ? acc + curr.amount : acc - curr.amount;
+  }, 0);
+
   if (loading) {
     return <div className="text-center py-10">Memuat data anak Anda...</div>;
   }
@@ -249,10 +284,10 @@ export default function WaliMuridDashboard() {
       <ScheduleWidget classId={studentData?.classId || 'Kelas 1'} title={`Jadwal Pelajaran & Ujian Ananda (${studentData?.classId || 'Kelas 1'})`} />
 
       {/* Tabs */}
-      <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-full max-w-sm mx-auto md:mx-0">
+      <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-full max-w-2xl mx-auto md:mx-0 overflow-x-auto">
         <button
           onClick={() => setActiveTab('profil')}
-          className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
+          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
             activeTab === 'profil' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -260,11 +295,27 @@ export default function WaliMuridDashboard() {
         </button>
         <button
           onClick={() => setActiveTab('akademik')}
-          className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
+          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
             activeTab === 'akademik' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
           Akademik & Nilai
+        </button>
+        <button
+          onClick={() => setActiveTab('galeri')}
+          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
+            activeTab === 'galeri' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Galeri Kelas
+        </button>
+        <button
+          onClick={() => setActiveTab('keuangan')}
+          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
+            activeTab === 'keuangan' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Keuangan
         </button>
       </div>
 
@@ -291,7 +342,7 @@ export default function WaliMuridDashboard() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'akademik' ? (
         <div className="space-y-6">
           {/* Attendance Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -355,6 +406,139 @@ export default function WaliMuridDashboard() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === 'galeri' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-800">Galeri Kegiatan Kelas</h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {photos.length === 0 ? (
+              <div className="col-span-full bg-white rounded-2xl p-12 text-center border border-slate-100 flex flex-col items-center">
+                <ImageIcon className="w-12 h-12 text-slate-300 mb-4" />
+                <h3 className="text-lg font-bold text-slate-700">Belum Ada Foto</h3>
+                <p className="text-sm text-slate-500 mt-1">Belum ada momen kegiatan kelas yang dibagikan.</p>
+              </div>
+            ) : (
+              photos.map((photo) => (
+                <div key={photo.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group">
+                  <div className="aspect-square bg-slate-100 relative">
+                    <img 
+                      src={photo.url} 
+                      alt={photo.caption} 
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="p-4">
+                    <p className="text-sm font-medium text-slate-800 line-clamp-2">
+                      {photo.caption || 'Tanpa keterangan'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {photo.createdAt?.toDate ? format(photo.createdAt.toDate(), 'dd MMM yyyy', { locale: id }) : ''}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 p-6 rounded-3xl text-white shadow-lg shadow-emerald-200">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="p-3 bg-white/20 rounded-2xl">
+                  <Wallet className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <p className="text-emerald-100 font-medium">Saldo Tabungan Siswa</p>
+                  <p className="text-sm text-emerald-50 opacity-80">Total simpanan {studentData?.name}</p>
+                </div>
+              </div>
+              <h3 className="text-4xl font-bold">Rp {tabunganBalance.toLocaleString('id-ID')}</h3>
+            </div>
+            
+            <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-3xl text-white shadow-lg shadow-blue-200">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="p-3 bg-white/20 rounded-2xl">
+                  <Coins className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <p className="text-blue-100 font-medium">Uang Kas Kelas</p>
+                  <p className="text-sm text-blue-50 opacity-80">Saldo kas {studentData?.classId}</p>
+                </div>
+              </div>
+              <h3 className="text-4xl font-bold">Rp {kasBalance.toLocaleString('id-ID')}</h3>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Tabungan History */}
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                <h3 className="text-lg font-bold text-slate-800">Riwayat Tabungan</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-xs text-slate-500">
+                      <th className="px-4 py-3 font-medium">Tanggal</th>
+                      <th className="px-4 py-3 font-medium">Ket</th>
+                      <th className="px-4 py-3 font-medium">Jumlah</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {savingTransactions.length === 0 ? (
+                      <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-500 text-sm">Belum ada transaksi</td></tr>
+                    ) : (
+                      savingTransactions.map((trx) => (
+                        <tr key={trx.id} className="hover:bg-slate-50/50">
+                          <td className="px-4 py-3 text-xs text-slate-600">{trx.date?.toDate ? format(trx.date.toDate(), 'dd/MM/yy', { locale: id }) : '-'}</td>
+                          <td className="px-4 py-3 text-xs text-slate-600">{trx.note}</td>
+                          <td className={`px-4 py-3 text-xs font-bold ${trx.type === 'setor' ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {trx.type === 'setor' ? '+' : '-'} Rp {trx.amount.toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Kas History */}
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                <h3 className="text-lg font-bold text-slate-800">Laporan Kas Kelas</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100 text-xs text-slate-500">
+                      <th className="px-4 py-3 font-medium">Tanggal</th>
+                      <th className="px-4 py-3 font-medium">Ket</th>
+                      <th className="px-4 py-3 font-medium">Jumlah</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {kasTransactions.length === 0 ? (
+                      <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-500 text-sm">Belum ada transaksi</td></tr>
+                    ) : (
+                      kasTransactions.map((trx) => (
+                        <tr key={trx.id} className="hover:bg-slate-50/50">
+                          <td className="px-4 py-3 text-xs text-slate-600">{trx.date?.toDate ? format(trx.date.toDate(), 'dd/MM/yy', { locale: id }) : '-'}</td>
+                          <td className="px-4 py-3 text-xs text-slate-600">{trx.note}</td>
+                          <td className={`px-4 py-3 text-xs font-bold ${trx.type === 'masuk' ? 'text-blue-600' : 'text-red-600'}`}>
+                            {trx.type === 'masuk' ? '+' : '-'} Rp {trx.amount.toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
