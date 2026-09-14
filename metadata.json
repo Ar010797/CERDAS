@@ -1,6 +1,6 @@
 {
-  "name": "Administrasi Sekolah (Flutter)",
-  "description": "Generator kode Flutter untuk Aplikasi Administrasi Sekolah",
+  "name": "CERDAS",
+  "description": "Catatan Edukasi, Rapor, & Data Administrasi Sekolah",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

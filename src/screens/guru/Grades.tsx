@@ -34,7 +34,7 @@ export default function GradesGuru() {
   const [students, setStudents] = useState<Student[]>([]);
   const [grades, setGrades] = useState<Record<string, Record<string, GradeSubject>>>({});
   const [subjects, setSubjects] = useState<string[]>([]);
-  const [schoolSettings, setSchoolSettings] = useState<any>({ namaSekolah: 'SI Miftahussalam', namaKepalaSekolah: '', nipKepalaSekolah: '', kkmGlobal: '75' });
+  const [schoolSettings, setSchoolSettings] = useState<any>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', kkmGlobal: '75' });
   
   const [loading, setLoading] = useState(true);
   

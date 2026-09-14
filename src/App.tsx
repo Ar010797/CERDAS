@@ -13,7 +13,7 @@ import GradesGuru from './screens/guru/Grades';
 import AttendanceGuru from './screens/guru/Attendance';
 import LessonPlansGuru from './screens/guru/LessonPlans';
 import SettingsGuru from './screens/guru/Settings';
-import GalleryGuru from './screens/guru/Gallery';
+import QuestionBankGuru from './screens/guru/QuestionBank';
 import FinanceGuru from './screens/guru/Finance';
 import WaliMuridDashboard from './screens/walimurid/Dashboard';
 import SchedulesScreen from './screens/Schedules';
@@ -64,7 +64,7 @@ export default function App() {
             <Route path="grades" element={<GradesGuru />} />
             <Route path="schedules" element={<SchedulesScreen />} />
             <Route path="lesson-plans" element={<LessonPlansGuru />} />
-            <Route path="gallery" element={<GalleryGuru />} />
+            <Route path="question-bank" element={<QuestionBankGuru />} />
             <Route path="finance" element={<FinanceGuru />} />
             <Route path="academic-years" element={<AcademicYearsAdmin />} />
             <Route path="announcements" element={<AnnouncementsAdmin />} />
@@ -81,7 +81,7 @@ export default function App() {
             <Route path="grades" element={<GradesGuru />} />
             <Route path="schedules" element={<SchedulesScreen />} />
             <Route path="lesson-plans" element={<LessonPlansGuru />} />
-            <Route path="gallery" element={<GalleryGuru />} />
+            <Route path="question-bank" element={<QuestionBankGuru />} />
             <Route path="finance" element={<FinanceGuru />} />
             <Route path="settings" element={<SettingsGuru />} />
           </Route>

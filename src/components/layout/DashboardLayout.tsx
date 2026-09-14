@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard,
   Users,
@@ -22,6 +23,7 @@ import {
 export const DashboardLayout = () => {
   const { userData, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleLogout = () => {
@@ -37,7 +39,7 @@ export const DashboardLayout = () => {
     { to: '/admin/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
     { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/admin/lesson-plans', icon: BookOpen, label: 'E-RPP Guru' },
-    { to: '/admin/gallery', icon: ImageIcon, label: 'Galeri Kelas' },
+    { to: '/admin/question-bank', icon: BookOpen, label: 'Bank Soal' },
     { to: '/admin/finance', icon: Wallet, label: 'Keuangan Kelas' },
     { to: '/admin/academic-years', icon: CalendarDays, label: 'Tahun Ajaran & KKM' },
     { to: '/admin/announcements', icon: Bell, label: 'Pengumuman' },
@@ -50,7 +52,7 @@ export const DashboardLayout = () => {
     { to: '/guru/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
     { to: '/guru/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/guru/lesson-plans', icon: BookOpen, label: 'E-RPP' },
-    { to: '/guru/gallery', icon: ImageIcon, label: 'Galeri Kelas' },
+    { to: '/guru/question-bank', icon: BookOpen, label: 'Bank Soal' },
     { to: '/guru/finance', icon: Wallet, label: 'Keuangan Kelas' },
     { to: '/guru/settings', icon: Settings, label: 'Pengaturan Kelas' },
   ];
@@ -66,10 +68,10 @@ export const DashboardLayout = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar Desktop */}
-      <aside className="hidden md:flex flex-col w-64 bg-indigo-900 text-white shadow-xl">
+      <aside className="hidden md:flex flex-col w-64 bg-indigo-900 text-white shadow-xl z-20">
         <div className="p-6 flex items-center space-x-3 border-b border-indigo-800">
           <GraduationCap className="w-8 h-8 text-indigo-300" />
-          <span className="text-xl font-bold tracking-tight">SI Miftahussalam</span>
+          <span className="text-2xl font-bold tracking-tight">CERDAS</span>
         </div>
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
           {links.map((link) => (
@@ -110,7 +112,7 @@ export const DashboardLayout = () => {
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-indigo-900 text-white z-50 flex items-center justify-between px-4 shadow-md">
         <div className="flex items-center space-x-3">
           <GraduationCap className="w-6 h-6 text-indigo-300" />
-          <span className="text-lg font-bold">SI Miftahussalam</span>
+          <span className="text-xl font-bold">CERDAS</span>
         </div>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2">
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -150,10 +152,19 @@ export const DashboardLayout = () => {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pt-16 md:pt-0">
-        <div className="p-6 md:p-8 max-w-7xl mx-auto">
-          <Outlet />
-        </div>
+      <main className="flex-1 overflow-y-auto pt-16 md:pt-0 bg-slate-50 relative">
+        <AnimatePresence mode="wait">
+          <motion.div 
+            key={location.pathname}
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="p-6 md:p-8 max-w-7xl mx-auto min-h-full"
+          >
+            <Outlet />
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );

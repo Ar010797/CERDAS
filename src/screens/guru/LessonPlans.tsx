@@ -20,16 +20,21 @@ export default function LessonPlansGuru() {
   const [mataPelajaran, setMataPelajaran] = useState('');
   const [kelasSemester, setKelasSemester] = useState(`${selectedClass} / Ganjil`);
   const [alokasiWaktu, setAlokasiWaktu] = useState('');
+  const [materi, setMateri] = useState('');
   const [tujuanPembelajaran, setTujuanPembelajaran] = useState('');
   const [pendahuluan, setPendahuluan] = useState('');
   const [kegiatanInti, setKegiatanInti] = useState('');
   const [penutup, setPenutup] = useState('');
+  const [latihanSoal, setLatihanSoal] = useState('');
   const [penilaian, setPenilaian] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [questionType, setQuestionType] = useState<'Pilihan Ganda' | 'Uraian'>('Pilihan Ganda');
+  const [questionCount, setQuestionCount] = useState(5);
 
   // Settings
   const [schoolSettings, setSchoolSettings] = useState({
-    namaSekolah: 'SI Miftahussalam',
+    namaSekolah: 'CERDAS',
     namaKepalaSekolah: '',
     nipKepalaSekolah: ''
   });
@@ -47,19 +52,38 @@ export default function LessonPlansGuru() {
     return () => unsubSchool();
   }, []);
 
-  const handleGenerateTemplate = () => {
-    if (!mataPelajaran.trim()) {
-      alert("Silakan isi Mata Pelajaran terlebih dahulu.");
+  const handleGenerateTemplate = async () => {
+    if (!mataPelajaran.trim() || !materi.trim()) {
+      alert("Silakan isi Mata Pelajaran dan Materi yang Disampaikan terlebih dahulu.");
       return;
     }
     
-    setKelasSemester(`${selectedClass} / Ganjil`);
-    setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
-    setTujuanPembelajaran(`Melalui model pembelajaran Discovery Learning, siswa mampu memahami, menjelaskan, dan mempraktekkan konsep ${mataPelajaran} dengan disiplin dan penuh tanggung jawab.`);
-    setPendahuluan(`1. Guru mengucapkan salam dan memimpin doa.\n2. Mengabsen siswa dan mengecek kebersihan kelas.\n3. Apersepsi: Mengaitkan materi sebelumnya dengan materi ${mataPelajaran} yang akan dipelajari.\n4. Menyampaikan tujuan pembelajaran dan memotivasi siswa.`);
-    setKegiatanInti(`1. Eksplorasi: Siswa mengamati video/gambar terkait ${mataPelajaran}.\n2. Elaborasi: Siswa dibagi dalam kelompok untuk mendiskusikan masalah dan menemukan solusi bersama.\n3. Konfirmasi: Siswa mempresentasikan hasil diskusi, guru memberikan umpan balik dan meluruskan miskonsepsi.`);
-    setPenutup(`1. Guru dan siswa bersama-sama menyimpulkan materi ${mataPelajaran}.\n2. Melakukan evaluasi singkat/post-test.\n3. Memberikan penugasan (PR) dan menginformasikan materi pertemuan berikutnya.\n4. Menutup dengan doa dan salam.`);
-    setPenilaian(`1. Sikap: Observasi keaktifan dan kedisiplinan selama pembelajaran.\n2. Pengetahuan: Tes tertulis (Pilihan Ganda/Uraian).\n3. Keterampilan: Praktik/Presentasi kelompok.`);
+    setIsGenerating(true);
+    try {
+      const response = await fetch('/api/generate-rpp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mataPelajaran, materi, questionType, questionCount })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setKelasSemester(`${selectedClass} / Ganjil`);
+        setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
+        if (data.tujuanPembelajaran) setTujuanPembelajaran(data.tujuanPembelajaran);
+        if (data.pendahuluan) setPendahuluan(data.pendahuluan);
+        if (data.kegiatanInti) setKegiatanInti(data.kegiatanInti);
+        if (data.penutup) setPenutup(data.penutup);
+        if (data.latihanSoal) setLatihanSoal(data.latihanSoal);
+        if (data.penilaian) setPenilaian(data.penilaian);
+      } else {
+        alert(data.error || "Gagal membuat draft RPP.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Terjadi kesalahan jaringan.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleSave = async () => {
@@ -71,10 +95,12 @@ export default function LessonPlansGuru() {
         mataPelajaran,
         kelasSemester,
         alokasiWaktu,
+        materi,
         tujuanPembelajaran,
         pendahuluan,
         kegiatanInti,
         penutup,
+        latihanSoal,
         penilaian,
         createdAt: new Date().toISOString()
       });
@@ -137,10 +163,12 @@ export default function LessonPlansGuru() {
     };
 
     printSection('A. Tujuan Pembelajaran', tujuanPembelajaran);
-    printSection('B. Kegiatan Pendahuluan', pendahuluan);
-    printSection('C. Kegiatan Inti', kegiatanInti);
-    printSection('D. Kegiatan Penutup', penutup);
-    printSection('E. Penilaian Pembelajaran', penilaian);
+    printSection('B. Materi Pembelajaran', materi);
+    printSection('C. Kegiatan Pendahuluan', pendahuluan);
+    printSection('D. Kegiatan Inti', kegiatanInti);
+    printSection('E. Kegiatan Penutup', penutup);
+    printSection('F. Latihan Soal', latihanSoal);
+    printSection('G. Penilaian Pembelajaran', penilaian);
 
     // Tanda Tangan
     if (yPos > 230) {
@@ -205,10 +233,11 @@ export default function LessonPlansGuru() {
             )}
             <button
               onClick={handleGenerateTemplate}
-              className="flex items-center space-x-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold backdrop-blur-md border border-white/20 transition-all"
+              disabled={isGenerating}
+              className="flex items-center space-x-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold backdrop-blur-md border border-white/20 transition-all disabled:opacity-50"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Isi Otomatis (AI Draft)</span>
+              <span>{isGenerating ? 'Membuat Draft...' : 'Isi Otomatis (AI Draft)'}</span>
             </button>
             <button
               onClick={exportPDF}
@@ -263,6 +292,44 @@ export default function LessonPlansGuru() {
                 onChange={(e) => setAlokasiWaktu(e.target.value)}
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
               />
+            </div>
+          </div>
+          <div className="mt-4">
+            <label className="block text-sm font-bold text-slate-700 mb-1.5">Materi yang Disampaikan</label>
+            <textarea
+              rows={2}
+              placeholder="Contoh: Operasi Hitung Campuran"
+              value={materi}
+              onChange={(e) => setMateri(e.target.value)}
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
+            />
+          </div>
+          
+          <div className="mt-4 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 flex flex-col sm:flex-row items-center gap-4">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-indigo-900 mb-1">Tipe Soal (Otomatis)</label>
+              <select
+                value={questionType}
+                onChange={(e) => setQuestionType(e.target.value as any)}
+                className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700"
+              >
+                <option value="Pilihan Ganda">Pilihan Ganda</option>
+                <option value="Uraian">Uraian / Esai</option>
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-indigo-900 mb-1">Jumlah Soal</label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={questionCount}
+                onChange={(e) => setQuestionCount(Number(e.target.value))}
+                className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700"
+              />
+            </div>
+            <div className="flex-1 text-xs text-indigo-600 font-medium">
+              *Tipe dan Jumlah Soal di atas akan digunakan saat Anda menekan tombol <strong className="text-indigo-800">Isi Otomatis (AI Draft)</strong>
             </div>
           </div>
         </div>
@@ -339,6 +406,21 @@ export default function LessonPlansGuru() {
                 placeholder="Jelaskan instrumen penilaian sikap, pengetahuan, dan keterampilan..."
                 value={penilaian}
                 onChange={(e) => setPenilaian(e.target.value)}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+              />
+            </div>
+
+            {/* D. Latihan Soal */}
+            <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100">
+              <label className="block text-sm font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <span className="bg-indigo-100 text-indigo-700 w-6 h-6 rounded-md flex items-center justify-center text-xs">D</span>
+                Latihan Soal
+              </label>
+              <textarea
+                rows={4}
+                placeholder="Tuliskan latihan soal untuk siswa..."
+                value={latihanSoal}
+                onChange={(e) => setLatihanSoal(e.target.value)}
                 className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
               />
             </div>

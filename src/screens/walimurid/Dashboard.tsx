@@ -18,7 +18,7 @@ export default function WaliMuridDashboard() {
   const [grades, setGrades] = useState<Record<string, { tugas: string, pts: string, pas: string }>>({});
   const [attendance, setAttendance] = useState({ hadir: 0, izin: 0, sakit: 0, alpa: 0 });
   const [subjects, setSubjects] = useState<string[]>([]);
-  const [schoolSettings, setSchoolSettings] = useState({ namaSekolah: 'SI Miftahussalam', namaKepalaSekolah: '', nipKepalaSekolah: '' });
+  const [schoolSettings, setSchoolSettings] = useState({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '' });
   const [loading, setLoading] = useState(true);
 
   // Extra Data

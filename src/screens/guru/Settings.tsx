@@ -25,7 +25,7 @@ export default function SettingsGuru() {
 
   // --- Kop Surat State ---
   const [schoolSettings, setSchoolSettings] = useState({
-    namaSekolah: 'SI Miftahussalam',
+    namaSekolah: 'CERDAS',
     namaKepalaSekolah: '',
     nipKepalaSekolah: ''
   });

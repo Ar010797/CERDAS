@@ -4,6 +4,7 @@ import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firesto
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { GraduationCap, Loader2, Eye, EyeOff } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useAuth, UserData } from '../contexts/AuthContext';
 
 type RoleOption = 'Admin' | 'Guru' | 'Wali Murid';
@@ -187,19 +188,48 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
-        <div className="bg-indigo-900 p-8 text-center">
-          <div className="w-20 h-20 bg-indigo-800 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden"
+      >
+        <div className="bg-indigo-900 p-8 text-center relative overflow-hidden">
+          <motion.div 
+            initial={{ opacity: 0, rotate: -20, scale: 0.5 }}
+            animate={{ opacity: 1, rotate: 0, scale: 1 }}
+            transition={{ delay: 0.2, duration: 0.6, type: "spring" }}
+            className="w-20 h-20 bg-indigo-800 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner relative z-10"
+          >
             <GraduationCap className="w-12 h-12 text-indigo-300" />
-          </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">SI Miftahussalam</h1>
-          <p className="text-indigo-200 mt-2">Sistem Administrasi Sekolah</p>
+          </motion.div>
+          <motion.h1 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 0.4 }}
+            className="text-4xl font-extrabold text-white tracking-tight relative z-10"
+          >
+            CERDAS
+          </motion.h1>
+          <motion.p 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.4 }}
+            className="text-indigo-200 mt-2 relative z-10 text-sm font-medium"
+          >
+            Catatan Edukasi, Rapor, & Data Administrasi Sekolah
+          </motion.p>
         </div>
         
         <div className="p-8">
-          <h2 className="text-xl font-semibold text-slate-800 mb-6">
+          <motion.h2 
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.6, duration: 0.4 }}
+            className="text-xl font-bold text-slate-800 mb-6"
+          >
             {isRegistering ? 'Buat Akun Baru' : 'Masuk ke Akun Anda'}
-          </h2>
+          </motion.h2>
           
           {error && (
             <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 text-sm font-medium border border-red-100">
@@ -323,7 +353,7 @@ export default function Login() {
             </button>
           </form>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
