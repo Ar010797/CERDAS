@@ -23,15 +23,16 @@ async function startServer() {
   };
 
   // Helper for Gemini retry
-  const callGeminiWithRetry = async (ai: GoogleGenAI, params: any, maxRetries = 3) => {
+  const callGeminiWithRetry = async (ai: GoogleGenAI, params: any, maxRetries = 5) => {
     for (let i = 0; i < maxRetries; i++) {
       try {
         return await ai.models.generateContent(params);
       } catch (error: any) {
-        const is503 = error?.status === 503 || error?.status === 'UNAVAILABLE' || error?.error?.code === 503 || (error?.message && error.message.includes('503')) || (error?.message && error.message.includes('UNAVAILABLE'));
-        if (is503) {
+        const isRetryable = error?.status === 503 || error?.status === 429 || error?.status === 'UNAVAILABLE' || error?.error?.code === 503 || error?.error?.code === 429 || (error?.message && error.message.includes('503')) || (error?.message && error.message.includes('429')) || (error?.message && error.message.includes('UNAVAILABLE'));
+        if (isRetryable) {
           if (i === maxRetries - 1) throw new Error("Layanan AI sedang sibuk karena tingginya permintaan. Mohon coba beberapa saat lagi.");
-          await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // wait 2s, 4s...
+          const delay = Math.min(Math.pow(2, i) * 2000, 10000); // 2s, 4s, 8s, 10s...
+          await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
         throw error;
@@ -57,7 +58,7 @@ async function startServer() {
       `;
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -128,7 +129,7 @@ async function startServer() {
       }
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-2.5-flash",
         contents: {
           parts: [
             {
@@ -191,7 +192,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-2.5-flash",
         contents: {
           parts: [
             {

@@ -136,7 +136,7 @@ export default function SettingsGuru() {
   const [resetting, setResetting] = useState(false);
 
   const executeDangerReset = async () => {
-    if (resetConfirmationText !== `RESET-${assignedClass}`) {
+    if (resetConfirmationText !== `RESET-${assignedClass}`.toUpperCase()) {
       showToast(`Konfirmasi teks tidak cocok. Ketik RESET-${assignedClass}`, 'error');
       return;
     }
@@ -412,7 +412,7 @@ export default function SettingsGuru() {
                 type="text"
                 placeholder={`RESET-${assignedClass}`}
                 value={resetConfirmationText}
-                onChange={e => setResetConfirmationText(e.target.value)}
+                onChange={e => setResetConfirmationText(e.target.value.toUpperCase())}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none mb-6 font-medium text-slate-800 text-center uppercase"
               />
               
@@ -428,7 +428,7 @@ export default function SettingsGuru() {
                 </button>
                 <button
                   onClick={executeDangerReset}
-                  disabled={resetConfirmationText !== `RESET-${assignedClass}` || resetting}
+                  disabled={resetConfirmationText !== `RESET-${assignedClass}`.toUpperCase() || resetting}
                   className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                 >
                   {resetting ? (

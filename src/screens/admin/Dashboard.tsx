@@ -279,7 +279,7 @@ export default function AdminDashboard() {
                   type="text"
                   placeholder="Ketik RESET-TOTAL"
                   value={resetConfirmationText}
-                  onChange={e => setResetConfirmationText(e.target.value)}
+                  onChange={e => setResetConfirmationText(e.target.value.toUpperCase())}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none mb-6 font-medium text-slate-800 text-center uppercase"
                 />
                 
