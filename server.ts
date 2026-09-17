@@ -178,6 +178,65 @@ async function startServer() {
     }
   });
 
+  // API 3: Extract Schedule from Image or Document
+  app.post("/api/extract-schedule", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const ai = getAi();
+      const fileBuffer = req.file.buffer;
+      const mimeType = req.file.mimetype;
+      const base64Data = fileBuffer.toString("base64");
+
+      const response = await callGeminiWithRetry(ai, {
+        model: "gemini-3.6-flash",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType
+              }
+            },
+            {
+              text: `Ekstrak jadwal dari gambar/dokumen ini. Kembalikan array objek jadwal. Setiap jadwal harus memiliki 'type' ('pelajaran' atau 'ujian'), 'hari' (misal 'Senin' atau tanggal), 'jam' (misal '07:30 - 09:00'), 'mataPelajaran', 'pengajar' (nama guru/pengawas), dan opsional 'ruangan' atau 'keterangan'. Jika hari tidak terdeteksi, tebak berdasarkan baris/kolom.`
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                type: { type: Type.STRING, description: "Hanya isi dengan 'pelajaran' atau 'ujian'" },
+                hari: { type: Type.STRING, description: "Hari (misal: Senin) atau tanggal ujian" },
+                jam: { type: Type.STRING, description: "Rentang waktu, misal: 07:30 - 09:00" },
+                mataPelajaran: { type: Type.STRING, description: "Nama mata pelajaran" },
+                pengajar: { type: Type.STRING, description: "Nama guru atau pengawas" },
+                ruangan: { type: Type.STRING, description: "Ruangan (opsional)" },
+                keterangan: { type: Type.STRING, description: "Keterangan tambahan (opsional)" }
+              },
+              required: ["type", "hari", "jam", "mataPelajaran"]
+            }
+          }
+        }
+      });
+
+      const text = response.text;
+      if (!text) throw new Error("No response from Gemini");
+      const json = JSON.parse(text.replace(/```json/gi, "").replace(/```/g, "").trim());
+      res.json(json);
+
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Failed to extract schedule" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

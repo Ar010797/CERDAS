@@ -114,42 +114,60 @@ export const DashboardLayout = () => {
           <GraduationCap className="w-6 h-6 text-indigo-300" />
           <span className="text-xl font-bold">CERDAS</span>
         </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2">
-          {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 relative z-50">
+          <AnimatePresence mode="wait">
+            {isMobileMenuOpen ? (
+              <motion.div key="close" initial={{ opacity: 0, rotate: -90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: 90 }} transition={{ duration: 0.2 }}>
+                <X className="w-6 h-6" />
+              </motion.div>
+            ) : (
+              <motion.div key="menu" initial={{ opacity: 0, rotate: 90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: -90 }} transition={{ duration: 0.2 }}>
+                <Menu className="w-6 h-6" />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </button>
       </div>
 
-      {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-40 bg-indigo-900 text-white pt-16 flex flex-col">
-          <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-            {links.map((link) => (
-              <NavLink
-                key={link.to}
-                to={link.to}
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors",
-                    isActive ? "bg-indigo-600 text-white" : "text-indigo-200 hover:bg-indigo-800 hover:text-white"
-                  )
-                }
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="md:hidden fixed inset-0 z-40 bg-indigo-900 text-white pt-16 flex flex-col"
+          >
+            <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+              {links.map((link) => (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors",
+                      isActive ? "bg-indigo-600 text-white" : "text-indigo-200 hover:bg-indigo-800 hover:text-white"
+                    )
+                  }
+                >
+                  <link.icon className="w-5 h-5" />
+                  <span className="font-medium">{link.label}</span>
+                </NavLink>
+              ))}
+            </nav>
+            <div className="p-6 border-t border-indigo-800">
+              <button
+                onClick={handleLogout}
+                className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors"
               >
-                <link.icon className="w-5 h-5" />
-                <span className="font-medium">{link.label}</span>
-              </NavLink>
-            ))}
-          </nav>
-          <div className="p-6 border-t border-indigo-800">
-            <button
-              onClick={handleLogout}
-              className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-              <span className="font-medium">Keluar</span>
-            </button>
-          </div>
-        </div>
-      )}
+                <LogOut className="w-5 h-5" />
+                <span className="font-medium">Keluar</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto pt-16 md:pt-0 bg-slate-50 relative">

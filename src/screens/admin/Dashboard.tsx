@@ -4,6 +4,7 @@ import { db } from '../../lib/firebase';
 import { Users, GraduationCap, BookOpen, AlertTriangle, Trash2, Activity, Clock, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
+import { motion, AnimatePresence } from 'motion/react';
 import ScheduleWidget from '../../components/ScheduleWidget';
 
 interface LogAktivitas {
@@ -92,7 +93,11 @@ export default function AdminDashboard() {
     setResetting(true);
     try {
       // Chunking for batch deletes if more than 500 docs
-      const collectionsToClear = ['students', 'grades', 'attendance', 'log_aktivitas', 'mata_pelajaran', 'lesson_plans', 'jadwal_kelas'];
+      const collectionsToClear = [
+        'students', 'grades', 'attendance', 'log_aktivitas', 'mata_pelajaran', 
+        'lesson_plans', 'jadwal_kelas', 'kas', 'savings', 'question_folders', 
+        'questions', 'gallery', 'announcements'
+      ];
       
       for (const collName of collectionsToClear) {
         const snap = await getDocs(collection(db, collName));
@@ -243,68 +248,86 @@ export default function AdminDashboard() {
       </div>
 
       {/* Custom Reset Modal */}
-      {isResetModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -z-0 opacity-50" />
-            <div className="relative z-10">
-              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-5">
-                <AlertTriangle className="w-6 h-6" />
+      <AnimatePresence>
+        {isResetModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -z-0 opacity-50" />
+              <div className="relative z-10">
+                <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-5">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                
+                <h2 className="text-xl font-bold text-slate-800 mb-2">Apakah Anda Yakin?</h2>
+                <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+                  Tindakan ini akan <strong>MENGHAPUS SELURUH DATA SEKOLAH</strong> secara permanen (Siswa, Nilai, Absensi, Pengaturan, Log, Soal, Finansial). Data yang dihapus tidak dapat dikembalikan.
+                  <br/><br/>
+                  Ketik <strong className="text-red-600 bg-red-50 px-2 py-1 rounded">RESET-TOTAL</strong> untuk mengonfirmasi.
+                </p>
+                
+                <input
+                  type="text"
+                  placeholder="Ketik RESET-TOTAL"
+                  value={resetConfirmationText}
+                  onChange={e => setResetConfirmationText(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none mb-6 font-medium text-slate-800 text-center uppercase"
+                />
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsResetModalOpen(false);
+                      setResetConfirmationText('');
+                    }}
+                    className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-sm transition-colors"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={executeGlobalReset}
+                    disabled={resetConfirmationText !== 'RESET-TOTAL' || resetting}
+                    className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    {resetting ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                    <span>{resetting ? 'Menghapus...' : 'Lanjut Hapus'}</span>
+                  </button>
+                </div>
               </div>
-              
-              <h2 className="text-xl font-bold text-slate-800 mb-2">Apakah Anda Yakin?</h2>
-              <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-                Tindakan ini akan <strong>MENGHAPUS SELURUH DATA SEKOLAH</strong> secara permanen (Siswa, Nilai, Absensi, Pengaturan, Log). Data yang dihapus tidak dapat dikembalikan.
-                <br/><br/>
-                Ketik <strong>RESET-TOTAL</strong> untuk mengonfirmasi.
-              </p>
-              
-              <input
-                type="text"
-                placeholder="Ketik RESET-TOTAL"
-                value={resetConfirmationText}
-                onChange={e => setResetConfirmationText(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none mb-6 font-medium text-slate-800 text-center uppercase"
-              />
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setIsResetModalOpen(false);
-                    setResetConfirmationText('');
-                  }}
-                  className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-sm transition-colors"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={executeGlobalReset}
-                  disabled={resetConfirmationText !== 'RESET-TOTAL' || resetting}
-                  className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-                >
-                  {resetting ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                  <span>{resetting ? 'Menghapus...' : 'Lanjut Hapus'}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Toast Notification (SnackBar) */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className={`flex items-center space-x-3 px-5 py-3.5 rounded-2xl shadow-xl text-white ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
-            {toast.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
-            <span className="text-sm font-medium">{toast.message}</span>
-          </div>
-        </div>
-      )}
-
+      <AnimatePresence>
+        {toast && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 right-6 z-50"
+          >
+            <div className={`flex items-center space-x-3 px-5 py-3.5 rounded-2xl shadow-xl text-white ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+              {toast.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
+              <span className="text-sm font-medium">{toast.message}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

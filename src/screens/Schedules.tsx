@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Plus, Trash2, Edit2, Upload, FileDown, Clock, BookOpen, User, MapPin, X, CheckCircle, AlertTriangle, FileSpreadsheet, Filter } from 'lucide-react';
+import { Calendar, Plus, Trash2, Edit2, Upload, FileDown, Clock, BookOpen, User, MapPin, X, CheckCircle, AlertTriangle, FileSpreadsheet, Filter, Image as ImageIcon } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface ScheduleItem {
@@ -53,6 +53,8 @@ export default function SchedulesScreen() {
   // Toast Notification State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -243,6 +245,74 @@ export default function SchedulesScreen() {
     reader.readAsBinaryString(file);
   };
 
+  const handleImportImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsExtracting(true);
+    showToast('Sedang mengekstrak jadwal menggunakan AI...', 'success');
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/extract-schedule", {
+        method: "POST",
+        body: formData,
+      });
+      
+      let extractedData;
+      const textRes = await res.text();
+      try {
+        extractedData = JSON.parse(textRes);
+      } catch (e) {
+        if (!res.ok) {
+          throw new Error(`Server error (${res.status}): Server sibuk atau gambar terlalu besar.`);
+        }
+        throw new Error('Respons server tidak valid.');
+      }
+
+      if (res.ok && Array.isArray(extractedData)) {
+        const batch = writeBatch(db);
+        let count = 0;
+
+        for (const item of extractedData) {
+          const newDocRef = doc(collection(db, 'jadwal_kelas'));
+          batch.set(newDocRef, {
+            classId: selectedClass,
+            type: item.type === 'ujian' ? 'ujian' : 'pelajaran',
+            hari: item.hari || 'Senin',
+            jam: item.jam || '07:30',
+            mataPelajaran: item.mataPelajaran || 'Tidak Diketahui',
+            pengajar: item.pengajar || '',
+            ruangan: item.ruangan || '',
+            keterangan: item.keterangan || ''
+          });
+          count++;
+
+          if (count === 480) {
+            await batch.commit();
+            count = 0;
+          }
+        }
+
+        if (count > 0) {
+          await batch.commit();
+        }
+
+        showToast(`Berhasil mengekstrak dan menyimpan ${extractedData.length} jadwal ke ${selectedClass}!`, 'success');
+      } else {
+        showToast(extractedData.error || "Gagal mengekstrak jadwal dari gambar.", 'error');
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || "Terjadi kesalahan jaringan saat mengekstrak gambar.", 'error');
+    } finally {
+      setIsExtracting(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  };
+
   const filteredSchedules = schedules.filter(s => s.type === activeTab);
 
   return (
@@ -274,7 +344,7 @@ export default function SchedulesScreen() {
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold shadow-sm transition-all"
             >
-              <Upload className="w-4 h-4" />
+              <FileSpreadsheet className="w-4 h-4" />
               <span>Import Excel</span>
             </button>
             <input
@@ -282,6 +352,26 @@ export default function SchedulesScreen() {
               ref={fileInputRef}
               onChange={handleImportExcel}
               accept=".xlsx, .xls"
+              className="hidden"
+            />
+
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              disabled={isExtracting}
+              className="flex items-center space-x-2 bg-pink-500 hover:bg-pink-600 disabled:bg-pink-400 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold shadow-sm transition-all"
+            >
+              {isExtracting ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <ImageIcon className="w-4 h-4" />
+              )}
+              <span>{isExtracting ? 'Mengekstrak AI...' : 'Scan Gambar/Foto'}</span>
+            </button>
+            <input
+              type="file"
+              ref={imageInputRef}
+              onChange={handleImportImage}
+              accept="image/*,.pdf"
               className="hidden"
             />
 

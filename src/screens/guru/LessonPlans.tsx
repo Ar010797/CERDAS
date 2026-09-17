@@ -65,7 +65,18 @@ export default function LessonPlansGuru() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mataPelajaran, materi, questionType, questionCount })
       });
-      const data = await response.json();
+      
+      let data;
+      const textResponse = await response.text();
+      try {
+        data = JSON.parse(textResponse);
+      } catch (e) {
+        if (!response.ok) {
+          throw new Error(`Server error (${response.status}): Server sibuk atau waktu habis. Silakan coba lagi.`);
+        }
+        throw new Error('Respons server tidak valid.');
+      }
+
       if (response.ok) {
         setKelasSemester(`${selectedClass} / Ganjil`);
         setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
@@ -78,9 +89,9 @@ export default function LessonPlansGuru() {
       } else {
         alert(data.error || "Gagal membuat draft RPP.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Terjadi kesalahan jaringan.");
+      alert(err.message || "Terjadi kesalahan jaringan.");
     } finally {
       setIsGenerating(false);
     }

@@ -119,7 +119,17 @@ export default function QuestionBank() {
         method: "POST",
         body: formData,
       });
-      const extractedQuestions = await res.json();
+      
+      let extractedQuestions;
+      const textRes = await res.text();
+      try {
+        extractedQuestions = JSON.parse(textRes);
+      } catch (e) {
+        if (!res.ok) {
+          throw new Error(`Server error (${res.status}): Server sibuk atau file terlalu besar.`);
+        }
+        throw new Error('Respons server tidak valid.');
+      }
       
       if (res.ok && Array.isArray(extractedQuestions)) {
         // save each question to firebase
@@ -140,9 +150,9 @@ export default function QuestionBank() {
       } else {
         alert(extractedQuestions.error || "Gagal mengekstrak soal dari file.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Terjadi kesalahan jaringan.");
+      alert(err.message || "Terjadi kesalahan jaringan.");
     } finally {
       setIsUploading(false);
       if (e.target) e.target.value = ''; // Reset input
