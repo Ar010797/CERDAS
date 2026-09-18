@@ -17,6 +17,7 @@ interface Student {
 
 interface GradeSubject {
   tugas: string[];
+  ulanganHarian: string[];
   pts: string;
   pas: string;
 }
@@ -70,7 +71,8 @@ export default function GradesGuru() {
           for (const [subj, g] of Object.entries<any>(data.gradesBySubject)) {
              normalizedGrades[subj] = {
                ...g,
-               tugas: Array.isArray(g.tugas) ? g.tugas : (g.tugas ? [g.tugas] : [])
+               tugas: Array.isArray(g.tugas) ? g.tugas : (g.tugas ? [g.tugas] : []),
+               ulanganHarian: Array.isArray(g.ulanganHarian) ? g.ulanganHarian : (g.ulanganHarian ? [g.ulanganHarian] : [])
              };
           }
         }
@@ -127,9 +129,10 @@ export default function GradesGuru() {
     
     const initTemp: Record<string, GradeSubject> = {};
     subjects.forEach(subj => {
-      const g = existingGrades[subj] || { tugas: [''], pts: '', pas: '' };
+      const g = existingGrades[subj] || { tugas: [''], ulanganHarian: [''], pts: '', pas: '' };
       initTemp[subj] = {
-        tugas: [...g.tugas.length > 0 ? g.tugas : ['']],
+        tugas: [...(g.tugas?.length > 0 ? g.tugas : [''])],
+        ulanganHarian: [...(g.ulanganHarian?.length > 0 ? g.ulanganHarian : [''])],
         pts: g.pts || '',
         pas: g.pas || ''
       };
@@ -186,6 +189,44 @@ export default function GradesGuru() {
     });
   };
 
+  const handleUlanganHarianChange = (subj: string, index: number, value: string) => {
+    setTempGrades(prev => {
+      const newUh = [...prev[subj].ulanganHarian];
+      newUh[index] = value;
+      return {
+        ...prev,
+        [subj]: {
+          ...prev[subj],
+          ulanganHarian: newUh
+        }
+      };
+    });
+  };
+
+  const handleAddUlanganHarian = (subj: string) => {
+    setTempGrades(prev => ({
+      ...prev,
+      [subj]: {
+        ...prev[subj],
+        ulanganHarian: [...(prev[subj].ulanganHarian || []), '']
+      }
+    }));
+  };
+
+  const handleRemoveUlanganHarian = (subj: string, index: number) => {
+    setTempGrades(prev => {
+      const newUh = [...prev[subj].ulanganHarian];
+      newUh.splice(index, 1);
+      return {
+        ...prev,
+        [subj]: {
+          ...prev[subj],
+          ulanganHarian: newUh.length > 0 ? newUh : ['']
+        }
+      };
+    });
+  };
+
   const handleSaveGrades = async () => {
     if (!editingStudent) return;
     setSaving(true);
@@ -214,11 +255,20 @@ export default function GradesGuru() {
      let count = 0;
      
      // Avg of tugas
-     const tugasScores = g.tugas.map(t => parseFloat(t)).filter(t => !isNaN(t));
+     const tugasScores = (g.tugas || []).map(t => parseFloat(t)).filter(t => !isNaN(t));
      let tugasAvg = 0;
      if (tugasScores.length > 0) {
        tugasAvg = tugasScores.reduce((a,b) => a+b, 0) / tugasScores.length;
        sum += tugasAvg;
+       count++;
+     }
+     
+     // Avg of ulangan harian
+     const uhScores = (g.ulanganHarian || []).map(t => parseFloat(t)).filter(t => !isNaN(t));
+     let uhAvg = 0;
+     if (uhScores.length > 0) {
+       uhAvg = uhScores.reduce((a,b) => a+b, 0) / uhScores.length;
+       sum += uhAvg;
        count++;
      }
      
@@ -259,21 +309,25 @@ export default function GradesGuru() {
     let totalScore = 0;
     
     // Header for table
-    const head = [['No', 'Mata Pelajaran', 'KKM', 'Rata-rata Tugas', 'PTS', 'PAS', 'Nilai Akhir']];
+    const head = [['No', 'Mata Pelajaran', 'KKM', 'Tugas', 'UH', 'PTS', 'PAS', 'Nilai Akhir']];
     
     const tableBody = subjects.map((subj, idx) => {
-      const g = studentGrades[subj] || { tugas: [], pts: '', pas: '' };
+      const g = studentGrades[subj] || { tugas: [], ulanganHarian: [], pts: '', pas: '' };
       const avg = calculateAverage(g);
       totalScore += avg;
       
-      const tugasScores = g.tugas.map(t => parseFloat(t)).filter(t => !isNaN(t));
+      const tugasScores = (g.tugas || []).map(t => parseFloat(t)).filter(t => !isNaN(t));
       const tugasAvg = tugasScores.length > 0 ? (tugasScores.reduce((a,b)=>a+b,0)/tugasScores.length).toFixed(1) : '-';
+
+      const uhScores = (g.ulanganHarian || []).map(t => parseFloat(t)).filter(t => !isNaN(t));
+      const uhAvg = uhScores.length > 0 ? (uhScores.reduce((a,b)=>a+b,0)/uhScores.length).toFixed(1) : '-';
 
       return [
         (idx + 1).toString(),
         subj,
         kkm.toString(),
         tugasAvg,
+        uhAvg,
         g.pts || '-',
         g.pas || '-',
         avg > 0 ? avg.toFixed(1) : '-'
@@ -281,7 +335,7 @@ export default function GradesGuru() {
     });
 
     if (tableBody.length === 0) {
-      tableBody.push(['-', 'Belum ada mata pelajaran', '-', '-', '-', '-', '-']);
+      tableBody.push(['-', 'Belum ada mata pelajaran', '-', '-', '-', '-', '-', '-']);
     }
     
     // Add Summary Row
@@ -289,13 +343,13 @@ export default function GradesGuru() {
     tableBody.push([
       '', 
       'JUMLAH NILAI', 
-      '', '', '', '', 
+      '', '', '', '', '', 
       totalScore > 0 ? totalScore.toFixed(1) : '-'
     ]);
     tableBody.push([
       '', 
       'RATA-RATA', 
-      '', '', '', '', 
+      '', '', '', '', '', 
       finalAvg > 0 ? finalAvg.toFixed(1) : '-'
     ]);
 
@@ -309,12 +363,13 @@ export default function GradesGuru() {
       styles: { fontSize: 9 },
       columnStyles: {
         0: { cellWidth: 10, halign: 'center' }, // No
-        1: { cellWidth: 50 }, // Mapel
+        1: { cellWidth: 45 }, // Mapel
         2: { halign: 'center' }, // KKM
         3: { halign: 'center' }, // Tugas
-        4: { halign: 'center' }, // PTS
-        5: { halign: 'center' }, // PAS
-        6: { halign: 'center', fontStyle: 'bold' }, // Nilai Akhir
+        4: { halign: 'center' }, // UH
+        5: { halign: 'center' }, // PTS
+        6: { halign: 'center' }, // PAS
+        7: { halign: 'center', fontStyle: 'bold' }, // Nilai Akhir
       }
     });
 
@@ -501,43 +556,83 @@ export default function GradesGuru() {
                            <div className="w-2 h-2 rounded-full bg-indigo-500" />
                            {subj}
                         </h3>
-                        <button 
-                           onClick={() => handleAddTugas(subj)}
-                           className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
-                        >
-                           <Plus className="w-3.5 h-3.5" />
-                           Tambah Tugas
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                              onClick={() => handleAddTugas(subj)}
+                             className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
+                          >
+                             <Plus className="w-3.5 h-3.5" />
+                             Tambah Tugas
+                          </button>
+                          <button
+                              onClick={() => handleAddUlanganHarian(subj)}
+                             className="text-xs font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
+                          >
+                             <Plus className="w-3.5 h-3.5" />
+                             Tambah UH
+                          </button>
+                        </div>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                        {/* Tugas Section */}
-                        <div className="md:col-span-8 space-y-3">
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Nilai Tugas</p>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                            {currentGrade.tugas.map((t, index) => (
-                              <div key={index} className="relative group">
-                                <label className="block text-xs font-medium text-slate-600 mb-1">Tugas {index + 1}</label>
-                                <div className="flex items-center">
-                                  <input
-                                    type="number"
-                                    min="0" max="100"
-                                    value={t}
-                                    onChange={(e) => handleTugasChange(subj, index, e.target.value)}
-                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm pr-8"
-                                    placeholder="0-100"
-                                  />
-                                  {currentGrade.tugas.length > 1 && (
-                                    <button 
-                                      onClick={() => handleRemoveTugas(subj, index)}
-                                      className="absolute right-2 text-slate-400 hover:text-red-500 transition-colors p-1"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
+                        {/* Tugas & UH Section */}
+                        <div className="md:col-span-8 space-y-4">
+                          <div className="space-y-3">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Nilai Tugas</p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              {currentGrade.tugas.map((t, index) => (
+                                <div key={`tugas-${index}`} className="relative group">
+                                  <label className="block text-xs font-medium text-slate-600 mb-1">Tugas {index + 1}</label>
+                                  <div className="flex items-center">
+                                    <input
+                                      type="number"
+                                      min="0" max="100"
+                                      value={t}
+                                      onChange={(e) => handleTugasChange(subj, index, e.target.value)}
+                                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm pr-8"
+                                      placeholder="0-100"
+                                    />
+                                    {currentGrade.tugas.length > 1 && (
+                                      <button
+                                         onClick={() => handleRemoveTugas(subj, index)}
+                                        className="absolute right-2 text-slate-400 hover:text-red-500 transition-colors p-1"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 pt-2 border-t border-slate-100">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Ulangan Harian</p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              {(currentGrade.ulanganHarian || []).map((t, index) => (
+                                <div key={`uh-${index}`} className="relative group">
+                                  <label className="block text-xs font-medium text-slate-600 mb-1">UH {index + 1}</label>
+                                  <div className="flex items-center">
+                                    <input
+                                      type="number"
+                                      min="0" max="100"
+                                      value={t}
+                                      onChange={(e) => handleUlanganHarianChange(subj, index, e.target.value)}
+                                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm pr-8"
+                                      placeholder="0-100"
+                                    />
+                                    {(currentGrade.ulanganHarian?.length > 1) && (
+                                      <button
+                                         onClick={() => handleRemoveUlanganHarian(subj, index)}
+                                        className="absolute right-2 text-slate-400 hover:text-red-500 transition-colors p-1"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </div>
 

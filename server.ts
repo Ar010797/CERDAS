@@ -58,7 +58,7 @@ async function startServer() {
       `;
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -129,7 +129,7 @@ async function startServer() {
       }
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         contents: {
           parts: [
             {
@@ -192,7 +192,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         contents: {
           parts: [
             {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs, writeBatch } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs, writeBatch, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Plus, Trash2, Edit2, Upload, FileDown, Clock, BookOpen, User, MapPin, X, CheckCircle, AlertTriangle, FileSpreadsheet, Filter, Image as ImageIcon } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -49,6 +50,7 @@ export default function SchedulesScreen() {
   // Delete State
   const [itemToDelete, setItemToDelete] = useState<ScheduleItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isConfirmDeleteAllOpen, setIsConfirmDeleteAllOpen] = useState(false);
 
   // Toast Notification State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -136,6 +138,29 @@ export default function SchedulesScreen() {
     } catch (error: any) {
       console.error(error);
       showToast(`Gagal menghapus: ${error.message || 'Terjadi kesalahan'}`, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const confirmDeleteAllItems = async () => {
+    setIsDeleting(true);
+    try {
+      const q = query(collection(db, 'jadwal_kelas'), where('classId', '==', selectedClass));
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      
+      snapshot.docs.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      
+      await batch.commit();
+      
+      showToast(`Semua jadwal ${selectedClass} berhasil dihapus!`, 'success');
+      setIsConfirmDeleteAllOpen(false);
+    } catch (error: any) {
+      console.error(error);
+      showToast(`Gagal menghapus jadwal: ${error.message || 'Terjadi kesalahan'}`, 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -300,6 +325,25 @@ export default function SchedulesScreen() {
           await batch.commit();
         }
 
+        // Upload image to Firebase Storage so we can display it on dashboard
+        try {
+          const timestamp = Date.now();
+          const extension = file.name.split('.').pop() || 'jpg';
+          const storageRef = ref(storage, `schedules/${selectedClass}_${timestamp}.${extension}`);
+          await uploadBytes(storageRef, file);
+          const downloadUrl = await getDownloadURL(storageRef);
+          
+          // Save the URL to a specific collection per class
+          const imageDocRef = doc(db, 'jadwal_images', selectedClass);
+          await setDoc(imageDocRef, { 
+            classId: selectedClass, 
+            imageUrl: downloadUrl,
+            updatedAt: new Date().toISOString()
+          });
+        } catch (uploadError) {
+          console.error("Gagal mengunggah gambar ke storage:", uploadError);
+        }
+
         showToast(`Berhasil mengekstrak dan menyimpan ${extractedData.length} jadwal ke ${selectedClass}!`, 'success');
       } else {
         showToast(extractedData.error || "Gagal mengekstrak jadwal dari gambar.", 'error');
@@ -374,6 +418,14 @@ export default function SchedulesScreen() {
               accept="image/*,.pdf"
               className="hidden"
             />
+
+            <button
+              onClick={() => setIsConfirmDeleteAllOpen(true)}
+              className="flex items-center space-x-2 bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-sm transition-all"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Hapus Semua</span>
+            </button>
 
             <button
               onClick={() => handleOpenModal()}
@@ -540,6 +592,41 @@ export default function SchedulesScreen() {
                   <Trash2 className="w-4 h-4" />
                 )}
                 <span>{isDeleting ? 'Menghapus...' : 'Lanjut Hapus'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Confirmation Modal */}
+      {isConfirmDeleteAllOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Hapus Seluruh Jadwal?</h2>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              Apakah Anda yakin ingin menghapus <strong>seluruh jadwal</strong> untuk <strong>{selectedClass}</strong>? Tindakan ini tidak dapat dibatalkan.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsConfirmDeleteAllOpen(false)}
+                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-sm transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmDeleteAllItems}
+                disabled={isDeleting}
+                className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+              >
+                {isDeleting ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{isDeleting ? 'Menghapus...' : 'Ya, Hapus Semua'}</span>
               </button>
             </div>
           </div>

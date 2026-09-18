@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Calendar, Clock, BookOpen, User, MapPin, FileText, ChevronRight, Sparkles } from 'lucide-react';
+import { Calendar, Clock, BookOpen, User, MapPin, FileText, ChevronRight, Sparkles, Image as ImageIcon, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export interface ScheduleItem {
@@ -27,6 +27,8 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
   const [activeTab, setActiveTab] = useState<'pelajaran' | 'ujian'>('pelajaran');
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -34,7 +36,6 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
     if (classId && classId !== 'Semua Kelas') {
       q = query(collection(db, 'jadwal_kelas'), where('classId', '==', classId));
     }
-
     const unsub = onSnapshot(q, (snap) => {
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as ScheduleItem));
       setSchedules(items);
@@ -44,7 +45,21 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
       setLoading(false);
     });
 
-    return () => unsub();
+    let unsubImage = () => {};
+    if (classId && classId !== 'Semua Kelas') {
+      unsubImage = onSnapshot(doc(db, 'jadwal_images', classId), (docSnap) => {
+        if (docSnap.exists()) {
+          setImageUrl(docSnap.data().imageUrl);
+        } else {
+          setImageUrl(null);
+        }
+      });
+    }
+
+    return () => {
+      unsub();
+      unsubImage();
+    };
   }, [classId]);
 
   const filtered = schedules.filter(s => s.type === activeTab);
@@ -72,7 +87,18 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
               {title || `Jadwal ${classId}`}
               <Sparkles className="w-4 h-4 text-amber-500" />
             </h3>
-            <p className="text-xs font-medium text-slate-500 bg-white/60 px-2 py-0.5 rounded-md inline-block mt-1 backdrop-blur-sm border border-slate-200/50">Jadwal Harian & Ujian</p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs font-medium text-slate-500 bg-white/60 px-2 py-0.5 rounded-md inline-block backdrop-blur-sm border border-slate-200/50">Jadwal Harian & Ujian</p>
+              {imageUrl && (
+                <button
+                  onClick={() => setShowImageModal(true)}
+                  className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1.5 transition-colors border border-indigo-100"
+                >
+                  <ImageIcon className="w-3 h-3" />
+                  Lihat Gambar Asli
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -206,6 +232,41 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
           )}
         </AnimatePresence>
       </div>
+
+      {/* Image Modal */}
+      <AnimatePresence>
+        {showImageModal && imageUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl p-2 w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative"
+            >
+              <div className="flex items-center justify-between p-4 border-b border-slate-100">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-indigo-600" />
+                  Gambar Jadwal Asli {classId}
+                </h3>
+                <button
+                  onClick={() => setShowImageModal(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto p-4 flex justify-center items-center bg-slate-50">
+                <img src={imageUrl} alt={`Jadwal ${classId}`} className="max-w-full h-auto rounded-xl shadow-sm object-contain" />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
