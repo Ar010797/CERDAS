@@ -4,13 +4,19 @@ import multer from "multer";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 25 * 1024 * 1024 // 25 MB
+  }
+});
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "25mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
   // Initialize Gemini Client
   const getAi = () => {
@@ -42,6 +48,7 @@ async function startServer() {
 
   // API 1: Generate RPP Draft
   app.post("/api/generate-rpp", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
     try {
       const ai = getAi();
       const { mataPelajaran, materi, questionType, questionCount } = req.body;
@@ -51,14 +58,49 @@ async function startServer() {
       }
 
       const prompt = `
-        Saya sedang menyusun Rencana Pelaksanaan Pembelajaran (RPP) untuk mata pelajaran "${mataPelajaran}" dengan materi spesifik "${materi}".
-        Tolong buatkan draf RPP yang komprehensif, saling terhubung dengan materi tersebut.
-        Saya juga butuh dibuatkan latihan soal sebanyak ${questionCount || 5} soal dengan tipe ${questionType === 'Uraian' ? 'Esai / Uraian' : 'Pilihan Ganda'}.
+        Saya sedang menyusun Rencana Pelaksanaan Pembelajaran (RPP) Kurikulum Nasional / Merdeka untuk mata pelajaran "${mataPelajaran}" dengan materi spesifik "${materi}".
+        Tolong buatkan draf RPP yang komprehensif, padat, dan saling terhubung dengan materi tersebut.
+        
+        PENTING: KHUSUS LATIHAN SOAL (${questionCount || 5} soal berjenis ${questionType === 'Uraian' ? 'Uraian / Esai' : 'Pilihan Ganda'}):
+        Sajikan persis seperti naskah naskah soal Ujian / PTS (Penilaian Tengah Semester) resmi dengan posisi, nomor, dan format yang SANGAT RAPI:
+        ${questionType === 'Pilihan Ganda' ? `
+        Format Pilihan Ganda PTS:
+        - Tiap soal memiliki nomor urut jelas (1, 2, 3, dst).
+        - Setiap pilihan (A, B, C, D) berada di baris baru dengan jarak dan indentasi teratur.
+        - Di bawah setiap soal, sediakan 1 baris khusus Kunci Jawaban beserta ringkasan pembahasannya.
+        
+        Contoh penulisan:
+        1. Berikut ini yang merupakan ciri utama dari ... adalah?
+           A. Pilihan jawaban A
+           B. Pilihan jawaban B
+           C. Pilihan jawaban C
+           D. Pilihan jawaban D
+           Kunci Jawaban: A (Pembahasan: ...)
+
+        2. Pertanyaan nomor dua ...?
+           A. Pilihan jawaban A
+           B. Pilihan jawaban B
+           C. Pilihan jawaban C
+           D. Pilihan jawaban D
+           Kunci Jawaban: C (Pembahasan: ...)
+        ` : `
+        Format Uraian / Esai PTS:
+        - Tiap soal memiliki nomor urut jelas (1, 2, 3, dst).
+        - Di bawah setiap soal, sediakan Kunci Jawaban / Rubrik Penilaian yang jelas.
+        
+        Contoh penulisan:
+        1. Jelaskan proses terjadinya ... dan sebutkan 3 contohnya!
+           Kunci Jawaban / Rubrik: Pembahasan lengkap dan kriteria penskoran...
+
+        2. Bagaimana hubungan antara ... dengan ...?
+           Kunci Jawaban / Rubrik: Pembahasan lengkap dan kriteria penskoran...
+        `}
+
         Berikan jawaban dalam format JSON.
       `;
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -67,7 +109,7 @@ async function startServer() {
             properties: {
               tujuanPembelajaran: {
                 type: Type.STRING,
-                description: "Tujuan pembelajaran yang ingin dicapai melalui model pembelajaran Discovery Learning."
+                description: "Tujuan pembelajaran yang ingin dicapai melalui model pembelajaran Discovery/Inquiry Learning."
               },
               pendahuluan: {
                 type: Type.STRING,
@@ -79,11 +121,11 @@ async function startServer() {
               },
               penutup: {
                 type: Type.STRING,
-                description: "Langkah-langkah kegiatan penutup (kesimpulan, evaluasi, PR)."
+                description: "Langkah-langkah kegiatan penutup (kesimpulan, evaluasi, refleksi, doa)."
               },
               latihanSoal: {
                 type: Type.STRING,
-                description: `Daftar soal latihan (${questionCount || 5} soal) berjenis ${questionType === 'Uraian' ? 'Esai' : 'Pilihan Ganda'}, dilengkapi jawaban/pembahasan. Gunakan nomor list 1. 2. 3. dst.`
+                description: `Daftar soal latihan (${questionCount || 5} butir) berjenis ${questionType === 'Uraian' ? 'Esai/Uraian' : 'Pilihan Ganda'}, diformat sangat rapi seperti naskah soal PTS dengan nomor, pilihan A-D di baris baru, dan kunci jawaban.`
               },
               penilaian: {
                 type: Type.STRING,
@@ -108,6 +150,7 @@ async function startServer() {
 
   // API 2: Extract Questions from Uploaded File (Bank Soal)
   app.post("/api/extract-questions", upload.single("file"), async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -115,27 +158,17 @@ async function startServer() {
 
       const ai = getAi();
       const fileBuffer = req.file.buffer;
-      const mimeType = req.file.mimetype;
+      const mimeType = req.file.mimetype || "application/pdf";
       const base64Data = fileBuffer.toString("base64");
 
-      // Valid mime types for GenAI include PDF and plain text, maybe others.
-      // If it's a docx, we might want to fallback to just raw parsing or sending it to gemini as application/octet-stream if supported, but typically PDF/TXT is safest.
-      // For standard PDF, word, text:
-      let finalMime = mimeType;
-      if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-         // Some word formats might not be officially parsed by default image/pdf endpoints, but 3.8-flash can handle standard documents often, or we can just send as application/pdf if we parse it.
-         // Let's pass it as is, or plain text if it's a simple file. 
-         // But GenAI handles standard documents!
-      }
-
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-3.8-flash",
         contents: {
           parts: [
             {
               inlineData: {
                 data: base64Data,
-                mimeType: finalMime
+                mimeType: mimeType
               }
             },
             {
@@ -181,6 +214,7 @@ async function startServer() {
 
   // API 3: Extract Schedule from Image or Document
   app.post("/api/extract-schedule", upload.single("file"), async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -188,11 +222,18 @@ async function startServer() {
 
       const ai = getAi();
       const fileBuffer = req.file.buffer;
-      const mimeType = req.file.mimetype;
+      let mimeType = req.file.mimetype;
+      if (!mimeType || mimeType === 'application/octet-stream') {
+        const originalName = req.file.originalname.toLowerCase();
+        if (originalName.endsWith('.png')) mimeType = 'image/png';
+        else if (originalName.endsWith('.webp')) mimeType = 'image/webp';
+        else if (originalName.endsWith('.pdf')) mimeType = 'application/pdf';
+        else mimeType = 'image/jpeg';
+      }
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-3.8-flash",
         contents: {
           parts: [
             {
@@ -202,7 +243,20 @@ async function startServer() {
               }
             },
             {
-              text: `Ekstrak jadwal dari gambar/dokumen ini. Kembalikan array objek jadwal. Setiap jadwal harus memiliki 'type' ('pelajaran' atau 'ujian'), 'hari' (misal 'Senin' atau tanggal), 'jam' (misal '07:30 - 09:00'), 'mataPelajaran', 'pengajar' (nama guru/pengawas), dan opsional 'ruangan' atau 'keterangan'. Jika hari tidak terdeteksi, tebak berdasarkan baris/kolom.`
+              text: `Anda adalah asisten cerdas untuk administrasi sekolah.
+Analisis gambar jadwal (jadwal pelajaran harian atau jadwal ujian) ini secara teliti.
+Ekstrak semua baris jadwal yang ada di gambar.
+Kembalikan daftar jadwal sebagai array objek JSON valid.
+Setiap item objek harus memiliki:
+- 'type': 'pelajaran' atau 'ujian' (jika jadwal ujian pilih 'ujian', jika hari biasa pilih 'pelajaran')
+- 'hari': Nama hari (Senin, Selasa, Rabu, Kamis, Jumat, Sabtu) atau tanggal pelaksanaan ujian
+- 'jam': Rentang jam (contoh: '07:30 - 08:30' atau '08.00 - 09.30')
+- 'mataPelajaran': Nama mata pelajaran (contoh: 'Matematika', 'Bahasa Indonesia', 'IPA', 'PAI', dll)
+- 'pengajar': Nama guru pengajar atau nama pengawas (kosongkan jika tidak ada)
+- 'ruangan': Ruangan kelas atau ruang ujian (opsional, contoh: 'Ruang 101' atau 'Kelas VII-A')
+- 'keterangan': Catatan tambahan (opsional)
+
+Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), uraikan setiap sesi ke dalam satu item jadwal.`
             }
           ]
         },
@@ -227,15 +281,55 @@ async function startServer() {
         }
       });
 
-      const text = response.text;
-      if (!text) throw new Error("No response from Gemini");
-      const json = JSON.parse(text.replace(/```json/gi, "").replace(/```/g, "").trim());
-      res.json(json);
+      let text = response.text || "";
+      if (!text) throw new Error("Tidak ada respon dari layanan AI.");
 
+      text = text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch (parseErr) {
+        // Fallback: search for [ ... ]
+        const match = text.match(/\[[\s\S]*\]/);
+        if (match) {
+          json = JSON.parse(match[0]);
+        } else {
+          const objMatch = text.match(/\{[\s\S]*\}/);
+          if (objMatch) {
+            json = JSON.parse(objMatch[0]);
+          }
+        }
+      }
+
+      if (!json) {
+        return res.json([]);
+      }
+
+      if (!Array.isArray(json)) {
+        const potentialArray = Object.values(json).find(val => Array.isArray(val));
+        json = potentialArray || [];
+      }
+
+      res.json(json);
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: error.message || "Failed to extract schedule" });
     }
+  });
+
+  // Explicit 404 for unhandled API routes so they NEVER fall through to Vite SPA HTML
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+  });
+
+  // Global API error handler (catches multer errors, body parser errors, etc.)
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith("/api/")) {
+      console.error("API error:", err);
+      return res.status(err.status || 500).json({ error: err.message || "Terjadi kesalahan internal server." });
+    }
+    next(err);
   });
 
   // Vite middleware for development

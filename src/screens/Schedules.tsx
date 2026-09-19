@@ -270,17 +270,73 @@ export default function SchedulesScreen() {
     reader.readAsBinaryString(file);
   };
 
+  const optimizeImageForUpload = (file: File): Promise<File> => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) {
+        return resolve(file);
+      }
+
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const maxDim = 1600;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(file);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return resolve(file);
+            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(file);
+      };
+      img.src = url;
+    });
+  };
+
   const handleImportImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsExtracting(true);
-    showToast('Sedang mengekstrak jadwal menggunakan AI...', 'success');
-
-    const formData = new FormData();
-    formData.append("file", file);
+    showToast('Sedang memproses dan menganalisis jadwal dengan AI...', 'success');
 
     try {
+      const fileToUpload = await optimizeImageForUpload(file);
+      const formData = new FormData();
+      formData.append("file", fileToUpload);
+
       const res = await fetch("/api/extract-schedule", {
         method: "POST",
         body: formData,
@@ -292,26 +348,43 @@ export default function SchedulesScreen() {
         extractedData = JSON.parse(textRes);
       } catch (e) {
         if (!res.ok) {
-          throw new Error(`Server error (${res.status}): Server sibuk atau gambar terlalu besar.`);
+          throw new Error(`Server (${res.status}): Server sibuk atau gambar terlalu besar. Silakan coba lagi.`);
         }
-        throw new Error('Respons server tidak valid.');
+        throw new Error('Respons server tidak valid. Pastikan gambar jadwal terlihat jelas.');
       }
 
-      if (res.ok && Array.isArray(extractedData)) {
+      if (!res.ok || extractedData?.error) {
+        throw new Error(extractedData?.error || "Gagal mengekstrak jadwal dari gambar.");
+      }
+
+      if (Array.isArray(extractedData)) {
+        if (extractedData.length === 0) {
+          showToast("Tidak ada jadwal yang terdeteksi pada gambar. Pastikan tulisan/tabel terbaca jelas.", 'error');
+          return;
+        }
+
         const batch = writeBatch(db);
         let count = 0;
 
         for (const item of extractedData) {
+          const mapel = item.mataPelajaran || item.mata_pelajaran || item.mapel || item.pelajaran || item.subject || 'Mata Pelajaran';
+          const hari = item.hari || item.day || 'Senin';
+          const jam = item.jam || item.waktu || item.time || '07:30 - 08:30';
+          const pengajar = item.pengajar || item.guru || '';
+          const ruangan = item.ruangan || item.ruang || '';
+          const keterangan = item.keterangan || item.catatan || '';
+          const type = (item.type === 'ujian' || item.tipe === 'ujian') ? 'ujian' : 'pelajaran';
+
           const newDocRef = doc(collection(db, 'jadwal_kelas'));
           batch.set(newDocRef, {
             classId: selectedClass,
-            type: item.type === 'ujian' ? 'ujian' : 'pelajaran',
-            hari: item.hari || 'Senin',
-            jam: item.jam || '07:30',
-            mataPelajaran: item.mataPelajaran || 'Tidak Diketahui',
-            pengajar: item.pengajar || '',
-            ruangan: item.ruangan || '',
-            keterangan: item.keterangan || ''
+            type,
+            hari,
+            jam,
+            mataPelajaran: mapel,
+            pengajar,
+            ruangan,
+            keterangan
           });
           count++;
 
@@ -328,9 +401,9 @@ export default function SchedulesScreen() {
         // Upload image to Firebase Storage so we can display it on dashboard
         try {
           const timestamp = Date.now();
-          const extension = file.name.split('.').pop() || 'jpg';
+          const extension = fileToUpload.name.split('.').pop() || 'jpg';
           const storageRef = ref(storage, `schedules/${selectedClass}_${timestamp}.${extension}`);
-          await uploadBytes(storageRef, file);
+          await uploadBytes(storageRef, fileToUpload);
           const downloadUrl = await getDownloadURL(storageRef);
           
           // Save the URL to a specific collection per class
@@ -341,16 +414,16 @@ export default function SchedulesScreen() {
             updatedAt: new Date().toISOString()
           });
         } catch (uploadError) {
-          console.error("Gagal mengunggah gambar ke storage:", uploadError);
+          console.warn("Info: Unggah gambar dashboard opsional dilewati:", uploadError);
         }
 
         showToast(`Berhasil mengekstrak dan menyimpan ${extractedData.length} jadwal ke ${selectedClass}!`, 'success');
       } else {
-        showToast(extractedData.error || "Gagal mengekstrak jadwal dari gambar.", 'error');
+        showToast(extractedData?.error || "Gagal mengekstrak jadwal dari gambar.", 'error');
       }
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Terjadi kesalahan jaringan saat mengekstrak gambar.", 'error');
+      showToast(err.message || "Terjadi kesalahan saat mengekstrak gambar.", 'error');
     } finally {
       setIsExtracting(false);
       if (imageInputRef.current) imageInputRef.current.value = '';

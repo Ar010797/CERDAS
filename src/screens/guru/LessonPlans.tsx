@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, Calendar, FileText, X } from 'lucide-react';
+import { Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, Calendar, FileText, X, ListOrdered, Edit3, CheckCircle2, HelpCircle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
@@ -9,6 +9,91 @@ import { id } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
 
 const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
+
+export interface FormattedPTSQuestion {
+  number: number;
+  question: string;
+  options: { label: string; text: string }[];
+  answerKey: string;
+}
+
+export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
+  if (!text || !text.trim()) return [];
+
+  const lines = text.split('\n');
+  const questions: FormattedPTSQuestion[] = [];
+  let currentQ: { number: number; lines: string[] } | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const matchNum = trimmed.match(/^(\d+)[\.\)]\s*(.*)/);
+    if (matchNum) {
+      if (currentQ) {
+        questions.push(buildPTSQuestion(currentQ.number, currentQ.lines));
+      }
+      currentQ = { number: parseInt(matchNum[1], 10), lines: [matchNum[2]] };
+    } else if (currentQ) {
+      currentQ.lines.push(trimmed);
+    }
+  }
+  if (currentQ) {
+    questions.push(buildPTSQuestion(currentQ.number, currentQ.lines));
+  }
+
+  return questions;
+}
+
+function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
+  let questionText = '';
+  const options: { label: string; text: string }[] = [];
+  let answerKey = '';
+  let inOptions = false;
+
+  for (const line of lines) {
+    const optMatch = line.match(/^([A-Da-d])[\.\)]\s*(.*)/);
+    const keyMatch = line.match(/^(?:Kunci(?:\s+Jawaban)?|Kunci|Rubrik(?:\s+Penilaian)?)\s*[:\-]\s*(.*)/i);
+
+    if (keyMatch) {
+      answerKey = keyMatch[1] || line;
+      inOptions = false;
+    } else if (optMatch) {
+      options.push({ label: optMatch[1].toUpperCase(), text: optMatch[2] });
+      inOptions = true;
+    } else if (inOptions && options.length > 0) {
+      options[options.length - 1].text += ' ' + line;
+    } else if (!answerKey) {
+      questionText = questionText ? questionText + ' ' + line : line;
+    } else {
+      answerKey += ' ' + line;
+    }
+  }
+
+  return {
+    number: num,
+    question: questionText || lines[0] || '',
+    options,
+    answerKey
+  };
+}
+
+export function formatAsPTS(text: string): string {
+  const parsed = parsePTSQuestions(text);
+  if (parsed.length === 0) return text;
+
+  return parsed.map((q, idx) => {
+    let out = `${idx + 1}. ${q.question}`;
+    if (q.options && q.options.length > 0) {
+      q.options.forEach(opt => {
+        out += `\n   ${opt.label}. ${opt.text}`;
+      });
+    }
+    if (q.answerKey) {
+      out += `\n   Kunci Jawaban: ${q.answerKey}`;
+    }
+    return out;
+  }).join('\n\n');
+}
 
 export default function LessonPlansGuru() {
   const { userData } = useAuth();
@@ -38,11 +123,19 @@ export default function LessonPlansGuru() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [questionType, setQuestionType] = useState<'Pilihan Ganda' | 'Uraian'>('Pilihan Ganda');
   const [questionCount, setQuestionCount] = useState(5);
+  const [questionTab, setQuestionTab] = useState<'pts' | 'raw'>('pts');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleFormatPTS = () => {
+    if (!latihanSoal.trim()) return;
+    const formatted = formatAsPTS(latihanSoal);
+    setLatihanSoal(formatted);
+    showToast('Format soal berhasil dirapikan sesuai standar PTS!', 'success');
   };
 
   const [schoolSettings, setSchoolSettings] = useState({
@@ -271,12 +364,73 @@ export default function LessonPlansGuru() {
       yPos += (lines.length * lineHeight) + 8;
     };
 
+    const printQuestionsSection = (title: string, content: string) => {
+      if (yPos > 255) {
+        pdf.addPage();
+        yPos = 20;
+      }
+      pdf.setFont("helvetica", "bold");
+      pdf.text(title, 20, yPos);
+      yPos += lineHeight + 2;
+
+      const parsed = parsePTSQuestions(content);
+      if (parsed.length > 0) {
+        for (const q of parsed) {
+          if (yPos > 260) {
+            pdf.addPage();
+            yPos = 20;
+          }
+
+          pdf.setFont("helvetica", "bold");
+          const qTextLines = pdf.splitTextToSize(`${q.number}. ${q.question}`, maxWidth);
+          pdf.text(qTextLines, 20, yPos);
+          yPos += (qTextLines.length * lineHeight) + 1;
+
+          if (q.options && q.options.length > 0) {
+            pdf.setFont("helvetica", "normal");
+            for (const opt of q.options) {
+              if (yPos > 275) {
+                pdf.addPage();
+                yPos = 20;
+              }
+              const optLines = pdf.splitTextToSize(`${opt.label}. ${opt.text}`, maxWidth - 10);
+              pdf.text(optLines, 28, yPos);
+              yPos += (optLines.length * lineHeight);
+            }
+          }
+
+          if (q.answerKey) {
+            if (yPos > 275) {
+              pdf.addPage();
+              yPos = 20;
+            }
+            pdf.setFont("helvetica", "italic");
+            const keyLines = pdf.splitTextToSize(`* Kunci Jawaban: ${q.answerKey}`, maxWidth - 10);
+            pdf.text(keyLines, 28, yPos);
+            yPos += (keyLines.length * lineHeight) + 1;
+          }
+
+          yPos += 3;
+        }
+        yPos += 5;
+      } else {
+        pdf.setFont("helvetica", "normal");
+        const lines = pdf.splitTextToSize(content || '-', maxWidth);
+        if (yPos + (lines.length * lineHeight) > 280) {
+          pdf.addPage();
+          yPos = 20;
+        }
+        pdf.text(lines, 20, yPos);
+        yPos += (lines.length * lineHeight) + 8;
+      }
+    };
+
     printSection('A. Tujuan Pembelajaran', dataToExport.tujuanPembelajaran);
     printSection('B. Materi Pembelajaran', dataToExport.materi);
     printSection('C. Kegiatan Pendahuluan', dataToExport.pendahuluan);
     printSection('D. Kegiatan Inti', dataToExport.kegiatanInti);
     printSection('E. Kegiatan Penutup', dataToExport.penutup);
-    printSection('F. Latihan Soal', dataToExport.latihanSoal);
+    printQuestionsSection('F. Latihan Soal & Kunci Jawaban (Format PTS)', dataToExport.latihanSoal);
     printSection('G. Penilaian Pembelajaran', dataToExport.penilaian);
 
     // Tanda Tangan
@@ -629,18 +783,172 @@ export default function LessonPlansGuru() {
                     />
                   </div>
 
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <label className="block text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-                      <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs shadow-sm">D</span>
-                      Latihan Soal & Kunci Jawaban
-                    </label>
-                    <textarea
-                      rows={6}
-                      placeholder="Tuliskan latihan soal untuk siswa..."
-                      value={latihanSoal}
-                      onChange={(e) => setLatihanSoal(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
-                    />
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                      <label className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs shadow-sm">D</span>
+                        <span>Latihan Soal & Kunci Jawaban</span>
+                        <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Format PTS
+                        </span>
+                      </label>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => setQuestionTab('pts')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              questionTab === 'pts' 
+                                ? 'bg-white text-indigo-700 shadow-sm' 
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            <ListOrdered className="w-3.5 h-3.5" />
+                            <span>Tampilan Rapi (PTS)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setQuestionTab('raw')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              questionTab === 'raw' 
+                                ? 'bg-white text-indigo-700 shadow-sm' 
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Edit Teks</span>
+                          </button>
+                        </div>
+
+                        {latihanSoal.trim() && (
+                          <button
+                            type="button"
+                            onClick={handleFormatPTS}
+                            title="Rapikan penomoran dan posisi pilihan soal secara otomatis"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors shadow-xs"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Rapikan Format</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {questionTab === 'pts' ? (
+                      <div>
+                        {(() => {
+                          const parsed = parsePTSQuestions(latihanSoal);
+                          if (parsed.length === 0) {
+                            return (
+                              <div className="text-center py-10 bg-slate-50/80 rounded-2xl border border-dashed border-slate-200 p-6">
+                                <ListOrdered className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                                <p className="text-slate-700 font-bold text-sm mb-1">Belum Ada Soal Latihan</p>
+                                <p className="text-slate-400 text-xs max-w-md mx-auto mb-4">
+                                  Klik tombol <strong className="text-orange-600 font-extrabold">Isi Otomatis (AI)</strong> di atas untuk membuat paket soal PTS rapi secara instan, atau beralih ke tab <strong>Edit Teks</strong> untuk mengetik manual.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => setQuestionTab('raw')}
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 shadow-sm"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  Ketik / Tempel Soal
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="space-y-4">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs text-indigo-900 bg-indigo-50/70 px-4 py-2.5 rounded-xl border border-indigo-100">
+                                <span className="font-extrabold flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                                  Tersusun {parsed.length} Butir Soal Standar PTS
+                                </span>
+                                <span className="text-[11px] text-indigo-600 font-medium">
+                                  Penomoran, pilihan jawaban, dan kunci tersusun simetris
+                                </span>
+                              </div>
+
+                              <div className="space-y-4">
+                                {parsed.map((q) => (
+                                  <div
+                                    key={q.number}
+                                    className="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-300 transition-all space-y-3.5 shadow-xs"
+                                  >
+                                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="bg-indigo-600 text-white text-xs font-extrabold px-3 py-1 rounded-lg shadow-xs">
+                                          Soal {q.number}
+                                        </span>
+                                        <span className="bg-slate-200/80 text-slate-700 text-[11px] font-bold px-2.5 py-0.5 rounded-md">
+                                          {q.options && q.options.length > 0 ? 'Pilihan Ganda' : 'Uraian / Esai'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-slate-800 font-bold text-sm leading-relaxed whitespace-pre-wrap pl-1">
+                                      {q.question}
+                                    </div>
+
+                                    {q.options && q.options.length > 0 && (
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                                        {q.options.map((opt) => (
+                                          <div
+                                            key={opt.label}
+                                            className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 bg-white text-sm hover:border-indigo-200 transition-colors shadow-xs"
+                                          >
+                                            <span className="w-6 h-6 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-extrabold text-xs flex items-center justify-center shrink-0">
+                                              {opt.label}
+                                            </span>
+                                            <span className="text-slate-700 font-medium pt-0.5 leading-snug">
+                                              {opt.text}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {q.answerKey && (
+                                      <div className="mt-2.5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 flex items-start gap-2.5">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                                        <div className="leading-relaxed">
+                                          <strong className="font-extrabold text-emerald-900 mr-1.5">
+                                            Kunci Jawaban & Pembahasan:
+                                          </strong>
+                                          <span className="font-medium text-emerald-800">{q.answerKey}</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <textarea
+                          rows={9}
+                          placeholder={`Format standar PTS:\n1. Pertanyaan soal nomor satu?\n   A. Pilihan jawaban A\n   B. Pilihan jawaban B\n   C. Pilihan jawaban C\n   D. Pilihan jawaban D\n   Kunci Jawaban: A (Pembahasan singkat)\n\n2. Pertanyaan soal nomor dua?`}
+                          value={latihanSoal}
+                          onChange={(e) => setLatihanSoal(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
+                        />
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400 pt-1">
+                          <span>Ketik atau tempel soal dengan nomor urut (1., 2.) dan pilihan (A., B., C., D.).</span>
+                          <button
+                            type="button"
+                            onClick={() => setQuestionTab('pts')}
+                            className="text-indigo-600 hover:text-indigo-700 font-bold self-end sm:self-auto"
+                          >
+                            Lihat Tampilan Rapi (PTS) &rarr;
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                 </div>
