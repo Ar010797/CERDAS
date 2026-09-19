@@ -35,6 +35,21 @@ export default function Login() {
     
     try {
       const trimmedUsername = username.trim();
+      const trimmedPassword = password.trim();
+
+      if (trimmedPassword.length < 6) {
+        setError('Kata sandi terlalu pendek. Gunakan minimal 6 karakter.');
+        setLoading(false);
+        return;
+      }
+
+      const commonBreachedPasswords = ['guru123', 'admin123', '123456', '12345678', 'password', 'qwerty', 'sekolah123'];
+      if (commonBreachedPasswords.includes(trimmedPassword.toLowerCase())) {
+        setError('Kata sandi tersebut sangat umum dan telah terdata bocor di Google. Harap gunakan kata sandi pribadi yang unik agar akun Anda aman dan peringatan Google hilang.');
+        setLoading(false);
+        return;
+      }
+
       const email = trimmedUsername.includes('@') ? trimmedUsername : `${trimmedUsername.toLowerCase().replace(/\s+/g, '')}@miftahussalam.sch.id`;
       
       let userUid = '';
@@ -334,14 +349,16 @@ export default function Login() {
               <div className="relative">
                 <input
                   id="login-password-field"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete={isRegistering ? "new-password" : "current-password"}
+                  name={selectedRole === 'Wali Murid' ? "student_absen" : "user_secret"}
+                  type={showPassword ? "text" : (selectedRole === 'Wali Murid' ? "text" : "password")}
+                  inputMode={selectedRole === 'Wali Murid' ? "numeric" : "text"}
+                  autoComplete={selectedRole === 'Wali Murid' ? "off" : (isRegistering ? "new-password" : "current-password")}
+                  data-lpignore="true"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-slate-800 font-medium"
-                  placeholder="••••••••"
+                  placeholder={selectedRole === 'Wali Murid' ? "Nomor absen siswa (contoh: 01)" : "••••••••"}
                 />
                 <button
                   type="button"
@@ -351,7 +368,11 @@ export default function Login() {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
-              {!isRegistering && (
+              {isRegistering ? (
+                <p className="text-xs text-slate-500 mt-2">
+                  🔒 Gunakan kata sandi pribadi yang unik (minimal 6 karakter). Hindari kata sandi umum seperti <i>guru123</i> agar Google Chrome tidak memunculkan notifikasi pelanggaran sandi.
+                </p>
+              ) : (
                 <p className="text-xs text-slate-400 mt-2">
                   {selectedRole === 'Wali Murid' 
                     ? '*Masukkan nomor absen siswa terdaftar' 
