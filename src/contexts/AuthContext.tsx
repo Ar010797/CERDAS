@@ -60,12 +60,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.error("Error fetching user profile:", error);
         }
       } else {
-        // Check for Wali Murid fallback in local storage if not logged into Firebase Auth
+        // Fallback to local storage session if not logged into Firebase Auth
         const storedUser = localStorage.getItem('sim_user');
         if (storedUser) {
           try {
             const parsed = JSON.parse(storedUser);
-            if (parsed.role === 'Wali Murid') {
+            if (parsed && parsed.role) {
               setUserData(parsed);
             } else {
               setUserData(null);
@@ -85,9 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = (data: UserData) => {
     setUserData(data);
-    if (data.role === 'Wali Murid') {
-      localStorage.setItem('sim_user', JSON.stringify(data));
-    }
+    localStorage.setItem('sim_user', JSON.stringify(data));
   };
 
   const logout = async () => {

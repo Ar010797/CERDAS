@@ -92,16 +92,24 @@ export default function UsersAdmin() {
         await updateDoc(doc(db, 'users', editingUser.id), dataToSave);
         showToast('Pengguna berhasil diperbarui!', 'success');
       } else {
-        const { createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
-        const { adminAuth } = await import('../../lib/firebase');
-        const email = formData.username.includes('@') ? formData.username : `${formData.username.toLowerCase().replace(/\s+/g, '')}@miftahussalam.sch.id`;
-        const userCredential = await createUserWithEmailAndPassword(adminAuth, email, formData.password);
+        let newUid = '';
+        try {
+          const { createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+          const { adminAuth } = await import('../../lib/firebase');
+          const email = formData.username.includes('@') ? formData.username : `${formData.username.toLowerCase().replace(/\s+/g, '')}@miftahussalam.sch.id`;
+          const userCredential = await createUserWithEmailAndPassword(adminAuth, email, formData.password);
+          newUid = userCredential.user.uid;
+          await signOut(adminAuth);
+        } catch (authErr: any) {
+          console.warn("Firebase Auth unavailable for admin user creation, saving to database:", authErr);
+          newUid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        }
         
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
+        await setDoc(doc(db, 'users', newUid), {
           ...dataToSave,
-          password: formData.password
+          password: formData.password,
+          createdAt: new Date().toISOString()
         });
-        await signOut(adminAuth);
         showToast('Pengguna baru berhasil ditambahkan!', 'success');
       }
       setIsModalOpen(false);
@@ -192,7 +200,7 @@ export default function UsersAdmin() {
                         </div>
                         <div>
                           <p className="font-bold text-slate-800">{user.name}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">Username: {user.username} {user.password && <span className="opacity-0 group-hover:opacity-100 transition-opacity ml-2">• Password: {user.password}</span>}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Username: {user.username}</p>
                         </div>
                       </div>
                     </td>
