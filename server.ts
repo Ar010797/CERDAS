@@ -51,23 +51,26 @@ async function startServer() {
     res.setHeader("Content-Type", "application/json");
     try {
       const ai = getAi();
-      const { mataPelajaran, materi, questionType, questionCount } = req.body;
+      const mataPelajaran = (req.body?.mataPelajaran || "").toString().trim();
+      const materi = (req.body?.materi || "").toString().trim();
+      const questionType = req.body?.questionType === "Uraian" ? "Uraian" : "Pilihan Ganda";
+      const questionCount = Math.min(Math.max(parseInt(req.body?.questionCount, 10) || 5, 1), 20);
 
       if (!mataPelajaran || !materi) {
-        return res.status(400).json({ error: "mataPelajaran and materi are required." });
+        return res.status(400).json({ error: "Mata pelajaran dan materi wajib diisi." });
       }
 
       const prompt = `
         Saya sedang menyusun Rencana Pelaksanaan Pembelajaran (RPP) Kurikulum Nasional / Merdeka untuk mata pelajaran "${mataPelajaran}" dengan materi spesifik "${materi}".
         Tolong buatkan draf RPP yang komprehensif, padat, dan saling terhubung dengan materi tersebut.
         
-        PENTING: KHUSUS LATIHAN SOAL (${questionCount || 5} soal berjenis ${questionType === 'Uraian' ? 'Uraian / Esai' : 'Pilihan Ganda'}):
-        Sajikan persis seperti naskah naskah soal Ujian / PTS (Penilaian Tengah Semester) resmi dengan posisi, nomor, dan format yang SANGAT RAPI:
+        PENTING: KHUSUS LATIHAN SOAL (${questionCount} butir soal berjenis ${questionType === 'Uraian' ? 'Uraian / Esai' : 'Pilihan Ganda'}):
+        Sajikan persis seperti naskah lembar Ujian / PTS (Penilaian Tengah Semester) resmi dengan posisi, nomor, dan format yang SANGAT RAPI:
         ${questionType === 'Pilihan Ganda' ? `
         Format Pilihan Ganda PTS:
         - Tiap soal memiliki nomor urut jelas (1, 2, 3, dst).
-        - Setiap pilihan (A, B, C, D) berada di baris baru dengan jarak dan indentasi teratur.
-        - Di bawah setiap soal, sediakan 1 baris khusus Kunci Jawaban beserta ringkasan pembahasannya.
+        - Setiap pilihan (A, B, C, D) HARUS berada di baris tersendiri dengan indentasi teratur.
+        - Di bawah setiap soal, sediakan baris khusus Kunci Jawaban beserta ringkasan pembahasannya.
         
         Contoh penulisan:
         1. Berikut ini yang merupakan ciri utama dari ... adalah?
@@ -90,10 +93,10 @@ async function startServer() {
         
         Contoh penulisan:
         1. Jelaskan proses terjadinya ... dan sebutkan 3 contohnya!
-           Kunci Jawaban / Rubrik: Pembahasan lengkap dan kriteria penskoran...
+           Kunci Jawaban: Pembahasan lengkap dan kriteria penskoran...
 
         2. Bagaimana hubungan antara ... dengan ...?
-           Kunci Jawaban / Rubrik: Pembahasan lengkap dan kriteria penskoran...
+           Kunci Jawaban: Pembahasan lengkap dan kriteria penskoran...
         `}
 
         Berikan jawaban dalam format JSON.
@@ -125,7 +128,7 @@ async function startServer() {
               },
               latihanSoal: {
                 type: Type.STRING,
-                description: `Daftar soal latihan (${questionCount || 5} butir) berjenis ${questionType === 'Uraian' ? 'Esai/Uraian' : 'Pilihan Ganda'}, diformat sangat rapi seperti naskah soal PTS dengan nomor, pilihan A-D di baris baru, dan kunci jawaban.`
+                description: `Daftar soal latihan (${questionCount} butir) berjenis ${questionType === 'Uraian' ? 'Esai/Uraian' : 'Pilihan Ganda'}, diformat sangat rapi seperti naskah soal PTS dengan nomor, pilihan A-D di baris baru, dan kunci jawaban.`
               },
               penilaian: {
                 type: Type.STRING,
@@ -137,14 +140,27 @@ async function startServer() {
         }
       });
 
-      const text = response.text;
-      if (!text) throw new Error("No response from Gemini");
-      const json = JSON.parse(text.replace(/```json/gi, "").replace(/```/g, "").trim());
+      let rawText = response.text || "";
+      if (!rawText.trim()) throw new Error("Tidak ada respon dari layanan AI.");
+      rawText = rawText.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+
+      let json: any = null;
+      try {
+        json = JSON.parse(rawText);
+      } catch (parseErr) {
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) {
+          json = JSON.parse(match[0]);
+        } else {
+          throw new Error("Format respon AI tidak valid sebagai JSON.");
+        }
+      }
+
       res.json(json);
 
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error.message || "Failed to generate RPP" });
+      console.error("Error in /api/generate-rpp:", error);
+      res.status(500).json({ error: error.message || "Gagal menyusun draft E-RPP otomatis." });
     }
   });
 

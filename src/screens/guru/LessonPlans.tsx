@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, Calendar, FileText, X, ListOrdered, Edit3, CheckCircle2, HelpCircle } from 'lucide-react';
+import { Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, Calendar, FileText, X, ListOrdered, Edit3, CheckCircle2, HelpCircle, ExternalLink, Printer, Eye, AlertTriangle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
@@ -9,6 +9,16 @@ import { id } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
 
 const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
+
+export const QUICK_TOPICS = [
+  { label: '📐 MTK: Operasi Pecahan', mapel: 'Matematika', materi: 'Operasi Hitung Penjumlahan dan Pengurangan Pecahan' },
+  { label: '🔬 IPA: Tata Surya & Planet', mapel: 'Ilmu Pengetahuan Alam (IPA)', materi: 'Sistem Tata Surya dan Karakteristik Planet' },
+  { label: '📖 B.IND: Teks Eksplanasi', mapel: 'Bahasa Indonesia', materi: 'Menemukan Gagasan Pokok dan Menulis Teks Eksplanasi' },
+  { label: '🌍 IPS: Kenampakan Alam', mapel: 'Ilmu Pengetahuan Sosial (IPS)', materi: 'Kenampakan Alam dan Pemanfaatan Sumber Daya Lingkungan' },
+  { label: '🕌 PAI: Akhlak Terpuji', mapel: 'Pendidikan Agama Islam', materi: 'Meneladani Sikap Jujur dan Amanah dalam Kehidupan Sehari-hari' },
+  { label: '🇬🇧 B.ING: Daily Routines', mapel: 'Bahasa Inggris', materi: 'Describing Daily Routine using Simple Present Tense' },
+  { label: '🏃 PJOK: Kebugaran Jasmani', mapel: 'Pendidikan Jasmani & Kesehatan', materi: 'Aktivitas Latihan Daya Tahan Jantung dan Kelincahan Tubuh' },
+];
 
 export interface FormattedPTSQuestion {
   number: number;
@@ -20,23 +30,37 @@ export interface FormattedPTSQuestion {
 export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
   if (!text || !text.trim()) return [];
 
-  const lines = text.split('\n');
+  const rawLines = text.split('\n');
   const questions: FormattedPTSQuestion[] = [];
   let currentQ: { number: number; lines: string[] } | null = null;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
+  for (const rawLine of rawLines) {
+    const trimmed = rawLine.trim();
     if (!trimmed) continue;
-    const matchNum = trimmed.match(/^(\d+)[\.\)]\s*(.*)/);
-    if (matchNum) {
+
+    // Check if line indicates a new question number (e.g. 1., 1), No. 1, Soal 1:)
+    const isOptionStart = /^[\(\[]?[A-Da-d][\.\)\]]/.test(trimmed);
+    const numMatch = trimmed.match(/^(?:Soal\s+|No\.\s*)?(\d+)[\.\)\:\-]\s*(.*)/i);
+
+    if (numMatch && !isOptionStart) {
       if (currentQ) {
         questions.push(buildPTSQuestion(currentQ.number, currentQ.lines));
       }
-      currentQ = { number: parseInt(matchNum[1], 10), lines: [matchNum[2]] };
+      currentQ = { number: parseInt(numMatch[1], 10), lines: numMatch[2].trim() ? [numMatch[2].trim()] : [] };
     } else if (currentQ) {
-      currentQ.lines.push(trimmed);
+      // Check if line has multiple inline options (e.g. 'A. x   B. y   C. z   D. w')
+      const inlineMatches = trimmed.match(/[\(\[]?[A-Da-d][\.\)\]]\s+/g);
+      if (inlineMatches && inlineMatches.length > 1) {
+        const parts = trimmed.split(/(?=[\(\[]?[A-Da-d][\.\)\]]\s+)/);
+        for (const p of parts) {
+          if (p.trim()) currentQ.lines.push(p.trim());
+        }
+      } else {
+        currentQ.lines.push(trimmed);
+      }
     }
   }
+
   if (currentQ) {
     questions.push(buildPTSQuestion(currentQ.number, currentQ.lines));
   }
@@ -45,14 +69,15 @@ export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
 }
 
 function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
-  let questionText = '';
+  const questionParts: string[] = [];
   const options: { label: string; text: string }[] = [];
   let answerKey = '';
   let inOptions = false;
 
   for (const line of lines) {
-    const optMatch = line.match(/^([A-Da-d])[\.\)]\s*(.*)/);
-    const keyMatch = line.match(/^(?:Kunci(?:\s+Jawaban)?|Kunci|Rubrik(?:\s+Penilaian)?)\s*[:\-]\s*(.*)/i);
+    if (!line) continue;
+    const optMatch = line.match(/^[\(\[]?([A-Da-d])[\.\)\]]\s*(.*)/);
+    const keyMatch = line.match(/^(?:\*?\s*(?:Kunci\s*(?:Jawaban)?|Jawaban|Rubrik\s*(?:Penilaian)?|Pembahasan))\s*[:\-]\s*(.*)/i);
 
     if (keyMatch) {
       answerKey = keyMatch[1] || line;
@@ -63,7 +88,7 @@ function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
     } else if (inOptions && options.length > 0) {
       options[options.length - 1].text += ' ' + line;
     } else if (!answerKey) {
-      questionText = questionText ? questionText + ' ' + line : line;
+      questionParts.push(line);
     } else {
       answerKey += ' ' + line;
     }
@@ -71,9 +96,9 @@ function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
 
   return {
     number: num,
-    question: questionText || lines[0] || '',
+    question: questionParts.join(' ').trim() || lines[0] || '',
     options,
-    answerKey
+    answerKey: answerKey.trim()
   };
 }
 
@@ -126,9 +151,14 @@ export default function LessonPlansGuru() {
   const [questionTab, setQuestionTab] = useState<'pts' | 'raw'>('pts');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Cross-device PDF & modal states
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [pdfPreviewFilename, setPdfPreviewFilename] = useState<string>('');
+  const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), 4500);
   };
 
   const handleFormatPTS = () => {
@@ -196,81 +226,104 @@ export default function LessonPlansGuru() {
     if (rpp) {
       setEditingId(rpp.id);
       setSelectedClass(rpp.kelasSemester.split(' / ')[0] || selectedClass);
-      setMataPelajaran(rpp.mataPelajaran);
-      setKelasSemester(rpp.kelasSemester);
-      setAlokasiWaktu(rpp.alokasiWaktu);
-      setMateri(rpp.materi);
-      setTujuanPembelajaran(rpp.tujuanPembelajaran);
-      setPendahuluan(rpp.pendahuluan);
-      setKegiatanInti(rpp.kegiatanInti);
-      setPenutup(rpp.penutup);
-      setLatihanSoal(rpp.latihanSoal);
-      setPenilaian(rpp.penilaian);
+      setMataPelajaran(rpp.mataPelajaran || '');
+      setKelasSemester(rpp.kelasSemester || `${selectedClass} / Ganjil`);
+      setAlokasiWaktu(rpp.alokasiWaktu || '');
+      setMateri(rpp.materi || '');
+      setTujuanPembelajaran(rpp.tujuanPembelajaran || '');
+      setPendahuluan(rpp.pendahuluan || '');
+      setKegiatanInti(rpp.kegiatanInti || '');
+      setPenutup(rpp.penutup || '');
+      setLatihanSoal(rpp.latihanSoal || '');
+      setPenilaian(rpp.penilaian || '');
     } else {
       resetForm();
     }
     setView('form');
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm("Apakah Anda yakin ingin menghapus E-RPP ini?")) {
-      try {
-        await deleteDoc(doc(db, 'lesson_plans', id));
-      } catch (err) {
-        console.error(err);
-        alert("Gagal menghapus E-RPP.");
-      }
+  const confirmDelete = async () => {
+    if (!deleteModalId) return;
+    try {
+      await deleteDoc(doc(db, 'lesson_plans', deleteModalId));
+      showToast("E-RPP berhasil dihapus dari sistem.", "success");
+    } catch (err: any) {
+      console.error(err);
+      showToast("Gagal menghapus E-RPP: " + (err.message || 'Kesalahan sistem'), "error");
+    } finally {
+      setDeleteModalId(null);
     }
   };
 
   const handleGenerateTemplate = async () => {
-    if (!mataPelajaran.trim() || !materi.trim()) {
-      alert("Silakan isi Mata Pelajaran dan Materi yang Disampaikan terlebih dahulu.");
+    const cleanMapel = mataPelajaran.trim();
+    const cleanMateri = materi.trim();
+
+    if (!cleanMapel || !cleanMateri) {
+      showToast("Silakan isi Mata Pelajaran dan Materi terlebih dahulu, atau gunakan tombol rekomendasi di bawah.", "error");
       return;
     }
     
     setIsGenerating(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
       const response = await fetch('/api/generate-rpp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mataPelajaran, materi, questionType, questionCount })
+        body: JSON.stringify({ 
+          mataPelajaran: cleanMapel, 
+          materi: cleanMateri, 
+          questionType, 
+          questionCount 
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       
-      let data;
+      let data: any;
       const textResponse = await response.text();
       try {
         data = JSON.parse(textResponse);
       } catch (e) {
         if (!response.ok) {
-          throw new Error(`Server error (${response.status}): Server sibuk atau waktu habis. Silakan coba lagi.`);
+          throw new Error(`Server (${response.status}): Silakan coba beberapa saat lagi.`);
         }
-        throw new Error('Respons server tidak valid.');
+        throw new Error('Respons dari server tidak sesuai format JSON.');
       }
 
-      if (response.ok) {
+      if (response.ok && data) {
         setKelasSemester(`${selectedClass} / Ganjil`);
-        setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
+        if (!alokasiWaktu.trim()) {
+          setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
+        }
         if (data.tujuanPembelajaran) setTujuanPembelajaran(data.tujuanPembelajaran);
         if (data.pendahuluan) setPendahuluan(data.pendahuluan);
         if (data.kegiatanInti) setKegiatanInti(data.kegiatanInti);
         if (data.penutup) setPenutup(data.penutup);
         if (data.latihanSoal) setLatihanSoal(data.latihanSoal);
         if (data.penilaian) setPenilaian(data.penilaian);
+        showToast("✨ Draf E-RPP & bank soal PTS berhasil disusun otomatis!", "success");
       } else {
-        alert(data.error || "Gagal membuat draft RPP.");
+        showToast(data?.error || "Gagal menyusun draf RPP.", "error");
       }
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error(err);
-      alert(err.message || "Terjadi kesalahan saat menghubungi layanan AI.");
+      if (err.name === 'AbortError') {
+        showToast("Waktu permintaan habis (timeout). Silakan periksa jaringan dan coba lagi.", "error");
+      } else {
+        showToast(err.message || "Terjadi kesalahan saat menghubungi layanan AI.", "error");
+      }
     } finally {
       setIsGenerating(false);
     }
   };
 
   const handleSave = async () => {
-    if (!mataPelajaran || !materi) {
-      alert("Mata Pelajaran dan Materi harus diisi.");
+    if (!mataPelajaran.trim() || !materi.trim()) {
+      showToast("Mata Pelajaran dan Materi harus diisi.", "error");
       return;
     }
     setSaving(true);
@@ -278,10 +331,10 @@ export default function LessonPlansGuru() {
       const payload = {
         teacherId: userData?.uid,
         teacherName: userData?.name || 'Guru',
-        mataPelajaran,
+        mataPelajaran: mataPelajaran.trim(),
         kelasSemester,
-        alokasiWaktu,
-        materi,
+        alokasiWaktu: alokasiWaktu || "2 x 45 Menit (1 Pertemuan)",
+        materi: materi.trim(),
         tujuanPembelajaran,
         pendahuluan,
         kegiatanInti,
@@ -293,18 +346,18 @@ export default function LessonPlansGuru() {
 
       if (editingId) {
         await updateDoc(doc(db, 'lesson_plans', editingId), payload);
-        alert('RPP berhasil diperbarui!');
+        showToast('E-RPP berhasil diperbarui!', 'success');
       } else {
         await addDoc(collection(db, 'lesson_plans'), {
           ...payload,
           createdAt: new Date().toISOString()
         });
-        alert('RPP berhasil disimpan!');
+        showToast('E-RPP berhasil disimpan ke database!', 'success');
       }
       setView('list');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('Gagal menyimpan RPP.');
+      showToast('Gagal menyimpan E-RPP: ' + (error.message || 'Kesalahan sistem'), 'error');
     } finally {
       setSaving(false);
     }
@@ -312,159 +365,370 @@ export default function LessonPlansGuru() {
 
   const exportPDF = (rppData?: any) => {
     const dataToExport = rppData || {
-      mataPelajaran, kelasSemester, alokasiWaktu, materi,
-      tujuanPembelajaran, pendahuluan, kegiatanInti, penutup, latihanSoal, penilaian
+      mataPelajaran,
+      kelasSemester,
+      alokasiWaktu,
+      materi,
+      tujuanPembelajaran,
+      pendahuluan,
+      kegiatanInti,
+      penutup,
+      latihanSoal,
+      penilaian,
+      teacherName: userData?.name || 'Guru Mata Pelajaran'
     };
 
-    const pdf = new jsPDF();
-    
-    // Header
-    pdf.setFontSize(14);
+    const cleanMapel = (dataToExport.mataPelajaran || 'Mata_Pelajaran').trim();
+    const cleanKelas = (dataToExport.kelasSemester || selectedClass || 'Kelas').split(' / ')[0].trim();
+    const safeFilename = `RPP_${cleanMapel.replace(/\s+/g, '_')}_${cleanKelas.replace(/\s+/g, '_')}.pdf`;
+
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    let yPos = 18;
+
+    const checkPageBreak = (neededHeight: number = 8) => {
+      if (yPos + neededHeight > 275) {
+        pdf.addPage();
+        yPos = 20;
+        return true;
+      }
+      return false;
+    };
+
+    // 1. KOP / HEADER
+    pdf.setFontSize(13);
     pdf.setFont("helvetica", "bold");
-    pdf.text('RENCANA PELAKSANAAN PEMBELAJARAN (RPP)', 105, 20, { align: 'center' });
-    pdf.setFontSize(11);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text('RENCANA PELAKSANAAN PEMBELAJARAN (RPP)', 105, yPos, { align: 'center' });
+    yPos += 5.5;
+
+    pdf.setFontSize(9.5);
     pdf.setFont("helvetica", "normal");
-    pdf.text(`Sesuai Surat Edaran Kemendikbud No 14 Tahun 2019`, 105, 26, { align: 'center' });
-    
-    pdf.setLineWidth(0.5);
-    pdf.line(20, 30, 190, 30);
+    pdf.setTextColor(71, 85, 105);
+    pdf.text('Berdasarkan Surat Edaran Mendikbudristek No. 14 Tahun 2019 (Format 1 Lembar / Merdeka Belajar)', 105, yPos, { align: 'center' });
+    yPos += 4.5;
 
-    // Identitas
-    pdf.setFontSize(10);
+    // Dual divider line
+    pdf.setDrawColor(30, 41, 59);
+    pdf.setLineWidth(0.6);
+    pdf.line(18, yPos, 192, yPos);
+    pdf.setLineWidth(0.2);
+    pdf.line(18, yPos + 1.2, 192, yPos + 1.2);
+    yPos += 5.5;
+
+    // 2. IDENTITAS PEMBELAJARAN
+    pdf.setFillColor(248, 250, 252);
+    pdf.setDrawColor(226, 232, 240);
+    pdf.roundedRect(18, yPos, 174, 23, 1.5, 1.5, 'FD');
+
+    pdf.setFontSize(8.5);
     pdf.setFont("helvetica", "bold");
-    pdf.text(`Nama Sekolah`, 20, 40); pdf.text(`: ${schoolSettings.namaSekolah}`, 60, 40);
-    pdf.text(`Mata Pelajaran`, 20, 46); pdf.text(`: ${dataToExport.mataPelajaran}`, 60, 46);
-    pdf.text(`Kelas/Semester`, 120, 40); pdf.text(`: ${dataToExport.kelasSemester}`, 155, 40);
-    pdf.text(`Alokasi Waktu`, 120, 46); pdf.text(`: ${dataToExport.alokasiWaktu}`, 155, 46);
-    
-    pdf.line(20, 52, 190, 52);
+    pdf.setTextColor(30, 41, 59);
 
-    let yPos = 60;
-    const lineHeight = 5;
-    const maxWidth = 170;
+    // Left Column
+    pdf.text('Satuan Pendidikan', 22, yPos + 5);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`: ${schoolSettings.namaSekolah || 'Sekolah'}`, 54, yPos + 5);
 
-    const printSection = (title: string, content: string) => {
-      if (yPos > 260) {
-        pdf.addPage();
-        yPos = 20;
-      }
+    pdf.setFont("helvetica", "bold");
+    pdf.text('Mata Pelajaran', 22, yPos + 10.5);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`: ${dataToExport.mataPelajaran || '-'}`, 54, yPos + 10.5);
+
+    pdf.setFont("helvetica", "bold");
+    pdf.text('Materi Pokok', 22, yPos + 16);
+    pdf.setFont("helvetica", "normal");
+    const cleanMateri = (dataToExport.materi || '-');
+    const materiLines = pdf.splitTextToSize(`: ${cleanMateri}`, 64);
+    pdf.text(materiLines[0], 54, yPos + 16);
+
+    // Right Column
+    pdf.setFont("helvetica", "bold");
+    pdf.text('Kelas / Semester', 120, yPos + 5);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`: ${dataToExport.kelasSemester || '-'}`, 150, yPos + 5);
+
+    pdf.setFont("helvetica", "bold");
+    pdf.text('Alokasi Waktu', 120, yPos + 10.5);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`: ${dataToExport.alokasiWaktu || '2 x 45 Menit (1 Pertemuan)'}`, 150, yPos + 10.5);
+
+    pdf.setFont("helvetica", "bold");
+    pdf.text('Tahun Ajaran', 120, yPos + 16);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`: ${new Date().getFullYear()} / ${new Date().getFullYear() + 1}`, 150, yPos + 16);
+
+    yPos += 27;
+
+    // Helper for Section Headers
+    const printSectionHeader = (title: string) => {
+      checkPageBreak(12);
+      pdf.setFillColor(241, 245, 249);
+      pdf.setDrawColor(203, 213, 225);
+      pdf.setLineWidth(0.2);
+      pdf.roundedRect(18, yPos - 3.8, 174, 6.8, 1, 1, 'FD');
       pdf.setFont("helvetica", "bold");
-      pdf.text(title, 20, yPos);
-      yPos += lineHeight;
-      
-      pdf.setFont("helvetica", "normal");
-      const lines = pdf.splitTextToSize(content || '-', maxWidth);
-      
-      if (yPos + (lines.length * lineHeight) > 280) {
-        pdf.addPage();
-        yPos = 20;
-      }
-      
-      pdf.text(lines, 20, yPos);
-      yPos += (lines.length * lineHeight) + 8;
+      pdf.setFontSize(9.5);
+      pdf.setTextColor(15, 23, 42);
+      pdf.text(title, 21, yPos + 1);
+      yPos += 7;
     };
 
-    const printQuestionsSection = (title: string, content: string) => {
-      if (yPos > 255) {
-        pdf.addPage();
-        yPos = 20;
-      }
-      pdf.setFont("helvetica", "bold");
-      pdf.text(title, 20, yPos);
-      yPos += lineHeight + 2;
+    // Helper for regular Multiline Sections
+    const printRegularSection = (title: string, content: string) => {
+      printSectionHeader(title);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(51, 65, 85);
 
-      const parsed = parsePTSQuestions(content);
-      if (parsed.length > 0) {
-        for (const q of parsed) {
-          if (yPos > 260) {
-            pdf.addPage();
-            yPos = 20;
+      const paragraphs = (content || '-').split('\n');
+      for (const p of paragraphs) {
+        const trimmed = p.trim();
+        if (!trimmed) {
+          yPos += 1.5;
+          continue;
+        }
+        const lines = pdf.splitTextToSize(trimmed, 170);
+        for (const line of lines) {
+          checkPageBreak(5);
+          pdf.text(line, 20, yPos);
+          yPos += 4.6;
+        }
+      }
+      yPos += 4;
+    };
+
+    // 3. SECTIONS
+    printRegularSection('A. TUJUAN PEMBELAJARAN', dataToExport.tujuanPembelajaran);
+    printRegularSection('B. MATERI PEMBELAJARAN', dataToExport.materi);
+
+    // Langkah Kegiatan
+    printSectionHeader('C. LANGKAH-LANGKAH KEGIATAN PEMBELAJARAN');
+    
+    // 1. Pendahuluan
+    checkPageBreak(10);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('1. Kegiatan Pendahuluan (Awal Pembelajaran)', 20, yPos);
+    yPos += 5;
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(51, 65, 85);
+    const pendahuluanLines = pdf.splitTextToSize(dataToExport.pendahuluan || '-', 166);
+    for (const l of pendahuluanLines) {
+      checkPageBreak(5);
+      pdf.text(l, 24, yPos);
+      yPos += 4.5;
+    }
+    yPos += 2.5;
+
+    // 2. Inti
+    checkPageBreak(10);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('2. Kegiatan Inti (Eksplorasi, Elaborasi & Konfirmasi)', 20, yPos);
+    yPos += 5;
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(51, 65, 85);
+    const intiLines = pdf.splitTextToSize(dataToExport.kegiatanInti || '-', 166);
+    for (const l of intiLines) {
+      checkPageBreak(5);
+      pdf.text(l, 24, yPos);
+      yPos += 4.5;
+    }
+    yPos += 2.5;
+
+    // 3. Penutup
+    checkPageBreak(10);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('3. Kegiatan Penutup (Refleksi, Evaluasi & Tindak Lanjut)', 20, yPos);
+    yPos += 5;
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(51, 65, 85);
+    const penutupLines = pdf.splitTextToSize(dataToExport.penutup || '-', 166);
+    for (const l of penutupLines) {
+      checkPageBreak(5);
+      pdf.text(l, 24, yPos);
+      yPos += 4.5;
+    }
+    yPos += 4;
+
+    // 4. LATIHAN SOAL & ASESMEN (STANDAR PTS) - REFINED
+    printSectionHeader('D. LATIHAN SOAL & ASESMEN (STANDAR ASESMEN PTS)');
+    
+    const parsedQuestions = parsePTSQuestions(dataToExport.latihanSoal);
+
+    if (parsedQuestions.length > 0) {
+      for (const q of parsedQuestions) {
+        // Prevent awkward question breaking
+        checkPageBreak(22);
+
+        // Question Number & Text with proper hanging indent
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8.5);
+        pdf.setTextColor(15, 23, 42);
+        pdf.text(`${q.number}.`, 20, yPos);
+
+        const qTextLines = pdf.splitTextToSize(q.question, 163);
+        for (let i = 0; i < qTextLines.length; i++) {
+          if (i > 0) checkPageBreak(5);
+          pdf.text(qTextLines[i], 27, yPos);
+          yPos += 4.6;
+        }
+        yPos += 1;
+
+        // Options (A, B, C, D)
+        if (q.options && q.options.length > 0) {
+          pdf.setFontSize(8.5);
+          for (const opt of q.options) {
+            checkPageBreak(6);
+            pdf.setFont("helvetica", "bold");
+            pdf.setTextColor(67, 56, 202);
+            pdf.text(`${opt.label}.`, 28, yPos);
+
+            pdf.setFont("helvetica", "normal");
+            pdf.setTextColor(51, 65, 85);
+            const optLines = pdf.splitTextToSize(opt.text, 153);
+            for (let j = 0; j < optLines.length; j++) {
+              if (j > 0) checkPageBreak(4.5);
+              pdf.text(optLines[j], 34, yPos);
+              yPos += 4.4;
+            }
+            yPos += 0.8;
           }
+        }
+
+        // Answer Key & Pembahasan Box
+        if (q.answerKey) {
+          checkPageBreak(12);
+          pdf.setFontSize(8);
+          const keyLines = pdf.splitTextToSize(q.answerKey, 152);
+          const keyBoxHeight = (keyLines.length * 4.2) + 6.5;
+
+          pdf.setFillColor(248, 250, 252);
+          pdf.setDrawColor(203, 213, 225);
+          pdf.setLineWidth(0.2);
+          pdf.roundedRect(26, yPos, 164, keyBoxHeight, 1.5, 1.5, 'FD');
 
           pdf.setFont("helvetica", "bold");
-          const qTextLines = pdf.splitTextToSize(`${q.number}. ${q.question}`, maxWidth);
-          pdf.text(qTextLines, 20, yPos);
-          yPos += (qTextLines.length * lineHeight) + 1;
+          pdf.setTextColor(13, 148, 136); // teal
+          pdf.text('Kunci Jawaban & Pembahasan:', 29, yPos + 4.2);
 
-          if (q.options && q.options.length > 0) {
-            pdf.setFont("helvetica", "normal");
-            for (const opt of q.options) {
-              if (yPos > 275) {
-                pdf.addPage();
-                yPos = 20;
-              }
-              const optLines = pdf.splitTextToSize(`${opt.label}. ${opt.text}`, maxWidth - 10);
-              pdf.text(optLines, 28, yPos);
-              yPos += (optLines.length * lineHeight);
-            }
+          pdf.setFont("helvetica", "italic");
+          pdf.setTextColor(51, 65, 85);
+          let currentKeyY = yPos + 8.4;
+          for (const kl of keyLines) {
+            pdf.text(kl, 29, currentKeyY);
+            currentKeyY += 4.2;
           }
-
-          if (q.answerKey) {
-            if (yPos > 275) {
-              pdf.addPage();
-              yPos = 20;
-            }
-            pdf.setFont("helvetica", "italic");
-            const keyLines = pdf.splitTextToSize(`* Kunci Jawaban: ${q.answerKey}`, maxWidth - 10);
-            pdf.text(keyLines, 28, yPos);
-            yPos += (keyLines.length * lineHeight) + 1;
-          }
-
-          yPos += 3;
+          yPos += keyBoxHeight + 3.5;
         }
-        yPos += 5;
-      } else {
-        pdf.setFont("helvetica", "normal");
-        const lines = pdf.splitTextToSize(content || '-', maxWidth);
-        if (yPos + (lines.length * lineHeight) > 280) {
-          pdf.addPage();
-          yPos = 20;
-        }
-        pdf.text(lines, 20, yPos);
-        yPos += (lines.length * lineHeight) + 8;
+
+        // Question Divider
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.2);
+        pdf.line(20, yPos, 190, yPos);
+        yPos += 3.5;
       }
-    };
-
-    printSection('A. Tujuan Pembelajaran', dataToExport.tujuanPembelajaran);
-    printSection('B. Materi Pembelajaran', dataToExport.materi);
-    printSection('C. Kegiatan Pendahuluan', dataToExport.pendahuluan);
-    printSection('D. Kegiatan Inti', dataToExport.kegiatanInti);
-    printSection('E. Kegiatan Penutup', dataToExport.penutup);
-    printQuestionsSection('F. Latihan Soal & Kunci Jawaban (Format PTS)', dataToExport.latihanSoal);
-    printSection('G. Penilaian Pembelajaran', dataToExport.penilaian);
-
-    // Tanda Tangan
-    if (yPos > 230) {
-      pdf.addPage();
-      yPos = 20;
+      yPos += 2;
     } else {
-      yPos += 10;
+      // Fallback for plain text
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(51, 65, 85);
+      const lines = pdf.splitTextToSize(dataToExport.latihanSoal || '-', 170);
+      for (const line of lines) {
+        checkPageBreak(5);
+        pdf.text(line, 20, yPos);
+        yPos += 4.6;
+      }
+      yPos += 4;
     }
 
+    // 5. PENILAIAN PEMBELAJARAN
+    printRegularSection('E. PENILAIAN PEMBELAJARAN (ASESMEN)', dataToExport.penilaian);
+
+    // 6. TANDA TANGAN (SIGNATURE BLOCK)
+    checkPageBreak(40);
+    yPos += 4;
+
+    pdf.setFontSize(9);
     pdf.setFont("helvetica", "normal");
-    pdf.text('Mengetahui,', 40, yPos, { align: 'center' });
-    pdf.text('Kepala Sekolah', 40, yPos + 6, { align: 'center' });
-    
+    pdf.setTextColor(30, 41, 59);
+
+    // Left: Kepala Sekolah
+    pdf.text('Mengetahui,', 45, yPos, { align: 'center' });
+    pdf.text('Kepala Sekolah', 45, yPos + 5, { align: 'center' });
+
     pdf.setFont("helvetica", "bold");
-    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 40, yPos + 25, { align: 'center' });
+    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 45, yPos + 24, { align: 'center' });
     pdf.setFont("helvetica", "normal");
-    
-    if(schoolSettings.nipKepalaSekolah) {
-      pdf.text(`NIP. ${schoolSettings.nipKepalaSekolah}`, 40, yPos + 30, { align: 'center' });
-    } else {
-      pdf.text(`NIP. __________________`, 40, yPos + 30, { align: 'center' });
+    pdf.setFontSize(8);
+    pdf.text(
+      schoolSettings.nipKepalaSekolah ? `NIP. ${schoolSettings.nipKepalaSekolah}` : 'NIP. __________________',
+      45,
+      yPos + 29,
+      { align: 'center' }
+    );
+
+    // Right: Guru Mata Pelajaran
+    pdf.setFontSize(9);
+    const formattedDate = format(new Date(), 'dd MMMM yyyy', { locale: id });
+    pdf.text(`${schoolSettings.namaSekolah || 'Sekolah'}, ${formattedDate}`, 155, yPos, { align: 'center' });
+    pdf.text('Guru Mata Pelajaran', 155, yPos + 5, { align: 'center' });
+
+    pdf.setFont("helvetica", "bold");
+    const teacherName = dataToExport.teacherName || (isAdmin ? '________________________' : (userData?.name || 'Guru Mata Pelajaran'));
+    pdf.text(`${teacherName}`, 155, yPos + 24, { align: 'center' });
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.text('NIP. __________________', 155, yPos + 29, { align: 'center' });
+
+    // 7. RUNNING HEADERS & FOOTERS (ALL PAGES)
+    const totalPages = (pdf as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      pdf.setPage(i);
+      pdf.setFontSize(7.5);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(148, 163, 184);
+
+      if (i > 1) {
+        pdf.text(`E-RPP: ${cleanMapel} - ${cleanKelas}`, 18, 11);
+        pdf.text(`${schoolSettings.namaSekolah || 'Sekolah'}`, 192, 11, { align: 'right' });
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.2);
+        pdf.line(18, 13, 192, 13);
+      }
+
+      pdf.text(`Dokumen E-RPP Digital Kemendikbudristek • Dicetak pada ${format(new Date(), 'dd/MM/yyyy HH:mm')} WIB`, 18, 288);
+      pdf.text(`Halaman ${i} dari ${totalPages}`, 192, 288, { align: 'right' });
     }
 
-    pdf.text(`${schoolSettings.namaSekolah || 'Sekolah'}, ${format(new Date(), 'dd MMMM yyyy', { locale: id })}`, 160, yPos, { align: 'center' });
-    pdf.text('Guru Mata Pelajaran', 160, yPos + 6, { align: 'center' });
-    
-    pdf.setFont("helvetica", "bold");
-    const teacherName = dataToExport.teacherName || (isAdmin ? '________________________' : (userData?.name || '________________________'));
-    pdf.text(`${teacherName}`, 160, yPos + 25, { align: 'center' });
-    pdf.setFont("helvetica", "normal");
-    pdf.text(`NIP. __________________`, 160, yPos + 30, { align: 'center' });
+    // 8. CROSS-DEVICE EXPORT & MODAL PREVIEW
+    try {
+      const blob = pdf.output('blob');
+      const blobUrl = URL.createObjectURL(blob);
+      setPdfPreviewUrl(blobUrl);
+      setPdfPreviewFilename(safeFilename);
 
-    pdf.save(`RPP_${dataToExport.mataPelajaran.replace(/\s+/g, '_')}_${dataToExport.kelasSemester.split(' / ')[0].replace(/\s+/g, '_')}.pdf`);
+      // Trigger standard download
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = safeFilename;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 2000);
+
+      showToast('PDF E-RPP berhasil disusun dan siap diunduh / dicetak!', 'success');
+    } catch (e: any) {
+      console.warn('Fallback to pdf.save:', e);
+      pdf.save(safeFilename);
+      showToast('Mengunduh dokumen PDF E-RPP...', 'success');
+    }
   };
 
   return (
@@ -552,14 +816,26 @@ export default function LessonPlansGuru() {
                       <div className="bg-indigo-100 text-indigo-700 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider">
                         {rpp.kelasSemester}
                       </div>
-                      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => exportPDF(rpp)} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Unduh PDF">
+                      <div className="flex items-center space-x-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => exportPDF(rpp)} 
+                          className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" 
+                          title="Unduh PDF E-RPP"
+                        >
                           <FileDown className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleOpenForm(rpp)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Edit">
+                        <button 
+                          onClick={() => handleOpenForm(rpp)} 
+                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" 
+                          title="Edit E-RPP"
+                        >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDelete(rpp.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Hapus">
+                        <button 
+                          onClick={() => setDeleteModalId(rpp.id)} 
+                          className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" 
+                          title="Hapus E-RPP"
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -667,7 +943,12 @@ export default function LessonPlansGuru() {
                 </div>
 
                 <div className="mt-4">
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Materi yang Disampaikan <span className="text-red-500">*</span></label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-sm font-bold text-slate-700">
+                      Materi yang Disampaikan <span className="text-red-500">*</span>
+                    </label>
+                    <span className="text-xs text-slate-400 font-normal">Contoh topik dapat dipilih di bawah</span>
+                  </div>
                   <textarea
                     rows={2}
                     placeholder="Contoh: Operasi Hitung Campuran pada Pecahan"
@@ -675,6 +956,29 @@ export default function LessonPlansGuru() {
                     onChange={(e) => setMateri(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
                   />
+                  
+                  {/* Quick Topics Helper Chips */}
+                  <div className="mt-2.5">
+                    <span className="text-[11px] font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">
+                      ⚡ Rekomendasi Topik Cepat (Ketuk untuk Mengisi):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {QUICK_TOPICS.map((topic, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            setMataPelajaran(topic.mapel);
+                            setMateri(topic.materi);
+                            showToast(`Topik "${topic.mapel}" berhasil diterapkan!`, 'success');
+                          }}
+                          className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 rounded-lg text-slate-600 transition-colors font-medium text-left"
+                        >
+                          {topic.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 
                 {/* AI Configuration Box */}
@@ -844,17 +1148,28 @@ export default function LessonPlansGuru() {
                               <div className="text-center py-10 bg-slate-50/80 rounded-2xl border border-dashed border-slate-200 p-6">
                                 <ListOrdered className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                                 <p className="text-slate-700 font-bold text-sm mb-1">Belum Ada Soal Latihan</p>
-                                <p className="text-slate-400 text-xs max-w-md mx-auto mb-4">
-                                  Klik tombol <strong className="text-orange-600 font-extrabold">Isi Otomatis (AI)</strong> di atas untuk membuat paket soal PTS rapi secara instan, atau beralih ke tab <strong>Edit Teks</strong> untuk mengetik manual.
+                                <p className="text-slate-400 text-xs max-w-md mx-auto mb-5">
+                                  Klik tombol <strong className="text-orange-600 font-extrabold">Isi Otomatis (AI)</strong> untuk membuat paket soal PTS rapi secara instan, atau ketik soal secara manual.
                                 </p>
-                                <button
-                                  type="button"
-                                  onClick={() => setQuestionTab('raw')}
-                                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 shadow-sm"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                  Ketik / Tempel Soal
-                                </button>
+                                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                                  <button
+                                    type="button"
+                                    onClick={handleGenerateTemplate}
+                                    disabled={isGenerating}
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <span>{isGenerating ? 'Menyusun Draft...' : 'Buat Soal dengan AI'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setQuestionTab('raw')}
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 shadow-sm transition-colors"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <span>Ketik / Tempel Soal</span>
+                                  </button>
+                                </div>
                               </div>
                             );
                           }
@@ -956,6 +1271,146 @@ export default function LessonPlansGuru() {
             </div>
           </div>
         </motion.div>
+      )}
+
+      {/* PDF Preview & Action Modal */}
+      {pdfPreviewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between gap-3 bg-slate-50">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-800 truncate">
+                    Pratinjau Dokumen E-RPP
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium truncate">
+                    {pdfPreviewFilename || 'RPP_Merdeka_Belajar.pdf'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.open(pdfPreviewUrl, '_blank')}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-colors border border-indigo-200"
+                  title="Buka di tab baru untuk mencetak langsung"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Cetak / Tab Baru</span>
+                </button>
+                <a
+                  href={pdfPreviewUrl}
+                  download={pdfPreviewFilename}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
+                  title="Unduh file PDF"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  <span>Unduh PDF</span>
+                </a>
+                <button
+                  onClick={() => setPdfPreviewUrl(null)}
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
+                  title="Tutup Pratinjau"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-100/50">
+              {/* Desktop Iframe */}
+              <div className="hidden md:block w-full h-[65vh] bg-white rounded-2xl shadow-inner border border-slate-200 overflow-hidden">
+                <iframe
+                  src={pdfPreviewUrl}
+                  title="Pratinjau PDF E-RPP"
+                  className="w-full h-full border-none"
+                />
+              </div>
+
+              {/* Mobile Card */}
+              <div className="md:hidden bg-white p-6 rounded-2xl border border-slate-200 text-center space-y-4 shadow-sm">
+                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-800 text-base">Dokumen PDF E-RPP Siap!</h4>
+                  <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
+                    Dokumen telah diformat rapi dengan kop standar, penomoran soal PTS simetris, dan tanda tangan resmi.
+                  </p>
+                </div>
+                <div className="pt-2 flex flex-col gap-2.5">
+                  <a
+                    href={pdfPreviewUrl}
+                    download={pdfPreviewFilename}
+                    className="w-full inline-flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    Simpan / Unduh ke Perangkat
+                  </a>
+                  <button
+                    onClick={() => window.open(pdfPreviewUrl, '_blank')}
+                    className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Buka di Tab Baru / Cetak
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 sm:p-4 border-t border-slate-100 bg-white flex items-center justify-between text-xs text-slate-500 font-medium">
+              <span>Sesuai Standar Kemendikbudristek No. 14/2019</span>
+              <button
+                onClick={() => setPdfPreviewUrl(null)}
+                className="text-slate-600 hover:text-slate-900 font-bold px-3 py-1.5 rounded-lg hover:bg-slate-100"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-base">Hapus E-RPP Ini?</h3>
+                <p className="text-xs text-slate-500 font-medium">Tindakan ini permanen dan tidak dapat dibatalkan.</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+              Dokumen RPP yang dihapus akan dihilangkan dari database sekolah dan tidak dapat dipulihkan kembali.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteModalId(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
+              >
+                Ya, Hapus Sekarang
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast Notification (SnackBar) */}
