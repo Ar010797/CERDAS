@@ -131,22 +131,22 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Dashboard Admin</h1>
-        <p className="text-sm text-slate-500 mt-1">Pantau seluruh aktivitas dan ringkasan sekolah.</p>
+        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Dashboard Admin</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Pantau seluruh aktivitas dan ringkasan sekolah.</p>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {statCards.map((stat, idx) => (
-          <div key={idx} className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center">
+          <div key={idx} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center transition-colors">
             <div className={`p-4 rounded-xl text-white ${stat.color} shadow-sm mr-5`}>
               <stat.icon className="w-8 h-8" />
             </div>
             <div>
-              <p className="text-slate-500 text-sm font-medium">{stat.title}</p>
+              <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">{stat.title}</p>
               {loading ? (
-                <div className="h-8 w-16 bg-slate-100 animate-pulse rounded mt-1" />
+                <div className="h-8 w-16 bg-slate-100 dark:bg-slate-800 animate-pulse rounded mt-1" />
               ) : (
-                <h3 className="text-3xl font-bold text-slate-800 mt-1">{stat.value}</h3>
+                <h3 className="text-3xl font-bold text-slate-800 dark:text-white mt-1">{stat.value}</h3>
               )}
             </div>
           </div>
@@ -160,22 +160,22 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Log Aktivitas Guru */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-[500px]">
-          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50 rounded-t-2xl shrink-0">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col h-[500px] transition-colors">
+          <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50 dark:bg-slate-800/40 rounded-t-2xl shrink-0">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+              <div className="p-2 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-lg">
                 <Activity className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-800">Monitoring Aktivitas Guru Hari Ini</h3>
-                <p className="text-xs text-slate-500">{format(new Date(), 'EEEE, d MMMM yyyy', { locale: id })}</p>
+                <h3 className="font-bold text-slate-800 dark:text-white">Monitoring Aktivitas Guru Hari Ini</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{format(new Date(), 'EEEE, d MMMM yyyy', { locale: id })}</p>
               </div>
             </div>
             
             <select
               value={selectedClass}
               onChange={(e) => setSelectedClass(e.target.value)}
-              className="px-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium text-slate-700"
+              className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium text-slate-700 dark:text-slate-200"
             >
               {classList.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -183,33 +183,33 @@ export default function AdminDashboard() {
           
           <div className="p-0 flex-1 overflow-y-auto">
             {logs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-3">
+              <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 space-y-3">
                 <Clock className="w-10 h-10 opacity-20" />
                 <p className="text-sm">Belum ada aktivitas guru tercatat hari ini.</p>
               </div>
             ) : (
               <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-white shadow-sm z-10">
-                  <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500">
+                <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-sm z-10">
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     <th className="px-5 py-3 font-semibold">Waktu</th>
                     <th className="px-5 py-3 font-semibold">Nama Guru</th>
                     <th className="px-5 py-3 font-semibold">Kelas</th>
                     <th className="px-5 py-3 font-semibold">Aktivitas Terakhir</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {logs.map(log => (
-                    <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-5 py-3 text-xs text-slate-500 whitespace-nowrap font-medium">
+                    <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="px-5 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap font-medium">
                         {log.timestamp ? format(new Date(log.timestamp), 'd MMM yyyy, HH:mm', { locale: id }) + ' WIB' : '-'}
                       </td>
-                      <td className="px-5 py-3 text-sm font-medium text-slate-700">{log.guruName}</td>
-                      <td className="px-5 py-3 text-sm text-slate-600">
-                        <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs font-medium border border-indigo-100/50">
+                      <td className="px-5 py-3 text-sm font-medium text-slate-700 dark:text-slate-200">{log.guruName}</td>
+                      <td className="px-5 py-3 text-sm text-slate-600 dark:text-slate-300">
+                        <span className="bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded text-xs font-medium border border-indigo-100/50 dark:border-indigo-800/50">
                           {log.className}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-sm text-slate-600">{log.activity}</td>
+                      <td className="px-5 py-3 text-sm text-slate-600 dark:text-slate-300">{log.activity}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -219,20 +219,20 @@ export default function AdminDashboard() {
         </div>
 
         {/* Danger Zone Global */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-100 relative overflow-hidden h-fit">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -z-0 opacity-50" />
-          <h3 className="text-lg font-bold text-red-600 mb-4 flex items-center space-x-2 relative z-10">
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-red-100 dark:border-red-950/60 relative overflow-hidden h-fit transition-colors">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 dark:bg-red-950/20 rounded-bl-full -z-0 opacity-50" />
+          <h3 className="text-lg font-bold text-red-600 dark:text-red-400 mb-4 flex items-center space-x-2 relative z-10">
             <AlertTriangle className="w-5 h-5" />
             <span>Danger Zone</span>
           </h3>
-          <p className="text-sm text-slate-600 mb-6 relative z-10 leading-relaxed">
+          <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 relative z-10 leading-relaxed">
             Menghapus <strong>SELURUH DATA</strong> sekolah termasuk semua data Siswa, Nilai Akademik, Absensi, Pengaturan Kelas, dan Log Aktivitas dari Kelas 1-9.
             <br/><br/>
             Gunakan fitur ini hanya saat pergantian tahun ajaran baru!
           </p>
           <button
             onClick={() => setIsResetModalOpen(true)}
-            className="w-full flex items-center justify-center space-x-2 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-3 rounded-xl transition-colors font-medium text-sm relative z-10"
+            className="w-full flex items-center justify-center space-x-2 bg-red-100 dark:bg-red-950/50 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl transition-colors font-medium text-sm relative z-10"
           >
             <Trash2 className="w-5 h-5" />
             <span>Hapus Seluruh Data Sekolah</span>
@@ -248,25 +248,25 @@ export default function AdminDashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           >
             <motion.div 
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl relative overflow-hidden"
+              className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-xl relative overflow-hidden border border-slate-100 dark:border-slate-800"
             >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -z-0 opacity-50" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 dark:bg-red-950/20 rounded-bl-full -z-0 opacity-50" />
               <div className="relative z-10">
-                <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-5">
+                <div className="w-12 h-12 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-2xl flex items-center justify-center mb-5">
                   <AlertTriangle className="w-6 h-6" />
                 </div>
                 
-                <h2 className="text-xl font-bold text-slate-800 mb-2">Apakah Anda Yakin?</h2>
-                <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Apakah Anda Yakin?</h2>
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">
                   Tindakan ini akan <strong>MENGHAPUS SELURUH DATA SEKOLAH</strong> secara permanen (Siswa, Nilai, Absensi, Pengaturan, Log, Soal, Finansial). Data yang dihapus tidak dapat dikembalikan.
                   <br/><br/>
-                  Ketik <strong className="text-red-600 bg-red-50 px-2 py-1 rounded">RESET-TOTAL</strong> untuk mengonfirmasi.
+                  Ketik <strong className="text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/60 px-2 py-1 rounded">RESET-TOTAL</strong> untuk mengonfirmasi.
                 </p>
                 
                 <input
@@ -274,7 +274,7 @@ export default function AdminDashboard() {
                   placeholder="Ketik RESET-TOTAL"
                   value={resetConfirmationText}
                   onChange={e => setResetConfirmationText(e.target.value.toUpperCase())}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none mb-6 font-medium text-slate-800 text-center uppercase"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none mb-6 font-medium text-slate-800 dark:text-white text-center uppercase"
                 />
                 
                 <div className="flex gap-3">
@@ -283,7 +283,7 @@ export default function AdminDashboard() {
                       setIsResetModalOpen(false);
                       setResetConfirmationText('');
                     }}
-                    className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-sm transition-colors"
+                    className="flex-1 py-3 px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-medium text-sm transition-colors"
                   >
                     Batal
                   </button>

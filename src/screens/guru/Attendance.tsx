@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Save, Calendar, FileDown, Filter, MessageSquare } from 'lucide-react';
+import { Save, Calendar, FileDown, Filter, MessageSquare, CheckCircle2, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import jsPDF from 'jspdf';
@@ -32,7 +32,13 @@ export default function AttendanceGuru() {
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   useEffect(() => {
     const fetchStudents = async () => {
@@ -89,10 +95,10 @@ export default function AttendanceGuru() {
         await logActivity(userData.name, userData.assigned_class || 'Admin', `Mengisi Absen harian (${todayStr})`);
       }
       
-      alert('Absensi hari ini berhasil disimpan!');
-    } catch (error) {
+      showToast('Absensi hari ini berhasil disimpan!', 'success');
+    } catch (error: any) {
       console.error(error);
-      alert('Gagal menyimpan absensi.');
+      showToast('Gagal menyimpan absensi: ' + (error?.message || 'Terjadi kesalahan.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -143,18 +149,32 @@ export default function AttendanceGuru() {
   };
 
   const statusColors = {
-    'Hadir': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    'Izin': 'bg-blue-50 text-blue-700 border-blue-200',
-    'Sakit': 'bg-amber-50 text-amber-700 border-amber-200',
-    'Alpa': 'bg-red-50 text-red-700 border-red-200',
+    'Hadir': 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+    'Izin': 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+    'Sakit': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    'Alpa': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5">
+          <div className={`flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-xl border text-sm font-semibold ${
+            toast.type === 'success' 
+              ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-500/20' 
+              : 'bg-red-600 text-white border-red-500 shadow-red-500/20'
+          }`}>
+            {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Absensi Harian</h1>
-          <div className="flex items-center space-x-2 text-slate-500 mt-1">
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Absensi Harian</h1>
+          <div className="flex items-center space-x-2 text-slate-500 dark:text-slate-400 mt-1">
             <Calendar className="w-4 h-4" />
             <span className="text-sm">{format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })}</span>
           </div>
@@ -162,20 +182,20 @@ export default function AttendanceGuru() {
         
         <div className="flex items-center space-x-3 flex-wrap sm:flex-nowrap gap-y-2">
            {isAdmin && (
-               <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm mr-2">
-                 <Filter className="w-4 h-4 text-slate-500" />
+               <div className="flex items-center space-x-2 bg-white dark:bg-slate-850 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm mr-2 transition-colors">
+                 <Filter className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                  <select
                     value={selectedClass}
                     onChange={(e) => setSelectedClass(e.target.value)}
-                    className="bg-transparent text-sm font-semibold text-slate-700 outline-none"
+                    className="bg-transparent text-sm font-semibold text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
                   >
-                    {CLASSES_LIST.map(c => <option key={c} value={c}>{c}</option>)}
+                    {CLASSES_LIST.map(c => <option key={c} value={c} className="dark:bg-slate-800 dark:text-white">{c}</option>)}
                   </select>
                </div>
            )}
           <button
             onClick={handleExportRekap}
-            className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm"
+            className="flex items-center space-x-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-4 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm"
           >
             <FileDown className="w-4 h-4" />
             <span className="hidden sm:inline">Cetak Rekap</span>
@@ -183,7 +203,7 @@ export default function AttendanceGuru() {
           <button
             onClick={handleSaveMassal}
             disabled={saving}
-            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm shadow-indigo-200"
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm shadow-indigo-200 dark:shadow-none"
           >
             {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
             <span className="hidden sm:inline">{saving ? 'Menyimpan...' : 'Simpan Absen Massal'}</span>
@@ -191,36 +211,36 @@ export default function AttendanceGuru() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white dark:bg-slate-850 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden transition-colors">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[600px]">
             <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100 text-sm text-slate-500">
+              <tr className="bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
                 <th className="px-6 py-4 font-medium">Siswa</th>
                 <th className="px-6 py-4 font-medium">Status Kehadiran</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={2} className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan={2} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                     Memuat data...
                   </td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={2} className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan={2} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                     Belum ada siswa di {selectedClass}.
                   </td>
                 </tr>
               ) : (
                 students.map((student) => (
-                  <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
+                  <tr key={student.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-semibold text-slate-800">{student.name}</p>
-                          <p className="text-xs text-slate-400">NISN: {student.nisn}</p>
+                          <p className="font-semibold text-slate-800 dark:text-white">{student.name}</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500">NISN: {student.nisn}</p>
                         </div>
                         <button
                           onClick={() => {
@@ -229,10 +249,10 @@ export default function AttendanceGuru() {
                               const waLink = `https://wa.me/${student.parentPhone.replace(/\D/g, '')}?text=Halo%20Bapak/Ibu%20Wali%20Murid%20dari%20${encodeURIComponent(student.name)}.%20Menginformasikan%20bahwa%20hari%20ini%20${encodeURIComponent(student.name)}%20berstatus%20${status}.`;
                               window.open(waLink, '_blank');
                             } else {
-                              alert('Nomor HP Wali Murid belum diatur untuk siswa ini');
+                              showToast('Nomor HP Wali Murid belum diatur untuk siswa ini', 'error');
                             }
                           }}
-                          className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors ml-2"
+                          className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-950/50 rounded-lg transition-colors ml-2"
                           title="Kirim Info via WA"
                         >
                           <MessageSquare className="w-4 h-4" />
@@ -248,7 +268,7 @@ export default function AttendanceGuru() {
                             className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
                               attendance[student.id] === status 
                                 ? statusColors[status] 
-                                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
                             }`}
                           >
                             {status}

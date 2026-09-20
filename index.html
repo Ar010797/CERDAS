@@ -9,6 +9,22 @@
     <meta property="og:description" content="Catatan Edukasi, Rapor, & Data Administrasi Sekolah" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          var key = 'cerdas_theme';
+          var stored = localStorage.getItem(key);
+          var isDark = stored === 'dark' || (!stored && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch (e) {}
+      })();
+    </script>
     <style>
       #app-preloader {
         position: fixed;
@@ -22,6 +38,10 @@
         color: #1e293b;
         z-index: 9999;
       }
+      .dark #app-preloader {
+        background-color: #020617;
+        color: #f8fafc;
+      }
       .preloader-spinner {
         width: 36px;
         height: 36px;
@@ -30,12 +50,16 @@
         border-radius: 50%;
         animation: preloader-spin 0.8s linear infinite;
       }
+      .dark .preloader-spinner {
+        border-color: #1e293b;
+        border-top-color: #6366f1;
+      }
       @keyframes preloader-spin {
         to { transform: rotate(360deg); }
       }
     </style>
   </head>
-  <body class="bg-slate-50 antialiased selection:bg-indigo-500 selection:text-white">
+  <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-500 selection:text-white transition-colors duration-150">
     <div id="root">
       <div id="app-preloader">
         <div class="preloader-spinner"></div>

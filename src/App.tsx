@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import Login from './screens/Login';
@@ -23,9 +24,9 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
   const { userData, loading } = useAuth();
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <div className="w-8 h-8 border-3 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3" />
-        <span className="text-xs text-slate-500 font-medium">Memverifikasi akses...</span>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 transition-colors">
+        <div className="w-8 h-8 border-3 border-indigo-200 dark:border-indigo-900 border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin mb-3" />
+        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Memverifikasi akses...</span>
       </div>
     );
   }
@@ -38,9 +39,9 @@ const RootRedirect = () => {
   const { userData, loading } = useAuth();
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <div className="w-8 h-8 border-3 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3" />
-        <span className="text-xs text-slate-500 font-medium">Menghubungkan ke sistem...</span>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 transition-colors">
+        <div className="w-8 h-8 border-3 border-indigo-200 dark:border-indigo-900 border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin mb-3" />
+        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Menghubungkan ke sistem...</span>
       </div>
     );
   }
@@ -54,62 +55,64 @@ const RootRedirect = () => {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<RootRedirect />} />
-            <Route path="/login" element={<Login />} />
-            
-            <Route path="/admin" element={
-              <ProtectedRoute allowedRoles={['Admin']}>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Navigate to="dashboard" replace />} />
-              <Route path="dashboard" element={<AdminDashboard />} />
-              <Route path="users" element={<UsersAdmin />} />
-              <Route path="students" element={<StudentsAdmin />} />
-              <Route path="attendance" element={<AttendanceGuru />} />
-              <Route path="grades" element={<GradesGuru />} />
-              <Route path="schedules" element={<SchedulesScreen />} />
-              <Route path="lesson-plans" element={<LessonPlansGuru />} />
-              <Route path="question-bank" element={<QuestionBankGuru />} />
-              <Route path="finance" element={<FinanceGuru />} />
-              <Route path="academic-years" element={<AcademicYearsAdmin />} />
-              <Route path="announcements" element={<AnnouncementsAdmin />} />
-            </Route>
+      <ThemeProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<RootRedirect />} />
+              <Route path="/login" element={<Login />} />
+              
+              <Route path="/admin" element={
+                <ProtectedRoute allowedRoles={['Admin']}>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }>
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<AdminDashboard />} />
+                <Route path="users" element={<UsersAdmin />} />
+                <Route path="students" element={<StudentsAdmin />} />
+                <Route path="attendance" element={<AttendanceGuru />} />
+                <Route path="grades" element={<GradesGuru />} />
+                <Route path="schedules" element={<SchedulesScreen />} />
+                <Route path="lesson-plans" element={<LessonPlansGuru />} />
+                <Route path="question-bank" element={<QuestionBankGuru />} />
+                <Route path="finance" element={<FinanceGuru />} />
+                <Route path="academic-years" element={<AcademicYearsAdmin />} />
+                <Route path="announcements" element={<AnnouncementsAdmin />} />
+              </Route>
 
-            <Route path="/guru" element={
-              <ProtectedRoute allowedRoles={['Guru']}>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Navigate to="dashboard" replace />} />
-              <Route path="dashboard" element={<GuruDashboard />} />
-              <Route path="students" element={<StudentsAdmin />} />
-              <Route path="attendance" element={<AttendanceGuru />} />
-              <Route path="grades" element={<GradesGuru />} />
-              <Route path="schedules" element={<SchedulesScreen />} />
-              <Route path="lesson-plans" element={<LessonPlansGuru />} />
-              <Route path="question-bank" element={<QuestionBankGuru />} />
-              <Route path="finance" element={<FinanceGuru />} />
-              <Route path="settings" element={<SettingsGuru />} />
-            </Route>
+              <Route path="/guru" element={
+                <ProtectedRoute allowedRoles={['Guru']}>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }>
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<GuruDashboard />} />
+                <Route path="students" element={<StudentsAdmin />} />
+                <Route path="attendance" element={<AttendanceGuru />} />
+                <Route path="grades" element={<GradesGuru />} />
+                <Route path="schedules" element={<SchedulesScreen />} />
+                <Route path="lesson-plans" element={<LessonPlansGuru />} />
+                <Route path="question-bank" element={<QuestionBankGuru />} />
+                <Route path="finance" element={<FinanceGuru />} />
+                <Route path="settings" element={<SettingsGuru />} />
+              </Route>
 
-            <Route path="/walimurid" element={
-              <ProtectedRoute allowedRoles={['Wali Murid']}>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Navigate to="dashboard" replace />} />
-              <Route path="dashboard" element={<WaliMuridDashboard />} />
-            </Route>
+              <Route path="/walimurid" element={
+                <ProtectedRoute allowedRoles={['Wali Murid']}>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }>
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<WaliMuridDashboard />} />
+              </Route>
 
-            {/* Catch-all route to prevent blank page on any unknown path or 404 */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
+              {/* Catch-all route to prevent blank page on any unknown path or 404 */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

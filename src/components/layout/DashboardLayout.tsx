@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -17,11 +18,14 @@ import {
   Bell,
   UserCircle,
   Image as ImageIcon,
-  Wallet
+  Wallet,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 export const DashboardLayout = () => {
   const { userData, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -65,14 +69,28 @@ export const DashboardLayout = () => {
                 userData?.role === 'Guru' ? guruLinks : 
                 waliMuridLinks;
 
+  const currentActiveLink = links.find(l => location.pathname.startsWith(l.to));
+
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex transition-colors duration-200">
       {/* Sidebar Desktop */}
-      <aside className="hidden md:flex flex-col w-64 bg-indigo-900 text-white shadow-xl z-20">
-        <div className="p-6 flex items-center space-x-3 border-b border-indigo-800">
-          <GraduationCap className="w-8 h-8 text-indigo-300" />
-          <span className="text-2xl font-bold tracking-tight">CERDAS</span>
+      <aside className="hidden md:flex flex-col w-64 bg-indigo-900 dark:bg-slate-950 text-white shadow-xl z-20 border-r border-indigo-800/40 dark:border-slate-800/80 transition-colors duration-200">
+        <div className="p-6 flex items-center justify-between border-b border-indigo-800 dark:border-slate-800">
+          <div className="flex items-center space-x-3">
+            <GraduationCap className="w-8 h-8 text-indigo-300 dark:text-indigo-400" />
+            <span className="text-2xl font-bold tracking-tight">CERDAS</span>
+          </div>
+          <button
+            onClick={toggleTheme}
+            id="sidebar-theme-quick-toggle"
+            aria-label={`Ganti ke mode ${theme === 'dark' ? 'terang' : 'gelap'}`}
+            title={`Ganti ke mode ${theme === 'dark' ? 'terang' : 'gelap'}`}
+            className="p-1.5 rounded-lg bg-indigo-800/80 hover:bg-indigo-700 dark:bg-slate-900 dark:hover:bg-slate-800 text-indigo-200 dark:text-amber-300 transition-colors"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-indigo-200" />}
+          </button>
         </div>
+
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
           {links.map((link) => (
             <NavLink
@@ -82,8 +100,8 @@ export const DashboardLayout = () => {
                 cn(
                   "flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ease-in-out",
                   isActive
-                    ? "bg-indigo-600 text-white shadow-md"
-                    : "text-indigo-200 hover:bg-indigo-800 hover:text-white"
+                    ? "bg-indigo-600 dark:bg-indigo-600 text-white shadow-md font-semibold"
+                    : "text-indigo-200 dark:text-slate-400 hover:bg-indigo-800 dark:hover:bg-slate-900 hover:text-white dark:hover:text-slate-100"
                 )
               }
             >
@@ -92,53 +110,119 @@ export const DashboardLayout = () => {
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-indigo-800">
-          <div className="mb-4 px-4">
-            <p className="text-sm text-indigo-300 font-medium">Masuk sebagai</p>
-            <p className="text-white font-semibold truncate">{userData?.name}</p>
-            <p className="text-xs text-indigo-400">{userData?.role}</p>
+
+        <div className="p-4 border-t border-indigo-800 dark:border-slate-800">
+          {/* Theme Switcher Card */}
+          <button
+            onClick={toggleTheme}
+            id="sidebar-theme-toggle"
+            className="flex items-center justify-between px-3.5 py-2.5 mb-3.5 w-full rounded-xl bg-indigo-950/60 hover:bg-indigo-950 dark:bg-slate-900/90 dark:hover:bg-slate-850 text-indigo-200 dark:text-slate-300 border border-indigo-800/60 dark:border-slate-800 transition-colors text-xs font-medium"
+          >
+            <span className="flex items-center gap-2.5">
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-indigo-300" />
+              )}
+              <span>{theme === 'dark' ? 'Mode Gelap' : 'Mode Terang'}</span>
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-indigo-800/80 dark:bg-slate-800 text-[10px] text-white">
+              {theme === 'dark' ? 'Aktif' : 'Aktif'}
+            </span>
+          </button>
+
+          <div className="mb-3 px-2">
+            <p className="text-xs text-indigo-300 dark:text-slate-400 font-medium">Masuk sebagai</p>
+            <p className="text-white font-semibold truncate text-sm">{userData?.name}</p>
+            <p className="text-[11px] text-indigo-400 dark:text-indigo-300">{userData?.role}</p>
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors"
+            className="flex items-center space-x-3 px-4 py-2.5 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 dark:hover:bg-slate-900 hover:text-white transition-colors text-sm"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut className="w-4 h-4" />
             <span className="font-medium">Keluar</span>
           </button>
         </div>
       </aside>
 
       {/* Mobile Header & Sidebar */}
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-indigo-900 text-white z-50 flex items-center justify-between px-4 shadow-md">
-        <div className="flex items-center space-x-3">
+      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-indigo-900 dark:bg-slate-950 text-white z-50 flex items-center justify-between px-4 shadow-md border-b border-indigo-800/40 dark:border-slate-800">
+        <div className="flex items-center space-x-2.5">
           <GraduationCap className="w-6 h-6 text-indigo-300" />
-          <span className="text-xl font-bold">CERDAS</span>
+          <span className="text-lg font-bold">CERDAS</span>
         </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 relative z-50">
-          <AnimatePresence mode="wait">
-            {isMobileMenuOpen ? (
-              <motion.div key="close" initial={{ opacity: 0, rotate: -90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: 90 }} transition={{ duration: 0.2 }}>
-                <X className="w-6 h-6" />
-              </motion.div>
+
+        <div className="flex items-center space-x-1.5">
+          {/* Mobile Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            id="mobile-theme-toggle"
+            aria-label={`Ganti ke mode ${theme === 'dark' ? 'terang' : 'gelap'}`}
+            className="p-2 rounded-xl text-indigo-200 hover:text-white hover:bg-indigo-800 dark:hover:bg-slate-900 transition-colors"
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-5 h-5 text-amber-300" />
             ) : (
-              <motion.div key="menu" initial={{ opacity: 0, rotate: 90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: -90 }} transition={{ duration: 0.2 }}>
-                <Menu className="w-6 h-6" />
-              </motion.div>
+              <Moon className="w-5 h-5 text-indigo-200" />
             )}
-          </AnimatePresence>
-        </button>
+          </button>
+
+          {/* Mobile Hamburger Toggle */}
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            aria-label="Buka Menu"
+            className="p-2 rounded-xl hover:bg-indigo-800 dark:hover:bg-slate-900 transition-colors"
+          >
+            <AnimatePresence mode="wait">
+              {isMobileMenuOpen ? (
+                <motion.div key="close" initial={{ opacity: 0, rotate: -90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: 90 }} transition={{ duration: 0.15 }}>
+                  <X className="w-6 h-6" />
+                </motion.div>
+              ) : (
+                <motion.div key="menu" initial={{ opacity: 0, rotate: 90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: -90 }} transition={{ duration: 0.15 }}>
+                  <Menu className="w-6 h-6" />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </button>
+        </div>
       </div>
 
       <AnimatePresence>
         {isMobileMenuOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: -20 }}
+            initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="md:hidden fixed inset-0 z-40 bg-indigo-900 text-white pt-16 flex flex-col"
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="md:hidden fixed inset-0 z-40 bg-indigo-950/95 dark:bg-slate-950/95 backdrop-blur-md text-white pt-16 flex flex-col"
           >
-            <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+            <div className="p-4 border-b border-indigo-800/60 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-indigo-300 dark:text-slate-400 font-medium">Masuk sebagai</p>
+                <p className="text-white font-semibold text-sm">{userData?.name}</p>
+                <p className="text-[11px] text-indigo-300 dark:text-indigo-400">{userData?.role}</p>
+              </div>
+              <button
+                onClick={toggleTheme}
+                className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-indigo-900 dark:bg-slate-900 border border-indigo-700/60 dark:border-slate-800 text-xs font-medium"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-300" />
+                    <span>Mode Terang</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-indigo-200" />
+                    <span>Mode Gelap</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto">
               {links.map((link) => (
                 <NavLink
                   key={link.to}
@@ -146,8 +230,10 @@ export const DashboardLayout = () => {
                   onClick={() => setIsMobileMenuOpen(false)}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors",
-                      isActive ? "bg-indigo-600 text-white" : "text-indigo-200 hover:bg-indigo-800 hover:text-white"
+                      "flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors text-sm",
+                      isActive
+                        ? "bg-indigo-600 text-white font-semibold shadow-sm"
+                        : "text-indigo-200 dark:text-slate-300 hover:bg-indigo-900 dark:hover:bg-slate-900 hover:text-white"
                     )
                   }
                 >
@@ -156,34 +242,73 @@ export const DashboardLayout = () => {
                 </NavLink>
               ))}
             </nav>
-            <div className="p-6 border-t border-indigo-800">
+
+            <div className="p-4 border-t border-indigo-800 dark:border-slate-800">
               <button
                 onClick={handleLogout}
-                className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors"
+                className="flex items-center justify-center space-x-2 px-4 py-3 w-full rounded-xl bg-red-600/20 text-red-200 border border-red-500/30 hover:bg-red-600 hover:text-white transition-colors text-sm font-semibold"
               >
-                <LogOut className="w-5 h-5" />
-                <span className="font-medium">Keluar</span>
+                <LogOut className="w-4 h-4" />
+                <span>Keluar Aplikasi</span>
               </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pt-16 md:pt-0 bg-slate-50 relative">
-        <AnimatePresence mode="wait">
-          <motion.div 
-            key={location.pathname}
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="p-6 md:p-8 max-w-7xl mx-auto min-h-full"
-          >
-            <Outlet />
-          </motion.div>
-        </AnimatePresence>
-      </main>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 pt-16 md:pt-0">
+        {/* Desktop Top Header Bar */}
+        <header className="hidden md:flex h-16 items-center justify-between px-8 bg-white/70 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 sticky top-0 z-10 transition-colors duration-200">
+          <div className="flex items-center space-x-3">
+            <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
+              {currentActiveLink?.label || 'CERDAS'}
+            </h2>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-100 dark:border-indigo-900">
+              {userData?.role || 'Pengguna'}
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            {/* Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              id="header-theme-toggle"
+              title={`Beralih ke mode ${theme === 'dark' ? 'terang' : 'gelap'}`}
+              className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/90 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/70 transition-all text-xs font-semibold shadow-2xs"
+            >
+              {theme === 'dark' ? (
+                <>
+                  <Sun className="w-4 h-4 text-amber-400" />
+                  <span>Mode Terang</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-indigo-600" />
+                  <span>Mode Gelap</span>
+                </>
+              )}
+            </button>
+          </div>
+        </header>
+
+        {/* Content View */}
+        <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950 relative transition-colors duration-200">
+          <AnimatePresence mode="wait">
+            <motion.div 
+              key={location.pathname}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.2, ease: "easeInOut" }}
+              className="p-5 md:p-8 max-w-7xl mx-auto min-h-full"
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
+        </main>
+      </div>
     </div>
   );
 };
+

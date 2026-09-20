@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, Calendar, FileText, X, ListOrdered, Edit3, CheckCircle2, HelpCircle, ExternalLink, Printer, Eye, AlertTriangle } from 'lucide-react';
+import { 
+  Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, 
+  Calendar, FileText, X, ListOrdered, Edit3, CheckCircle2, HelpCircle, ExternalLink, 
+  Printer, Eye, EyeOff, Copy, Check, AlertTriangle, Layers, Award, CheckSquare 
+} from 'lucide-react';
 import jsPDF from 'jspdf';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
@@ -25,6 +29,20 @@ export interface FormattedPTSQuestion {
   question: string;
   options: { label: string; text: string }[];
   answerKey: string;
+  keyLetter?: string;
+  explanation?: string;
+}
+
+export function cleanMarkdown(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#+\s*/g, '')
+    .trim();
 }
 
 export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
@@ -35,12 +53,17 @@ export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
   let currentQ: { number: number; lines: string[] } | null = null;
 
   for (const rawLine of rawLines) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) continue;
+    const cleaned = cleanMarkdown(rawLine).trim();
+    if (!cleaned) continue;
+
+    // Ignore redundant headers (e.g. "Bagian D", "Latihan Soal", "Pilihan Ganda:", etc.)
+    if (/^(?:Bagian\s+[A-Za-z0-9]|Latihan\s+Soal|Pilihan\s+Ganda|Soal\s+Uraian|Petunjuk\s+Pengerjaan)\s*[:\-]?$/i.test(cleaned)) {
+      continue;
+    }
 
     // Check if line indicates a new question number (e.g. 1., 1), No. 1, Soal 1:)
-    const isOptionStart = /^[\(\[]?[A-Da-d][\.\)\]]/.test(trimmed);
-    const numMatch = trimmed.match(/^(?:Soal\s+|No\.\s*)?(\d+)[\.\)\:\-]\s*(.*)/i);
+    const isOptionStart = /^[\(\[]?[A-Ea-e][\.\)\]\:]\s+/.test(cleaned);
+    const numMatch = cleaned.match(/^(?:Soal\s+|No\.\s*)?(\d+)[\.\)\:\-]\s*(.*)/i);
 
     if (numMatch && !isOptionStart) {
       if (currentQ) {
@@ -49,14 +72,14 @@ export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
       currentQ = { number: parseInt(numMatch[1], 10), lines: numMatch[2].trim() ? [numMatch[2].trim()] : [] };
     } else if (currentQ) {
       // Check if line has multiple inline options (e.g. 'A. x   B. y   C. z   D. w')
-      const inlineMatches = trimmed.match(/[\(\[]?[A-Da-d][\.\)\]]\s+/g);
+      const inlineMatches = cleaned.match(/[\(\[]?[A-Ea-e][\.\)\]\:]\s+/g);
       if (inlineMatches && inlineMatches.length > 1) {
-        const parts = trimmed.split(/(?=[\(\[]?[A-Da-d][\.\)\]]\s+)/);
+        const parts = cleaned.split(/(?=[\(\[]?[A-Ea-e][\.\)\]\:]\s+)/);
         for (const p of parts) {
           if (p.trim()) currentQ.lines.push(p.trim());
         }
       } else {
-        currentQ.lines.push(trimmed);
+        currentQ.lines.push(cleaned);
       }
     }
   }
@@ -74,16 +97,18 @@ function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
   let answerKey = '';
   let inOptions = false;
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = cleanMarkdown(rawLine).trim();
     if (!line) continue;
-    const optMatch = line.match(/^[\(\[]?([A-Da-d])[\.\)\]]\s*(.*)/);
-    const keyMatch = line.match(/^(?:\*?\s*(?:Kunci\s*(?:Jawaban)?|Jawaban|Rubrik\s*(?:Penilaian)?|Pembahasan))\s*[:\-]\s*(.*)/i);
+
+    const optMatch = line.match(/^[\(\[]?([A-Ea-e])[\.\)\]\:]\s*(.*)/);
+    const keyMatch = line.match(/^(?:\*?\s*(?:Kunci\s*(?:Jawaban)?|Jawaban|Rubrik\s*(?:Penilaian)?|Pembahasan|Kunci))\s*[:\-]\s*(.*)/i);
 
     if (keyMatch) {
       answerKey = keyMatch[1] || line;
       inOptions = false;
     } else if (optMatch) {
-      options.push({ label: optMatch[1].toUpperCase(), text: optMatch[2] });
+      options.push({ label: optMatch[1].toUpperCase(), text: cleanMarkdown(optMatch[2]).trim() });
       inOptions = true;
     } else if (inOptions && options.length > 0) {
       options[options.length - 1].text += ' ' + line;
@@ -94,17 +119,36 @@ function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
     }
   }
 
+  const rawKey = answerKey.trim();
+  let keyLetter = '';
+  let explanation = '';
+
+  if (rawKey) {
+    const letterMatch = rawKey.match(/^([A-Ea-e])\b(?:\s*[\.\:\-\(]\s*(.*))?/);
+    if (letterMatch) {
+      keyLetter = letterMatch[1].toUpperCase();
+      let rest = (letterMatch[2] || '').trim();
+      if (rest.endsWith(')')) rest = rest.slice(0, -1).trim();
+      rest = rest.replace(/^(?:Pembahasan|Penjelasan|Keterangan)\s*[:\-]\s*/i, '').trim();
+      explanation = rest;
+    } else {
+      explanation = rawKey;
+    }
+  }
+
   return {
     number: num,
-    question: questionParts.join(' ').trim() || lines[0] || '',
+    question: cleanMarkdown(questionParts.join(' ').trim() || lines[0] || ''),
     options,
-    answerKey: answerKey.trim()
+    answerKey: rawKey,
+    keyLetter,
+    explanation
   };
 }
 
 export function formatAsPTS(text: string): string {
   const parsed = parsePTSQuestions(text);
-  if (parsed.length === 0) return text;
+  if (parsed.length === 0) return cleanMarkdown(text);
 
   return parsed.map((q, idx) => {
     let out = `${idx + 1}. ${q.question}`;
@@ -148,7 +192,9 @@ export default function LessonPlansGuru() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [questionType, setQuestionType] = useState<'Pilihan Ganda' | 'Uraian'>('Pilihan Ganda');
   const [questionCount, setQuestionCount] = useState(5);
-  const [questionTab, setQuestionTab] = useState<'pts' | 'raw'>('pts');
+  const [questionTab, setQuestionTab] = useState<'paper' | 'cards' | 'raw'>('paper');
+  const [showAnswerKeys, setShowAnswerKeys] = useState(true);
+  const [copiedSoal, setCopiedSoal] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Cross-device PDF & modal states
@@ -165,7 +211,19 @@ export default function LessonPlansGuru() {
     if (!latihanSoal.trim()) return;
     const formatted = formatAsPTS(latihanSoal);
     setLatihanSoal(formatted);
-    showToast('Format soal berhasil dirapikan sesuai standar PTS!', 'success');
+    showToast('Naskah soal berhasil dirapikan sesuai format resmi PTS/Ujian!', 'success');
+  };
+
+  const handleCopyQuestions = () => {
+    if (!latihanSoal.trim()) {
+      showToast('Belum ada teks soal untuk disalin.', 'error');
+      return;
+    }
+    const formatted = formatAsPTS(latihanSoal);
+    navigator.clipboard.writeText(formatted);
+    setCopiedSoal(true);
+    showToast('Naskah soal latihan berhasil disalin ke clipboard!', 'success');
+    setTimeout(() => setCopiedSoal(false), 2500);
   };
 
   const [schoolSettings, setSchoolSettings] = useState({
@@ -302,7 +360,7 @@ export default function LessonPlansGuru() {
         if (data.pendahuluan) setPendahuluan(data.pendahuluan);
         if (data.kegiatanInti) setKegiatanInti(data.kegiatanInti);
         if (data.penutup) setPenutup(data.penutup);
-        if (data.latihanSoal) setLatihanSoal(data.latihanSoal);
+        if (data.latihanSoal) setLatihanSoal(formatAsPTS(data.latihanSoal));
         if (data.penilaian) setPenilaian(data.penilaian);
         showToast("✨ Draf E-RPP & bank soal PTS berhasil disusun otomatis!", "success");
       } else {
@@ -555,15 +613,22 @@ export default function LessonPlansGuru() {
     }
     yPos += 4;
 
-    // 4. LATIHAN SOAL & ASESMEN (STANDAR PTS) - REFINED
+    // 4. LATIHAN SOAL & ASESMEN (STANDAR ASESMEN PTS) - REFINED
     printSectionHeader('D. LATIHAN SOAL & ASESMEN (STANDAR ASESMEN PTS)');
     
+    // Subtitle / Petunjuk Soal
+    pdf.setFont("helvetica", "italic");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text("Petunjuk: Pilihlah salah satu jawaban yang paling tepat (A, B, C, atau D) atau jawablah uraian dengan singkat, tepat, dan terstruktur.", 20, yPos);
+    yPos += 4.8;
+
     const parsedQuestions = parsePTSQuestions(dataToExport.latihanSoal);
 
     if (parsedQuestions.length > 0) {
       for (const q of parsedQuestions) {
         // Prevent awkward question breaking
-        checkPageBreak(22);
+        checkPageBreak(24);
 
         // Question Number & Text with proper hanging indent
         pdf.setFont("helvetica", "bold");
@@ -571,7 +636,8 @@ export default function LessonPlansGuru() {
         pdf.setTextColor(15, 23, 42);
         pdf.text(`${q.number}.`, 20, yPos);
 
-        const qTextLines = pdf.splitTextToSize(q.question, 163);
+        const cleanQText = cleanMarkdown(q.question);
+        const qTextLines = pdf.splitTextToSize(cleanQText, 163);
         for (let i = 0; i < qTextLines.length; i++) {
           if (i > 0) checkPageBreak(5);
           pdf.text(qTextLines[i], 27, yPos);
@@ -590,7 +656,8 @@ export default function LessonPlansGuru() {
 
             pdf.setFont("helvetica", "normal");
             pdf.setTextColor(51, 65, 85);
-            const optLines = pdf.splitTextToSize(opt.text, 153);
+            const cleanOptText = cleanMarkdown(opt.text);
+            const optLines = pdf.splitTextToSize(cleanOptText, 153);
             for (let j = 0; j < optLines.length; j++) {
               if (j > 0) checkPageBreak(4.5);
               pdf.text(optLines[j], 34, yPos);
@@ -602,10 +669,13 @@ export default function LessonPlansGuru() {
 
         // Answer Key & Pembahasan Box
         if (q.answerKey) {
-          checkPageBreak(12);
+          checkPageBreak(14);
           pdf.setFontSize(8);
-          const keyLines = pdf.splitTextToSize(q.answerKey, 152);
-          const keyBoxHeight = (keyLines.length * 4.2) + 6.5;
+
+          const keyLabel = q.keyLetter ? `Kunci Jawaban: [ ${q.keyLetter} ]` : 'Kunci Jawaban / Rubrik Penilaian:';
+          const explText = cleanMarkdown(q.explanation || (!q.keyLetter ? q.answerKey : ''));
+          const explLines = explText ? pdf.splitTextToSize(explText, 154) : [];
+          const keyBoxHeight = (explLines.length > 0 ? (explLines.length * 4.0) + 8.5 : 7.0);
 
           pdf.setFillColor(248, 250, 252);
           pdf.setDrawColor(203, 213, 225);
@@ -614,14 +684,16 @@ export default function LessonPlansGuru() {
 
           pdf.setFont("helvetica", "bold");
           pdf.setTextColor(13, 148, 136); // teal
-          pdf.text('Kunci Jawaban & Pembahasan:', 29, yPos + 4.2);
+          pdf.text(keyLabel, 29, yPos + 4.2);
 
-          pdf.setFont("helvetica", "italic");
-          pdf.setTextColor(51, 65, 85);
-          let currentKeyY = yPos + 8.4;
-          for (const kl of keyLines) {
-            pdf.text(kl, 29, currentKeyY);
-            currentKeyY += 4.2;
+          if (explLines.length > 0) {
+            pdf.setFont("helvetica", "italic");
+            pdf.setTextColor(51, 65, 85);
+            let currentKeyY = yPos + 8.0;
+            for (const kl of explLines) {
+              pdf.text(kl, 29, currentKeyY);
+              currentKeyY += 4.0;
+            }
           }
           yPos += keyBoxHeight + 3.5;
         }
@@ -774,24 +846,24 @@ export default function LessonPlansGuru() {
 
       {view === 'list' ? (
         /* LIST VIEW */
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-indigo-600" />
+            <h2 className="text-lg font-extrabold text-slate-800 dark:text-white flex items-center gap-2">
+              <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               Daftar E-RPP Tersimpan
             </h2>
-            <div className="bg-slate-50 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-500 border border-slate-200">
+            <div className="bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
               Total: {savedRpps.length} RPP
             </div>
           </div>
 
           {savedRpps.length === 0 ? (
             <div className="py-16 text-center flex flex-col items-center justify-center">
-              <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-4">
-                <BookOpen className="w-10 h-10 text-indigo-300" />
+              <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-950/50 rounded-full flex items-center justify-center mb-4">
+                <BookOpen className="w-10 h-10 text-indigo-300 dark:text-indigo-400" />
               </div>
-              <h3 className="text-slate-700 font-bold text-lg mb-2">Belum Ada RPP</h3>
-              <p className="text-slate-500 text-sm max-w-sm mb-6">Anda belum membuat RPP apapun. Klik tombol "Buat RPP Baru" di atas untuk mulai membuat RPP menggunakan AI.</p>
+              <h3 className="text-slate-700 dark:text-slate-200 font-bold text-lg mb-2">Belum Ada RPP</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mb-6">Anda belum membuat RPP apapun. Klik tombol "Buat RPP Baru" di atas untuk mulai membuat RPP menggunakan AI.</p>
               <button
                 onClick={() => handleOpenForm()}
                 className="flex items-center space-x-2 bg-indigo-600 text-white hover:bg-indigo-700 px-6 py-3 rounded-2xl text-sm font-bold shadow-md transition-all"
@@ -810,30 +882,30 @@ export default function LessonPlansGuru() {
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     key={rpp.id} 
-                    className="bg-white border border-slate-200 hover:border-indigo-300 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all group flex flex-col"
+                    className="bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 hover:border-indigo-300 dark:hover:border-indigo-600 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all group flex flex-col"
                   >
                     <div className="flex items-start justify-between mb-3">
-                      <div className="bg-indigo-100 text-indigo-700 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider">
+                      <div className="bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider border border-indigo-200 dark:border-indigo-800/50">
                         {rpp.kelasSemester}
                       </div>
                       <div className="flex items-center space-x-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button 
                           onClick={() => exportPDF(rpp)} 
-                          className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" 
+                          className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-lg transition-colors" 
                           title="Unduh PDF E-RPP"
                         >
                           <FileDown className="w-4 h-4" />
                         </button>
                         <button 
                           onClick={() => handleOpenForm(rpp)} 
-                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" 
+                          className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-lg transition-colors" 
                           title="Edit E-RPP"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button 
                           onClick={() => setDeleteModalId(rpp.id)} 
-                          className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" 
+                          className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg transition-colors" 
                           title="Hapus E-RPP"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -841,16 +913,16 @@ export default function LessonPlansGuru() {
                       </div>
                     </div>
                     
-                    <h3 className="text-base font-bold text-slate-800 mb-1">{rpp.mataPelajaran}</h3>
-                    <p className="text-sm font-medium text-slate-500 mb-4 line-clamp-2">{rpp.materi}</p>
+                    <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1">{rpp.mataPelajaran}</h3>
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">{rpp.materi}</p>
                     
-                    <div className="mt-auto pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 dark:text-slate-500 font-medium">
                       <div className="flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5" />
                         {rpp.createdAt ? format(new Date(rpp.createdAt), 'dd MMM yyyy') : '-'}
                       </div>
                       {isAdmin && (
-                        <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-md">
+                        <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md text-slate-600 dark:text-slate-300">
                           Guru: {rpp.teacherName}
                         </div>
                       )}
@@ -864,10 +936,10 @@ export default function LessonPlansGuru() {
       ) : (
         /* FORM VIEW */
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50/50">
-              <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-                <Edit2 className="w-5 h-5 text-indigo-600" />
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden transition-colors">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50/50 dark:bg-slate-800/40">
+              <h2 className="text-base font-extrabold text-slate-800 dark:text-white flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 {editingId ? 'Edit E-RPP' : 'Buat E-RPP Baru'}
               </h2>
               <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
@@ -906,60 +978,71 @@ export default function LessonPlansGuru() {
             </div>
 
             <div className="p-6">
+              {/* Generation in Progress Feedback Banner */}
+              {isGenerating && (
+                <div className="mb-6 p-4 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-2xl flex items-center gap-3 animate-pulse">
+                  <div className="w-5 h-5 border-2 border-indigo-300 dark:border-indigo-700 border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin shrink-0" />
+                  <div className="text-xs text-indigo-900 dark:text-indigo-200">
+                    <span className="font-bold">AI sedang menyusun draf E-RPP & bank soal secara otomatis...</span>
+                    <span className="block text-[11px] text-indigo-600 dark:text-indigo-400 mt-0.5">Memproses tujuan, langkah kegiatan pendahuluan-inti-penutup, soal latihan, dan instrumen asesmen.</span>
+                  </div>
+                </div>
+              )}
+
               {/* Identitas Section */}
               <div className="mb-8">
-                <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2 uppercase tracking-wide">1. Identitas Pembelajaran</h3>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-4 border-b border-slate-100 dark:border-slate-800 pb-2 uppercase tracking-wide">1. Identitas Pembelajaran</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1.5">Mata Pelajaran <span className="text-red-500">*</span></label>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Mata Pelajaran <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       placeholder="Contoh: Matematika"
                       value={mataPelajaran}
                       onChange={(e) => setMataPelajaran(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 placeholder:font-normal"
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 dark:text-white placeholder:font-normal placeholder:text-slate-400 dark:placeholder:text-slate-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1.5">Kelas / Semester</label>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Kelas / Semester</label>
                     <input
                       type="text"
                       placeholder="Contoh: Kelas 1 / Ganjil"
                       value={kelasSemester}
                       onChange={(e) => setKelasSemester(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1.5">Alokasi Waktu</label>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Alokasi Waktu</label>
                     <input
                       type="text"
                       placeholder="Contoh: 2 x 45 Menit"
                       value={alokasiWaktu}
                       onChange={(e) => setAlokasiWaktu(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div className="mt-4">
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-sm font-bold text-slate-700">
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">
                       Materi yang Disampaikan <span className="text-red-500">*</span>
                     </label>
-                    <span className="text-xs text-slate-400 font-normal">Contoh topik dapat dipilih di bawah</span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">Contoh topik dapat dipilih di bawah</span>
                   </div>
                   <textarea
                     rows={2}
                     placeholder="Contoh: Operasi Hitung Campuran pada Pecahan"
                     value={materi}
                     onChange={(e) => setMateri(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   />
                   
                   {/* Quick Topics Helper Chips */}
                   <div className="mt-2.5">
-                    <span className="text-[11px] font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">
+                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 block mb-1.5 uppercase tracking-wider">
                       ⚡ Rekomendasi Topik Cepat (Ketuk untuk Mengisi):
                     </span>
                     <div className="flex flex-wrap gap-1.5">
@@ -972,7 +1055,7 @@ export default function LessonPlansGuru() {
                             setMateri(topic.materi);
                             showToast(`Topik "${topic.mapel}" berhasil diterapkan!`, 'success');
                           }}
-                          className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 rounded-lg text-slate-600 transition-colors font-medium text-left"
+                          className="text-xs px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:text-indigo-700 dark:hover:text-indigo-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors font-medium text-left"
                         >
                           {topic.label}
                         </button>
@@ -982,45 +1065,57 @@ export default function LessonPlansGuru() {
                 </div>
                 
                 {/* AI Configuration Box */}
-                <div className="mt-6 p-5 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl border border-indigo-100 flex flex-col sm:flex-row items-center gap-4 relative overflow-hidden">
+                <div className="mt-6 p-5 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-slate-800/80 dark:to-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-slate-800 flex flex-col lg:flex-row items-center gap-4 relative overflow-hidden transition-colors">
                   <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
                     <Sparkles className="w-16 h-16 text-indigo-500" />
                   </div>
-                  <div className="flex-1 relative z-10">
-                    <label className="block text-xs font-bold text-indigo-900 mb-1">Tipe Latihan Soal AI</label>
+                  <div className="w-full sm:w-auto flex-1 relative z-10">
+                    <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 mb-1">Tipe Latihan Soal AI</label>
                     <select
                       value={questionType}
                       onChange={(e) => setQuestionType(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 shadow-sm"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200 shadow-sm"
                     >
                       <option value="Pilihan Ganda">Pilihan Ganda</option>
                       <option value="Uraian">Uraian / Esai</option>
                     </select>
                   </div>
-                  <div className="flex-1 relative z-10">
-                    <label className="block text-xs font-bold text-indigo-900 mb-1">Jumlah Soal AI</label>
+                  <div className="w-full sm:w-auto flex-1 relative z-10">
+                    <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 mb-1">Jumlah Soal AI</label>
                     <input
                       type="number"
                       min="1"
                       max="20"
                       value={questionCount}
                       onChange={(e) => setQuestionCount(Number(e.target.value))}
-                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 shadow-sm"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200 shadow-sm"
                     />
                   </div>
-                  <div className="flex-1 text-xs text-indigo-700 font-medium relative z-10 bg-white/60 p-3 rounded-xl border border-white backdrop-blur-sm">
-                    Isi bagian di atas, lalu klik tombol <strong className="text-orange-600 font-extrabold">Isi Otomatis (AI)</strong> untuk menyusun draft lengkap secara instan.
+                  <div className="w-full lg:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2 relative z-10">
+                    <button
+                      type="button"
+                      onClick={handleGenerateTemplate}
+                      disabled={isGenerating}
+                      className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50 shrink-0"
+                    >
+                      {isGenerating ? (
+                        <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <Sparkles className="w-4 h-4" />
+                      )}
+                      <span>{isGenerating ? 'Menyusun Draft...' : '⚡ Isi Otomatis dengan AI'}</span>
+                    </button>
                   </div>
                 </div>
               </div>
 
               {/* Komponen Inti Section */}
               <div>
-                <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2 uppercase tracking-wide">2. Komponen Inti & Lampiran</h3>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-4 border-b border-slate-100 dark:border-slate-800 pb-2 uppercase tracking-wide">2. Komponen Inti & Lampiran</h3>
                 <div className="space-y-5">
                   
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <label className="block text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                  <div className="bg-white dark:bg-slate-850 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
+                    <label className="block text-sm font-bold text-slate-800 dark:text-white mb-3 flex items-center gap-2">
                       <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs shadow-sm">A</span>
                       Tujuan Pembelajaran
                     </label>
@@ -1029,52 +1124,52 @@ export default function LessonPlansGuru() {
                       placeholder="Tuliskan tujuan pembelajaran yang ingin dicapai..."
                       value={tujuanPembelajaran}
                       onChange={(e) => setTujuanPembelajaran(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                     />
                   </div>
 
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                    <label className="block text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <div className="bg-white dark:bg-slate-850 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5 transition-colors">
+                    <label className="block text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
                       <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs shadow-sm">B</span>
                       Langkah-Langkah Kegiatan Pembelajaran
                     </label>
                     
                     <div className="ml-0 md:ml-8 space-y-5">
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">1. Kegiatan Pendahuluan</label>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">1. Kegiatan Pendahuluan</label>
                         <textarea
                           rows={3}
                           placeholder="Kegiatan awal, apersepsi, motivasi..."
                           value={pendahuluan}
                           onChange={(e) => setPendahuluan(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">2. Kegiatan Inti</label>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">2. Kegiatan Inti</label>
                         <textarea
                           rows={5}
                           placeholder="Model pembelajaran, sintaks, eksplorasi, diskusi..."
                           value={kegiatanInti}
                           onChange={(e) => setKegiatanInti(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">3. Kegiatan Penutup</label>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">3. Kegiatan Penutup</label>
                         <textarea
                           rows={3}
                           placeholder="Kesimpulan, refleksi, penugasan, doa..."
                           value={penutup}
                           onChange={(e) => setPenutup(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <label className="block text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                  <div className="bg-white dark:bg-slate-850 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
+                    <label className="block text-sm font-bold text-slate-800 dark:text-white mb-3 flex items-center gap-2">
                       <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs shadow-sm">C</span>
                       Penilaian Pembelajaran (Assessment)
                     </label>
@@ -1083,41 +1178,61 @@ export default function LessonPlansGuru() {
                       placeholder="Jelaskan instrumen penilaian sikap, pengetahuan, dan keterampilan..."
                       value={penilaian}
                       onChange={(e) => setPenilaian(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                     />
                   </div>
 
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                      <label className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                        <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs shadow-sm">D</span>
-                        <span>Latihan Soal & Kunci Jawaban</span>
-                        <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                          Format PTS
+                  <div className="bg-white dark:bg-slate-850 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5 transition-colors">
+                    {/* Header & Controls */}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="bg-indigo-600 text-white w-6 h-6 rounded-md flex items-center justify-center text-xs font-extrabold shadow-xs">D</span>
+                        <h3 className="text-sm sm:text-base font-extrabold text-slate-800 dark:text-white">
+                          Latihan Soal & Kunci Jawaban
+                        </h3>
+                        <span className="bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                          Format Naskah Ujian PTS
                         </span>
-                      </label>
+                      </div>
 
+                      {/* Action buttons & View Switcher */}
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                        {/* View Switcher */}
+                        <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                           <button
                             type="button"
-                            onClick={() => setQuestionTab('pts')}
+                            onClick={() => setQuestionTab('paper')}
+                            title="Tampilan naskah lembar ujian resmi siap pakai"
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                              questionTab === 'pts' 
-                                ? 'bg-white text-indigo-700 shadow-sm' 
-                                : 'text-slate-500 hover:text-slate-800'
+                              questionTab === 'paper' 
+                                ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs' 
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                             }`}
                           >
-                            <ListOrdered className="w-3.5 h-3.5" />
-                            <span>Tampilan Rapi (PTS)</span>
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Naskah Ujian (Matang)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setQuestionTab('cards')}
+                            title="Tampilan kartu per butir soal"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              questionTab === 'cards' 
+                                ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs' 
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            <span>Kartu Soal</span>
                           </button>
                           <button
                             type="button"
                             onClick={() => setQuestionTab('raw')}
+                            title="Edit teks mentah atau tempel naskah soal"
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                               questionTab === 'raw' 
-                                ? 'bg-white text-indigo-700 shadow-sm' 
-                                : 'text-slate-500 hover:text-slate-800'
+                                ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs' 
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                             }`}
                           >
                             <Edit3 className="w-3.5 h-3.5" />
@@ -1126,30 +1241,60 @@ export default function LessonPlansGuru() {
                         </div>
 
                         {latihanSoal.trim() && (
-                          <button
-                            type="button"
-                            onClick={handleFormatPTS}
-                            title="Rapikan penomoran dan posisi pilihan soal secara otomatis"
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors shadow-xs"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Rapikan Format</span>
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {/* Toggle Answer Key */}
+                            <button
+                              type="button"
+                              onClick={() => setShowAnswerKeys(!showAnswerKeys)}
+                              title={showAnswerKeys ? "Sembunyikan kunci jawaban (Mode Lembar Siswa)" : "Tampilkan kunci jawaban (Mode Guru)"}
+                              className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+                                showAnswerKeys 
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' 
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              {showAnswerKeys ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                              <span className="hidden sm:inline">{showAnswerKeys ? 'Kunci: Tampil' : 'Kunci: Sembunyi'}</span>
+                            </button>
+
+                            {/* Copy Questions */}
+                            <button
+                              type="button"
+                              onClick={handleCopyQuestions}
+                              title="Salin seluruh naskah soal yang sudah rapi ke clipboard"
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors shadow-2xs"
+                            >
+                              {copiedSoal ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                              <span className="hidden sm:inline">{copiedSoal ? 'Tersalin!' : 'Salin Naskah'}</span>
+                            </button>
+
+                            {/* Auto Format */}
+                            <button
+                              type="button"
+                              onClick={handleFormatPTS}
+                              title="Rapikan penomoran dan posisi pilihan A-D secara otomatis"
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors shadow-2xs"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                              <span className="hidden sm:inline">Rapikan Format</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    {questionTab === 'pts' ? (
+                    {/* VIEW 1: LEMBAR NASKAH UJIAN (SOAL MATANG) */}
+                    {questionTab === 'paper' && (
                       <div>
                         {(() => {
                           const parsed = parsePTSQuestions(latihanSoal);
                           if (parsed.length === 0) {
                             return (
-                              <div className="text-center py-10 bg-slate-50/80 rounded-2xl border border-dashed border-slate-200 p-6">
-                                <ListOrdered className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                                <p className="text-slate-700 font-bold text-sm mb-1">Belum Ada Soal Latihan</p>
-                                <p className="text-slate-400 text-xs max-w-md mx-auto mb-5">
-                                  Klik tombol <strong className="text-orange-600 font-extrabold">Isi Otomatis (AI)</strong> untuk membuat paket soal PTS rapi secara instan, atau ketik soal secara manual.
+                              <div className="text-center py-12 bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6">
+                                <FileText className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                                <p className="text-slate-800 dark:text-slate-200 font-extrabold text-sm mb-1">Naskah Soal Latihan Belum Tersedia</p>
+                                <p className="text-slate-400 dark:text-slate-400 text-xs max-w-md mx-auto mb-5 leading-relaxed">
+                                  Klik tombol <strong className="text-orange-600 dark:text-orange-400 font-extrabold">Isi Otomatis (AI)</strong> di bagian atas untuk menyusun paket soal PTS matang secara instan, atau beralih ke tab <strong>Edit Teks</strong> untuk mengetik manual.
                                 </p>
                                 <div className="flex flex-wrap items-center justify-center gap-2.5">
                                   <button
@@ -1164,7 +1309,7 @@ export default function LessonPlansGuru() {
                                   <button
                                     type="button"
                                     onClick={() => setQuestionTab('raw')}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 shadow-sm transition-colors"
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 shadow-sm transition-colors"
                                   >
                                     <Edit3 className="w-3.5 h-3.5" />
                                     <span>Ketik / Tempel Soal</span>
@@ -1175,92 +1320,271 @@ export default function LessonPlansGuru() {
                           }
 
                           return (
-                            <div className="space-y-4">
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs text-indigo-900 bg-indigo-50/70 px-4 py-2.5 rounded-xl border border-indigo-100">
-                                <span className="font-extrabold flex items-center gap-1.5">
-                                  <CheckCircle2 className="w-4 h-4 text-indigo-600" />
-                                  Tersusun {parsed.length} Butir Soal Standar PTS
-                                </span>
-                                <span className="text-[11px] text-indigo-600 font-medium">
-                                  Penomoran, pilihan jawaban, dan kunci tersusun simetris
-                                </span>
+                            <div className="bg-slate-50/70 dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-750 p-5 sm:p-7 space-y-6 shadow-inner">
+                              {/* Kop Lembar Ujian Resmi */}
+                              <div className="bg-white dark:bg-slate-850 p-5 rounded-2xl border border-slate-200 dark:border-slate-750 shadow-xs space-y-3">
+                                <div className="text-center border-b border-slate-200 dark:border-slate-700 pb-3">
+                                  <span className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 tracking-wider uppercase">
+                                    Kurikulum Merdeka / Asesmen Pembelajaran
+                                  </span>
+                                  <h4 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-wide mt-0.5">
+                                    LEMBAR SOAL ASESMEN & LATIHAN SISWA
+                                  </h4>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                                    Standar Penilaian Tengah Semester (PTS) / Sumatif Lingkup Materi
+                                  </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs pt-1">
+                                  <div className="bg-slate-50 dark:bg-slate-800/80 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/60">
+                                    <span className="text-slate-400 dark:text-slate-400 block text-[10px] uppercase font-bold">Mata Pelajaran</span>
+                                    <span className="font-extrabold text-slate-800 dark:text-slate-100 truncate block mt-0.5">
+                                      {mataPelajaran || 'Mata Pelajaran'}
+                                    </span>
+                                  </div>
+                                  <div className="bg-slate-50 dark:bg-slate-800/80 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/60">
+                                    <span className="text-slate-400 dark:text-slate-400 block text-[10px] uppercase font-bold">Topik / Materi</span>
+                                    <span className="font-extrabold text-slate-800 dark:text-slate-100 truncate block mt-0.5">
+                                      {materi || 'Materi Pokok'}
+                                    </span>
+                                  </div>
+                                  <div className="bg-slate-50 dark:bg-slate-800/80 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/60">
+                                    <span className="text-slate-400 dark:text-slate-400 block text-[10px] uppercase font-bold">Kelas / Semester</span>
+                                    <span className="font-extrabold text-slate-800 dark:text-slate-100 block mt-0.5">
+                                      {kelasSemester || selectedClass}
+                                    </span>
+                                  </div>
+                                  <div className="bg-slate-50 dark:bg-slate-800/80 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/60">
+                                    <span className="text-slate-400 dark:text-slate-400 block text-[10px] uppercase font-bold">Bentuk & Jumlah Soal</span>
+                                    <span className="font-extrabold text-slate-800 dark:text-slate-100 block mt-0.5">
+                                      {parsed.some(q => q.options?.length > 0) ? 'Pilihan Ganda' : 'Uraian'} ({parsed.length} Butir)
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Petunjuk Pengerjaan Box */}
+                                <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/50 rounded-xl text-xs text-amber-900 dark:text-amber-200 leading-relaxed flex items-start gap-2">
+                                  <Award className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="font-extrabold mr-1">PETUNJUK PENGERJAAN:</span>
+                                    {parsed.some(q => q.options?.length > 0) 
+                                      ? "Bacalah pertanyaan dengan teliti. Pilihlah salah satu jawaban yang paling tepat dengan memberikan tanda silang (X) pada pilihan jawaban A, B, C, atau D!" 
+                                      : "Jawablah pertanyaan-pertanyaan berikut dengan singkat, tepat, dan sertakan argumen atau penjelasan yang jelas!"}
+                                  </div>
+                                </div>
                               </div>
 
-                              <div className="space-y-4">
-                                {parsed.map((q) => (
+                              {/* Daftar Butir Soal (Naskah Matang) */}
+                              <div className="space-y-6">
+                                {parsed.map((q, idx) => (
                                   <div
                                     key={q.number}
-                                    className="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-300 transition-all space-y-3.5 shadow-xs"
+                                    className="bg-white dark:bg-slate-850 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-750 shadow-xs hover:border-indigo-200 dark:hover:border-indigo-800 transition-all space-y-4"
                                   >
-                                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <span className="bg-indigo-600 text-white text-xs font-extrabold px-3 py-1 rounded-lg shadow-xs">
-                                          Soal {q.number}
-                                        </span>
-                                        <span className="bg-slate-200/80 text-slate-700 text-[11px] font-bold px-2.5 py-0.5 rounded-md">
-                                          {q.options && q.options.length > 0 ? 'Pilihan Ganda' : 'Uraian / Esai'}
-                                        </span>
+                                    {/* Question Stem */}
+                                    <div className="flex items-start gap-3">
+                                      <span className="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800/80 text-indigo-700 dark:text-indigo-300 font-black text-sm flex items-center justify-center shrink-0">
+                                        {q.number}
+                                      </span>
+                                      <div className="flex-1 pt-0.5">
+                                        <p className="text-slate-900 dark:text-slate-100 font-bold text-[14.5px] leading-relaxed select-text">
+                                          {cleanMarkdown(q.question)}
+                                        </p>
                                       </div>
                                     </div>
 
-                                    <div className="text-slate-800 font-bold text-sm leading-relaxed whitespace-pre-wrap pl-1">
-                                      {q.question}
-                                    </div>
-
+                                    {/* Options (A, B, C, D) */}
                                     {q.options && q.options.length > 0 && (
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pl-0 sm:pl-10">
                                         {q.options.map((opt) => (
                                           <div
                                             key={opt.label}
-                                            className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 bg-white text-sm hover:border-indigo-200 transition-colors shadow-xs"
+                                            className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-800/50 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors shadow-2xs group"
                                           >
-                                            <span className="w-6 h-6 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-extrabold text-xs flex items-center justify-center shrink-0">
+                                            <span className="w-6 h-6 rounded-lg bg-white dark:bg-slate-750 border border-slate-300 dark:border-slate-650 text-slate-800 dark:text-slate-200 font-extrabold text-xs flex items-center justify-center shrink-0 group-hover:border-indigo-400 group-hover:text-indigo-600 transition-colors">
                                               {opt.label}
                                             </span>
-                                            <span className="text-slate-700 font-medium pt-0.5 leading-snug">
-                                              {opt.text}
+                                            <span className="text-slate-800 dark:text-slate-200 font-medium text-sm leading-relaxed pt-0.5">
+                                              {cleanMarkdown(opt.text)}
                                             </span>
                                           </div>
                                         ))}
                                       </div>
                                     )}
 
+                                    {/* Answer Key & Explanation */}
                                     {q.answerKey && (
-                                      <div className="mt-2.5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 flex items-start gap-2.5">
-                                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                                        <div className="leading-relaxed">
-                                          <strong className="font-extrabold text-emerald-900 mr-1.5">
-                                            Kunci Jawaban & Pembahasan:
-                                          </strong>
-                                          <span className="font-medium text-emerald-800">{q.answerKey}</span>
-                                        </div>
+                                      <div className="pl-0 sm:pl-10 pt-1">
+                                        {showAnswerKeys ? (
+                                          <div className="p-3.5 bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 rounded-xl text-xs text-emerald-950 dark:text-emerald-200 space-y-1.5 shadow-2xs">
+                                            <div className="flex items-center gap-2">
+                                              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                              <span className="font-extrabold text-emerald-900 dark:text-emerald-300 text-xs">
+                                                Kunci Jawaban:
+                                              </span>
+                                              {q.keyLetter ? (
+                                                <span className="bg-emerald-600 text-white font-extrabold px-2 py-0.5 rounded-md text-[11px] shadow-2xs">
+                                                  Pilihan {q.keyLetter}
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                            {q.explanation ? (
+                                              <p className="text-emerald-900/90 dark:text-emerald-200 leading-relaxed font-medium pl-6">
+                                                <strong className="font-bold">Pembahasan: </strong>
+                                                {cleanMarkdown(q.explanation)}
+                                              </p>
+                                            ) : (
+                                              !q.keyLetter && (
+                                                <p className="text-emerald-900/90 dark:text-emerald-200 leading-relaxed font-medium pl-6">
+                                                  {cleanMarkdown(q.answerKey)}
+                                                </p>
+                                              )
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="text-[11px] text-slate-400 dark:text-slate-500 italic flex items-center gap-1.5 py-1">
+                                            <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                                            <span>Kunci jawaban disembunyikan (Mode Naskah Siswa)</span>
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>
                                 ))}
                               </div>
+
+                              {/* Footer Summary Strip */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-4 bg-white dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-750 text-xs text-slate-600 dark:text-slate-300">
+                                <span className="font-bold flex items-center gap-2">
+                                  <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                  Total {parsed.length} Butir Soal Telah Berformat Rapi Sesuai Standar PTS
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleCopyQuestions}
+                                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
+                                  >
+                                    Salin Naskah Soal &rarr;
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           );
                         })()}
                       </div>
-                    ) : (
-                      <div className="space-y-2">
+                    )}
+
+                    {/* VIEW 2: KARTU SOAL INTERAKTIF */}
+                    {questionTab === 'cards' && (
+                      <div>
+                        {(() => {
+                          const parsed = parsePTSQuestions(latihanSoal);
+                          if (parsed.length === 0) {
+                            return (
+                              <div className="text-center py-10 bg-slate-50/80 dark:bg-slate-800/50 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6">
+                                <Layers className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                                <p className="text-slate-700 dark:text-slate-200 font-bold text-sm mb-1">Belum Ada Butir Soal</p>
+                                <p className="text-slate-400 dark:text-slate-400 text-xs max-w-md mx-auto mb-4">
+                                  Gunakan tombol AI atau beralih ke editor teks untuk membuat butir soal.
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="space-y-4">
+                              {parsed.map((q) => (
+                                <div
+                                  key={q.number}
+                                  className="p-5 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-white dark:hover:bg-slate-800 hover:border-indigo-300 dark:hover:border-indigo-600 transition-all space-y-3.5 shadow-xs"
+                                >
+                                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-700/80 pb-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="bg-indigo-600 text-white text-xs font-extrabold px-3 py-1 rounded-lg shadow-xs">
+                                        Soal {q.number}
+                                      </span>
+                                      <span className="bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold px-2.5 py-0.5 rounded-md">
+                                        {q.options && q.options.length > 0 ? 'Pilihan Ganda' : 'Uraian / Esai'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-slate-800 dark:text-white font-bold text-sm leading-relaxed whitespace-pre-wrap pl-1">
+                                    {cleanMarkdown(q.question)}
+                                  </div>
+
+                                  {q.options && q.options.length > 0 && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                                      {q.options.map((opt) => (
+                                        <div
+                                          key={opt.label}
+                                          className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-850 text-sm hover:border-indigo-200 dark:hover:border-indigo-700 transition-colors shadow-xs"
+                                        >
+                                          <span className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-extrabold text-xs flex items-center justify-center shrink-0">
+                                            {opt.label}
+                                          </span>
+                                          <span className="text-slate-700 dark:text-slate-200 font-medium pt-0.5 leading-snug">
+                                            {cleanMarkdown(opt.text)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {q.answerKey && (
+                                    <div className="mt-2.5 p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs text-emerald-950 dark:text-emerald-200 flex items-start gap-2.5">
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                                      <div className="leading-relaxed">
+                                        <strong className="font-extrabold text-emerald-900 dark:text-emerald-300 mr-1.5">
+                                          Kunci Jawaban & Pembahasan:
+                                        </strong>
+                                        <span className="font-medium text-emerald-800 dark:text-emerald-200">{cleanMarkdown(q.answerKey)}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* VIEW 3: EDITOR TEKS MENTAH */}
+                    {questionTab === 'raw' && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
+                          <span>Editor Teks Mentah (Monospace)</span>
+                          <span className="font-mono">{latihanSoal.length} karakter</span>
+                        </div>
                         <textarea
-                          rows={9}
+                          rows={11}
                           placeholder={`Format standar PTS:\n1. Pertanyaan soal nomor satu?\n   A. Pilihan jawaban A\n   B. Pilihan jawaban B\n   C. Pilihan jawaban C\n   D. Pilihan jawaban D\n   Kunci Jawaban: A (Pembahasan singkat)\n\n2. Pertanyaan soal nomor dua?`}
                           value={latihanSoal}
                           onChange={(e) => setLatihanSoal(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400 pt-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-slate-500 dark:text-slate-400 pt-1">
                           <span>Ketik atau tempel soal dengan nomor urut (1., 2.) dan pilihan (A., B., C., D.).</span>
-                          <button
-                            type="button"
-                            onClick={() => setQuestionTab('pts')}
-                            className="text-indigo-600 hover:text-indigo-700 font-bold self-end sm:self-auto"
-                          >
-                            Lihat Tampilan Rapi (PTS) &rarr;
-                          </button>
+                          <div className="flex items-center gap-2 self-end sm:self-auto">
+                            <button
+                              type="button"
+                              onClick={handleFormatPTS}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors shadow-2xs flex items-center gap-1.5"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Rapikan Format (Auto)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setQuestionTab('paper')}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs flex items-center gap-1.5"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>Lihat Naskah Ujian &rarr;</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1275,19 +1599,19 @@ export default function LessonPlansGuru() {
 
       {/* PDF Preview & Action Modal */}
       {pdfPreviewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 dark:bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden transition-colors">
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between gap-3 bg-slate-50">
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm sm:text-base font-extrabold text-slate-800 truncate">
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-800 dark:text-white truncate">
                     Pratinjau Dokumen E-RPP
                   </h3>
-                  <p className="text-xs text-slate-400 font-medium truncate">
+                  <p className="text-xs text-slate-400 dark:text-slate-400 font-medium truncate">
                     {pdfPreviewFilename || 'RPP_Merdeka_Belajar.pdf'}
                   </p>
                 </div>
@@ -1296,7 +1620,7 @@ export default function LessonPlansGuru() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => window.open(pdfPreviewUrl, '_blank')}
-                  className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-colors border border-indigo-200"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition-colors border border-indigo-200 dark:border-slate-750"
                   title="Buka di tab baru untuk mencetak langsung"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -1313,7 +1637,7 @@ export default function LessonPlansGuru() {
                 </a>
                 <button
                   onClick={() => setPdfPreviewUrl(null)}
-                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-xl transition-colors"
                   title="Tutup Pratinjau"
                 >
                   <X className="w-5 h-5" />
@@ -1322,9 +1646,9 @@ export default function LessonPlansGuru() {
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-100/50">
+            <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-100/50 dark:bg-slate-950/50">
               {/* Desktop Iframe */}
-              <div className="hidden md:block w-full h-[65vh] bg-white rounded-2xl shadow-inner border border-slate-200 overflow-hidden">
+              <div className="hidden md:block w-full h-[65vh] bg-white rounded-2xl shadow-inner border border-slate-200 dark:border-slate-800 overflow-hidden">
                 <iframe
                   src={pdfPreviewUrl}
                   title="Pratinjau PDF E-RPP"
@@ -1333,13 +1657,13 @@ export default function LessonPlansGuru() {
               </div>
 
               {/* Mobile Card */}
-              <div className="md:hidden bg-white p-6 rounded-2xl border border-slate-200 text-center space-y-4 shadow-sm">
-                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+              <div className="md:hidden bg-white dark:bg-slate-850 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 text-center space-y-4 shadow-sm">
+                <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
                   <CheckCircle2 className="w-8 h-8" />
                 </div>
                 <div>
-                  <h4 className="font-extrabold text-slate-800 text-base">Dokumen PDF E-RPP Siap!</h4>
-                  <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
+                  <h4 className="font-extrabold text-slate-800 dark:text-white text-base">Dokumen PDF E-RPP Siap!</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
                     Dokumen telah diformat rapi dengan kop standar, penomoran soal PTS simetris, dan tanda tangan resmi.
                   </p>
                 </div>
@@ -1354,7 +1678,7 @@ export default function LessonPlansGuru() {
                   </a>
                   <button
                     onClick={() => window.open(pdfPreviewUrl, '_blank')}
-                    className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-colors"
+                    className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-bold transition-colors"
                   >
                     <ExternalLink className="w-4 h-4" />
                     Buka di Tab Baru / Cetak
@@ -1364,11 +1688,11 @@ export default function LessonPlansGuru() {
             </div>
 
             {/* Modal Footer */}
-            <div className="p-3 sm:p-4 border-t border-slate-100 bg-white flex items-center justify-between text-xs text-slate-500 font-medium">
+            <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
               <span>Sesuai Standar Kemendikbudristek No. 14/2019</span>
               <button
                 onClick={() => setPdfPreviewUrl(null)}
-                className="text-slate-600 hover:text-slate-900 font-bold px-3 py-1.5 rounded-lg hover:bg-slate-100"
+                className="text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-bold px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 Tutup
               </button>
@@ -1379,25 +1703,25 @@ export default function LessonPlansGuru() {
 
       {/* Delete Confirmation Modal */}
       {deleteModalId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center gap-3 text-red-600">
-              <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center shrink-0">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4 transition-colors">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 dark:bg-red-950/60 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-extrabold text-slate-900 text-base">Hapus E-RPP Ini?</h3>
-                <p className="text-xs text-slate-500 font-medium">Tindakan ini permanen dan tidak dapat dibatalkan.</p>
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-base">Hapus E-RPP Ini?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Tindakan ini permanen dan tidak dapat dibatalkan.</p>
               </div>
             </div>
-            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-800 p-3.5 rounded-xl border border-slate-100 dark:border-slate-700">
               Dokumen RPP yang dihapus akan dihilangkan dari database sekolah dan tidak dapat dipulihkan kembali.
             </p>
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
                 onClick={() => setDeleteModalId(null)}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 Batal
               </button>

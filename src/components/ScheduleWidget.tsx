@@ -72,10 +72,10 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
   const examItems = filtered.sort((a, b) => a.hari.localeCompare(b.hari) || a.jam.localeCompare(b.jam));
 
   return (
-    <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-3xl p-6 shadow-md border border-indigo-100/50 flex flex-col h-full relative overflow-hidden">
+    <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/40 rounded-3xl p-6 shadow-md border border-indigo-100/50 dark:border-slate-800 flex flex-col h-full relative overflow-hidden transition-colors">
       {/* Decorative background elements */}
-      <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-indigo-200/40 via-purple-200/20 to-transparent rounded-bl-full -z-0 pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-40 h-40 bg-gradient-to-tr from-pink-200/30 to-transparent rounded-tr-full -z-0 pointer-events-none" />
+      <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-indigo-200/40 via-purple-200/20 to-transparent dark:from-indigo-500/10 dark:via-purple-500/5 rounded-bl-full -z-0 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-40 h-40 bg-gradient-to-tr from-pink-200/30 to-transparent dark:from-pink-500/10 rounded-tr-full -z-0 pointer-events-none" />
 
       <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div className="flex items-center space-x-4">
@@ -83,16 +83,16 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
             <Calendar className="w-6 h-6 -rotate-3" />
           </div>
           <div>
-            <h3 className="text-lg font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+            <h3 className="text-lg font-extrabold text-slate-800 dark:text-white tracking-tight flex items-center gap-2">
               {title || `Jadwal ${classId}`}
               <Sparkles className="w-4 h-4 text-amber-500" />
             </h3>
             <div className="flex items-center gap-2 mt-1">
-              <p className="text-xs font-medium text-slate-500 bg-white/60 px-2 py-0.5 rounded-md inline-block backdrop-blur-sm border border-slate-200/50">Jadwal Harian & Ujian</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 bg-white/60 dark:bg-slate-800/80 px-2 py-0.5 rounded-md inline-block backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/50">Jadwal Harian & Ujian</p>
               {imageUrl && (
                 <button
                   onClick={() => setShowImageModal(true)}
-                  className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1.5 transition-colors border border-indigo-100"
+                  className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1.5 transition-colors border border-indigo-100 dark:border-indigo-800"
                 >
                   <ImageIcon className="w-3 h-3" />
                   Lihat Gambar Asli
@@ -103,16 +103,16 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
         </div>
 
         {/* Tabs */}
-        <div className="flex bg-slate-200/70 p-1.5 rounded-2xl text-xs font-bold self-stretch sm:self-auto shadow-inner backdrop-blur-sm">
+        <div className="flex bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl text-xs font-bold self-stretch sm:self-auto shadow-inner backdrop-blur-sm">
           <button
             onClick={() => setActiveTab('pelajaran')}
-            className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl transition-all duration-300 ${activeTab === 'pelajaran' ? 'bg-white text-indigo-700 shadow-sm scale-100' : 'text-slate-500 hover:text-slate-800 scale-95'}`}
+            className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl transition-all duration-300 ${activeTab === 'pelajaran' ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm scale-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 scale-95'}`}
           >
             Pelajaran
           </button>
           <button
             onClick={() => setActiveTab('ujian')}
-            className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl transition-all duration-300 ${activeTab === 'ujian' ? 'bg-white text-purple-700 shadow-sm scale-100' : 'text-slate-500 hover:text-slate-800 scale-95'}`}
+            className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl transition-all duration-300 ${activeTab === 'ujian' ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-sm scale-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 scale-95'}`}
           >
             Ujian
           </button>
@@ -123,20 +123,20 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
         <AnimatePresence mode="wait">
           {loading ? (
             <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-16">
-              <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+              <div className="w-8 h-8 border-4 border-indigo-200 dark:border-indigo-900 border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin" />
             </motion.div>
           ) : activeTab === 'pelajaran' ? (
             groupedByDay.length === 0 ? (
-              <motion.div key="empty-pelajaran" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-16 text-center text-slate-400 space-y-3">
-                <div className="w-16 h-16 bg-white/50 rounded-full flex items-center justify-center mb-2">
-                  <BookOpen className="w-8 h-8 text-indigo-300" />
+              <motion.div key="empty-pelajaran" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-16 text-center text-slate-400 dark:text-slate-500 space-y-3">
+                <div className="w-16 h-16 bg-white/50 dark:bg-slate-800/50 rounded-full flex items-center justify-center mb-2">
+                  <BookOpen className="w-8 h-8 text-indigo-300 dark:text-indigo-400" />
                 </div>
-                <p className="text-sm font-bold text-slate-500">Belum ada jadwal untuk {classId}.</p>
+                <p className="text-sm font-bold text-slate-500 dark:text-slate-400">Belum ada jadwal untuk {classId}.</p>
               </motion.div>
             ) : (
               <motion.div key="pelajaran" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5 overflow-y-auto max-h-[420px] pr-2 custom-scrollbar">
                 {groupedByDay.map(group => (
-                  <div key={group.day} className="bg-white/80 backdrop-blur-md rounded-2xl p-4 border border-white shadow-sm">
+                  <div key={group.day} className="bg-white/80 dark:bg-slate-800/70 backdrop-blur-md rounded-2xl p-4 border border-white dark:border-slate-700/60 shadow-sm">
                     <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white text-xs font-extrabold rounded-xl mb-4 shadow-sm">
                       <Calendar className="w-3.5 h-3.5" />
                       {group.day}
@@ -146,25 +146,25 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
                         <motion.div 
                           initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05 }}
                           key={item.id} 
-                          className="bg-white p-4 rounded-2xl border border-indigo-50 hover:border-indigo-200 shadow-sm hover:shadow-md transition-all group space-y-2 relative overflow-hidden"
+                          className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-indigo-50 dark:border-slate-700/60 hover:border-indigo-200 dark:hover:border-slate-600 shadow-sm hover:shadow-md transition-all group space-y-2 relative overflow-hidden"
                         >
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 group-hover:w-1.5 transition-all" />
                           <div className="flex justify-between items-start">
-                            <span className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                            <span className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                               {item.mataPelajaran}
                             </span>
-                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg flex items-center gap-1.5 border border-indigo-100">
+                            <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-1 rounded-lg flex items-center gap-1.5 border border-indigo-100 dark:border-indigo-800">
                               <Clock className="w-3 h-3" />
                               {item.jam}
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-xs pt-2">
-                            <span className="flex items-center gap-1.5 font-medium text-slate-600 bg-slate-50 px-2 py-1 rounded-md">
+                            <span className="flex items-center gap-1.5 font-medium text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/60 px-2 py-1 rounded-md">
                               <User className="w-3.5 h-3.5 text-slate-400" />
                               {item.pengajar || '-'}
                             </span>
                             {item.ruangan && (
-                              <span className="flex items-center gap-1.5 font-medium text-slate-500">
+                              <span className="flex items-center gap-1.5 font-medium text-slate-500 dark:text-slate-400">
                                 <MapPin className="w-3.5 h-3.5 text-slate-400" />
                                 {item.ruangan}
                               </span>
@@ -179,11 +179,11 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
             )
           ) : (
             examItems.length === 0 ? (
-              <motion.div key="empty-ujian" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-16 text-center text-slate-400 space-y-3">
-                <div className="w-16 h-16 bg-white/50 rounded-full flex items-center justify-center mb-2">
+              <motion.div key="empty-ujian" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-16 text-center text-slate-400 dark:text-slate-500 space-y-3">
+                <div className="w-16 h-16 bg-white/50 dark:bg-slate-800/50 rounded-full flex items-center justify-center mb-2">
                   <FileText className="w-8 h-8 text-purple-300" />
                 </div>
-                <p className="text-sm font-bold text-slate-500">Belum ada jadwal ujian untuk {classId}.</p>
+                <p className="text-sm font-bold text-slate-500 dark:text-slate-400">Belum ada jadwal ujian untuk {classId}.</p>
               </motion.div>
             ) : (
               <motion.div key="ujian" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto max-h-[420px] pr-2 custom-scrollbar">
@@ -191,36 +191,36 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: idx * 0.05 }}
                     key={item.id} 
-                    className="bg-gradient-to-br from-white to-purple-50/50 border border-purple-100 p-5 rounded-2xl space-y-3 shadow-sm hover:shadow-md transition-all relative overflow-hidden"
+                    className="bg-gradient-to-br from-white to-purple-50/50 dark:from-slate-800 dark:to-purple-950/20 border border-purple-100 dark:border-purple-900/40 p-5 rounded-2xl space-y-3 shadow-sm hover:shadow-md transition-all relative overflow-hidden"
                   >
-                    <div className="absolute top-0 right-0 w-16 h-16 bg-purple-100/50 rounded-bl-full -z-0" />
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-purple-100/50 dark:bg-purple-900/20 rounded-bl-full -z-0" />
                     <div className="relative z-10 flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-purple-800 bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-xl shadow-sm">
+                      <span className="text-xs font-extrabold text-purple-800 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 px-3 py-1.5 rounded-xl shadow-sm">
                         {item.hari}
                       </span>
-                      <span className="text-[11px] font-bold text-purple-700 flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg shadow-sm border border-purple-50">
+                      <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg shadow-sm border border-purple-50 dark:border-slate-800">
                         <Clock className="w-3.5 h-3.5" />
                         {item.jam}
                       </span>
                     </div>
-                    <h4 className="relative z-10 text-base font-black text-slate-800 flex items-center gap-2 pt-1">
-                      <BookOpen className="w-4 h-4 text-purple-600" />
+                    <h4 className="relative z-10 text-base font-black text-slate-800 dark:text-white flex items-center gap-2 pt-1">
+                      <BookOpen className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                       {item.mataPelajaran}
                     </h4>
-                    <div className="relative z-10 flex items-center justify-between text-xs pt-3 border-t border-purple-100/60 mt-1">
-                      <span className="flex items-center gap-1.5 font-semibold text-slate-600">
+                    <div className="relative z-10 flex items-center justify-between text-xs pt-3 border-t border-purple-100/60 dark:border-slate-700/60 mt-1">
+                      <span className="flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
                         <User className="w-3.5 h-3.5 text-purple-400" />
                         Pengawas: {item.pengajar || '-'}
                       </span>
                       {item.ruangan && (
-                        <span className="flex items-center gap-1.5 font-bold text-purple-700 bg-white px-2 py-1 rounded-lg">
+                        <span className="flex items-center gap-1.5 font-bold text-purple-700 dark:text-purple-300 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg">
                           <MapPin className="w-3.5 h-3.5 text-purple-500" />
                           {item.ruangan}
                         </span>
                       )}
                     </div>
                     {item.keterangan && (
-                      <p className="relative z-10 text-xs font-medium text-purple-800 bg-purple-100/60 p-2.5 rounded-xl border border-purple-200/50 mt-2 flex items-start gap-2">
+                      <p className="relative z-10 text-xs font-medium text-purple-800 dark:text-purple-300 bg-purple-100/60 dark:bg-purple-950/50 p-2.5 rounded-xl border border-purple-200/50 dark:border-purple-800/50 mt-2 flex items-start gap-2">
                         <FileText className="w-3.5 h-3.5 shrink-0 mt-0.5 opacity-70" />
                         {item.keterangan}
                       </p>
@@ -240,27 +240,27 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl p-2 w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative"
+              className="bg-white dark:bg-slate-900 rounded-3xl p-2 w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative border border-slate-100 dark:border-slate-800"
             >
-              <div className="flex items-center justify-between p-4 border-b border-slate-100">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5 text-indigo-600" />
+              <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                   Gambar Jadwal Asli {classId}
                 </h3>
                 <button
                   onClick={() => setShowImageModal(false)}
-                  className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="flex-1 overflow-auto p-4 flex justify-center items-center bg-slate-50">
+              <div className="flex-1 overflow-auto p-4 flex justify-center items-center bg-slate-50 dark:bg-slate-950">
                 <img src={imageUrl} alt={`Jadwal ${classId}`} className="max-w-full h-auto rounded-xl shadow-sm object-contain" />
               </div>
             </motion.div>
