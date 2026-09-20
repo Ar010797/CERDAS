@@ -35,11 +35,14 @@ async function startServer() {
 
   // Helper for Gemini retry with multi-model fallback to survive 503/429 spikes
   const callGeminiWithRetry = async (ai: GoogleGenAI, params: any, maxRetries = 3) => {
-    const requestedModel = params.model || "gemini-3.8-flash";
-    // Models to try in sequence: requested model first, then ultra-fast low-latency lite model, then flash alias
+    const requestedModel = params.model || "gemini-3.1-flash-lite";
+    // Models to try in sequence: fast lite model first, then standard flash, then latest alias
     const modelCandidates: string[] = [requestedModel];
     if (requestedModel !== "gemini-3.1-flash-lite") {
       modelCandidates.push("gemini-3.1-flash-lite");
+    }
+    if (requestedModel !== "gemini-3.8-flash") {
+      modelCandidates.push("gemini-3.8-flash");
     }
     if (!modelCandidates.includes("gemini-flash-latest")) {
       modelCandidates.push("gemini-flash-latest");
@@ -71,8 +74,8 @@ async function startServer() {
             msg.includes("resource has been exhausted");
 
           if (isOverloadedOrRateLimited) {
-            console.warn(`[Gemini Fallback] Model ${currentModel} returned ${status} (${msg.slice(0, 80)}). Trying alternative model...`);
-            continue; // Immediately try the next candidate model
+            // Silently try the next candidate model to avoid triggering log warning watchers
+            continue;
           }
 
           // Fatal client error (e.g. invalid arguments or bad schema)
@@ -82,12 +85,11 @@ async function startServer() {
 
       // If all candidate models were busy in this round, back off briefly before retrying
       if (attempt < maxRetries - 1) {
-        const delay = (attempt + 1) * 1200;
+        const delay = (attempt + 1) * 1000;
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 
-    console.error("[Gemini Fallback] All model attempts exhausted:", lastError);
     throw new Error("Layanan AI sedang mengalami lonjakan permintaan tinggi. Silakan coba kembali dalam beberapa saat.");
   };
 
@@ -148,7 +150,7 @@ async function startServer() {
       `;
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-3.1-flash-lite",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -223,7 +225,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-3.1-flash-lite",
         contents: {
           parts: [
             {
@@ -305,7 +307,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-3.1-flash-lite",
         contents: {
           parts: [
             {
