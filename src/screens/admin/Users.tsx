@@ -5,6 +5,7 @@ import { Users, Plus, Edit2, Trash2, Shield, User, X, CheckCircle, AlertTriangle
 
 interface UserData {
   id: string;
+  uid?: string;
   name: string;
   username: string;
   password?: string;
@@ -44,6 +45,9 @@ export default function UsersAdmin() {
     const q = query(collection(db, 'users'));
     const unsub = onSnapshot(q, (snap) => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserData)));
+      setLoading(false);
+    }, (err) => {
+      console.warn("Users snapshot error:", err);
       setLoading(false);
     });
     return () => unsub();

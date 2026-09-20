@@ -18,6 +18,11 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
+  // Health check endpoint for platform monitoring
+  app.get(["/api/health", "/health"], (req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // Initialize Gemini Client
   const getAi = () => {
     const key = process.env.GEMINI_API_KEY;
@@ -28,22 +33,62 @@ async function startServer() {
     });
   };
 
-  // Helper for Gemini retry
-  const callGeminiWithRetry = async (ai: GoogleGenAI, params: any, maxRetries = 5) => {
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await ai.models.generateContent(params);
-      } catch (error: any) {
-        const isRetryable = error?.status === 503 || error?.status === 429 || error?.status === 'UNAVAILABLE' || error?.error?.code === 503 || error?.error?.code === 429 || (error?.message && error.message.includes('503')) || (error?.message && error.message.includes('429')) || (error?.message && error.message.includes('UNAVAILABLE'));
-        if (isRetryable) {
-          if (i === maxRetries - 1) throw new Error("Layanan AI sedang sibuk karena tingginya permintaan. Mohon coba beberapa saat lagi.");
-          const delay = Math.min(Math.pow(2, i) * 2000, 10000); // 2s, 4s, 8s, 10s...
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
+  // Helper for Gemini retry with multi-model fallback to survive 503/429 spikes
+  const callGeminiWithRetry = async (ai: GoogleGenAI, params: any, maxRetries = 3) => {
+    const requestedModel = params.model || "gemini-3.8-flash";
+    // Models to try in sequence: requested model first, then ultra-fast low-latency lite model, then flash alias
+    const modelCandidates: string[] = [requestedModel];
+    if (requestedModel !== "gemini-3.1-flash-lite") {
+      modelCandidates.push("gemini-3.1-flash-lite");
+    }
+    if (!modelCandidates.includes("gemini-flash-latest")) {
+      modelCandidates.push("gemini-flash-latest");
+    }
+
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      for (const currentModel of modelCandidates) {
+        try {
+          const currentParams = { ...params, model: currentModel };
+          return await ai.models.generateContent(currentParams);
+        } catch (error: any) {
+          lastError = error;
+          const status = error?.status || error?.error?.code || error?.code;
+          const msg = (error?.message || "").toLowerCase();
+          const isOverloadedOrRateLimited =
+            status === 503 ||
+            status === 429 ||
+            status === 500 ||
+            msg.includes("503") ||
+            msg.includes("429") ||
+            msg.includes("unavailable") ||
+            msg.includes("high demand") ||
+            msg.includes("overloaded") ||
+            msg.includes("spikes in demand") ||
+            msg.includes("quota") ||
+            msg.includes("rate limit") ||
+            msg.includes("resource has been exhausted");
+
+          if (isOverloadedOrRateLimited) {
+            console.warn(`[Gemini Fallback] Model ${currentModel} returned ${status} (${msg.slice(0, 80)}). Trying alternative model...`);
+            continue; // Immediately try the next candidate model
+          }
+
+          // Fatal client error (e.g. invalid arguments or bad schema)
+          throw error;
         }
-        throw error;
+      }
+
+      // If all candidate models were busy in this round, back off briefly before retrying
+      if (attempt < maxRetries - 1) {
+        const delay = (attempt + 1) * 1200;
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
+
+    console.error("[Gemini Fallback] All model attempts exhausted:", lastError);
+    throw new Error("Layanan AI sedang mengalami lonjakan permintaan tinggi. Silakan coba kembali dalam beberapa saat.");
   };
 
   // API 1: Generate RPP Draft
@@ -217,9 +262,20 @@ async function startServer() {
         }
       });
 
-      const text = response.text;
-      if (!text) throw new Error("No response from Gemini");
-      const json = JSON.parse(text.replace(/```json/gi, "").replace(/```/g, "").trim());
+      let text = response.text || "";
+      if (!text) throw new Error("Tidak ada respon dari layanan AI.");
+      text = text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        const match = text.match(/\[[\s\S]*\]/);
+        if (match) {
+          json = JSON.parse(match[0]);
+        } else {
+          throw new Error("Format hasil ekstraksi tidak valid sebagai JSON.");
+        }
+      }
       res.json(json);
 
     } catch (error: any) {
@@ -364,9 +420,16 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  server.on("error", (err: any) => {
+    console.error("Server error:", err);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+});
+

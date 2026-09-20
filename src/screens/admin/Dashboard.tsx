@@ -35,34 +35,28 @@ export default function AdminDashboard() {
         }
       });
       setClassList(['Semua Kelas', ...Array.from(classes)]);
-    });
+    }, (err) => console.warn("unsubUsers error:", err));
     
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
       setStats(prev => ({ ...prev, students: snap.size }));
-    });
+    }, (err) => console.warn("unsubStudents error:", err));
 
     // Real-time activity logs for TODAY
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    let qLogs = query(
+    const qLogs = query(
       collection(db, 'log_aktivitas'),
       where('timestamp', '>=', todayStr),
-      where('timestamp', '<=', todayStr + 'T23:59:59'),
+      where('timestamp', '<=', todayStr + 'T23:59:59')
     );
 
-    if (selectedClass !== 'Semua Kelas') {
-      qLogs = query(
-        collection(db, 'log_aktivitas'),
-        where('timestamp', '>=', todayStr),
-        where('timestamp', '<=', todayStr + 'T23:59:59'),
-        where('className', '==', selectedClass)
-      );
-    }
-
     const unsubLogs = onSnapshot(qLogs, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as LogAktivitas));
+      let data = snap.docs.map(d => ({ id: d.id, ...d.data() } as LogAktivitas));
+      if (selectedClass !== 'Semua Kelas') {
+        data = data.filter(item => item.className === selectedClass);
+      }
       data.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setLogs(data);
-    });
+    }, (err) => console.warn("unsubLogs error:", err));
 
     setLoading(false);
 

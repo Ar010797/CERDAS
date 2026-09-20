@@ -33,6 +33,9 @@ export default function Announcements() {
     const unsub = onSnapshot(q, (snap) => {
       setAnnouncements(snap.docs.map(d => ({ id: d.id, ...d.data() } as Announcement)));
       setLoading(false);
+    }, (err) => {
+      console.warn("Announcements snapshot error:", err);
+      setLoading(false);
     });
     return () => unsub();
   }, []);

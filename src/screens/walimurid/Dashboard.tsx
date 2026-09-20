@@ -18,7 +18,7 @@ export default function WaliMuridDashboard() {
   const [grades, setGrades] = useState<Record<string, { tugas: string, pts: string, pas: string }>>({});
   const [attendance, setAttendance] = useState({ hadir: 0, izin: 0, sakit: 0, alpa: 0 });
   const [subjects, setSubjects] = useState<string[]>([]);
-  const [schoolSettings, setSchoolSettings] = useState({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '' });
+  const [schoolSettings, setSchoolSettings] = useState<{ namaSekolah: string; namaKepalaSekolah: string; nipKepalaSekolah: string; tahunAjaran?: string }>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', tahunAjaran: '2026/2027' });
   const [loading, setLoading] = useState(true);
 
   // Extra Data
@@ -47,7 +47,7 @@ export default function WaliMuridDashboard() {
           birthPlace: data.birthPlace || ''
         });
       }
-    });
+    }, (err) => console.warn("unsubStudent error:", err));
 
     // Grades
     const unsubGrades = onSnapshot(doc(db, 'grades', userData.uid), (docSnap) => {
@@ -55,7 +55,7 @@ export default function WaliMuridDashboard() {
         const data = docSnap.data();
         setGrades(data.gradesBySubject || {});
       }
-    });
+    }, (err) => console.warn("unsubGrades error:", err));
 
     // Attendance (Listen to changes if needed, but summary usually from a query)
     const qAtt = query(collection(db, 'attendance'), where('studentId', '==', userData.uid));
@@ -69,12 +69,12 @@ export default function WaliMuridDashboard() {
         else if (status === 'Alpa') attCount.alpa++;
       });
       setAttendance(attCount);
-    });
+    }, (err) => console.warn("unsubAtt error:", err));
 
     // School Settings
     const unsubSchool = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (docSnap) => {
       if (docSnap.exists()) setSchoolSettings(docSnap.data() as any);
-    });
+    }, (err) => console.warn("unsubSchool error:", err));
 
     setLoading(false);
 
@@ -93,19 +93,31 @@ export default function WaliMuridDashboard() {
     // Subjects
     const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', studentData.classId), (docSnap) => {
       if (docSnap.exists()) setSubjects(docSnap.data().subjects || []);
-    });
+    }, (err) => console.warn("unsubSubjects error:", err));
 
-    // Gallery
-    const qGallery = query(collection(db, 'gallery'), where('classId', '==', studentData.classId), orderBy('createdAt', 'desc'));
-    const unsubGallery = onSnapshot(qGallery, (snap) => setPhotos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    // Gallery (avoid composite index requirement)
+    const qGallery = query(collection(db, 'gallery'), where('classId', '==', studentData.classId));
+    const unsubGallery = onSnapshot(qGallery, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      docs.sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      setPhotos(docs);
+    }, (err) => console.warn("unsubGallery error:", err));
 
-    // Tabungan
-    const qSavings = query(collection(db, 'savings'), where('studentId', '==', studentData.id), orderBy('date', 'desc'));
-    const unsubSavings = onSnapshot(qSavings, (snap) => setSavingTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    // Tabungan (avoid composite index requirement)
+    const qSavings = query(collection(db, 'savings'), where('studentId', '==', studentData.id));
+    const unsubSavings = onSnapshot(qSavings, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+      setSavingTransactions(docs);
+    }, (err) => console.warn("unsubSavings error:", err));
 
-    // Kas
-    const qKas = query(collection(db, 'kas'), where('classId', '==', studentData.classId), orderBy('date', 'desc'));
-    const unsubKas = onSnapshot(qKas, (snap) => setKasTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    // Kas (avoid composite index requirement)
+    const qKas = query(collection(db, 'kas'), where('classId', '==', studentData.classId));
+    const unsubKas = onSnapshot(qKas, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+      setKasTransactions(docs);
+    }, (err) => console.warn("unsubKas error:", err));
 
     return () => {
       unsubSubjects();

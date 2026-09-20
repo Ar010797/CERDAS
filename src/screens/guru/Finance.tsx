@@ -75,22 +75,24 @@ export default function FinanceGuru() {
     if (activeTab === 'tabungan' && selectedStudent) {
       const q = query(
         collection(db, 'savings'),
-        where('studentId', '==', selectedStudent),
-        orderBy('date', 'desc')
+        where('studentId', '==', selectedStudent)
       );
       const unsub = onSnapshot(q, (snap) => {
-        setSavingTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavingTransaction)));
-      });
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavingTransaction));
+        docs.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        setSavingTransactions(docs);
+      }, (err) => console.warn("Savings snapshot error:", err));
       return () => unsub();
     } else if (activeTab === 'kas') {
       const q = query(
         collection(db, 'kas'),
-        where('classId', '==', selectedClass),
-        orderBy('date', 'desc')
+        where('classId', '==', selectedClass)
       );
       const unsub = onSnapshot(q, (snap) => {
-        setKasTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as KasTransaction)));
-      });
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as KasTransaction));
+        docs.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        setKasTransactions(docs);
+      }, (err) => console.warn("Kas snapshot error:", err));
       return () => unsub();
     }
   }, [activeTab, selectedStudent, selectedClass]);

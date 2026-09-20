@@ -17,7 +17,7 @@ interface Student {
 
 interface GradeSubject {
   tugas: string[];
-  ulanganHarian: string[];
+  ulanganHarian?: string[];
   pts: string;
   pas: string;
 }
@@ -476,7 +476,7 @@ export default function GradesGuru() {
                   let sum = 0;
                   let count = 0;
                   subjects.forEach(s => {
-                     const g = studentGrades[s] || { tugas: [], pts: '', pas: '' };
+                     const g = studentGrades[s] || { tugas: [], ulanganHarian: [], pts: '', pas: '' };
                      const avg = calculateAverage(g);
                      if (avg > 0) {
                         sum += avg;
@@ -548,7 +548,7 @@ export default function GradesGuru() {
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
               <div className="space-y-6">
                 {subjects.map((subj) => {
-                  const currentGrade = tempGrades[subj] || { tugas: [''], pts: '', pas: '' };
+                  const currentGrade = tempGrades[subj] || { tugas: [''], ulanganHarian: [''], pts: '', pas: '' };
                   return (
                     <div key={subj} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-2xs">
                       <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-50">
