@@ -34,10 +34,10 @@ async function startServer() {
   };
 
   // Helper for Gemini retry with multi-model fallback to survive 503/429 spikes or model transitions
-  const callGeminiWithRetry = async (ai: GoogleGenAI, params: any, maxRetries = 3) => {
-    // Models to try in sequence: standard fast models as per guidelines
-    const requestedModel = params.model || "gemini-3.6-flash";
-    const defaultCandidates = ["gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+  const callGeminiWithRetry = async (ai: GoogleGenAI, params: any) => {
+    // Models to try in sequence: gemini-3.1-flash-lite is the fastest (under 1s) and most stable
+    const requestedModel = params.model || "gemini-3.1-flash-lite";
+    const defaultCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
     const modelCandidates: string[] = [
       requestedModel,
       ...defaultCandidates.filter((m) => m !== requestedModel)
@@ -45,21 +45,22 @@ async function startServer() {
 
     let lastError: any = null;
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      for (const currentModel of modelCandidates) {
-        try {
-          const currentParams = { ...params, model: currentModel };
-          return await ai.models.generateContent(currentParams);
-        } catch (error: any) {
-          lastError = error;
-          // Continue to next candidate model seamlessly
-          continue;
-        }
-      }
-
-      if (attempt < maxRetries - 1) {
-        const delay = (attempt + 1) * 800;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+    for (const currentModel of modelCandidates) {
+      try {
+        const currentParams = { ...params, model: currentModel };
+        // Strict 9-second timeout per candidate to prevent hanging and 504 Gateway Timeout
+        const result = await Promise.race([
+          ai.models.generateContent(currentParams),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error(`Timeout on model ${currentModel}`)), 9000)
+          )
+        ]);
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`Model ${currentModel} returned error:`, error?.message || error);
+        // Seamlessly try the next model candidate
+        continue;
       }
     }
 
@@ -231,8 +232,9 @@ async function startServer() {
         Berikan jawaban dalam format JSON.
       `;
 
-      const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+      // Wrap AI call in a strict 14-second overall deadline to prevent 504 Gateway Timeout on any network/proxy
+      const aiPromise = callGeminiWithRetry(ai, {
+        model: "gemini-3.1-flash-lite",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -268,6 +270,11 @@ async function startServer() {
           }
         }
       });
+
+      const response: any = await Promise.race([
+        aiPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("AI overall request timeout (14s)")), 14000))
+      ]);
 
       let rawText = response.text || "";
       if (!rawText.trim()) throw new Error("Tidak ada respon dari layanan AI.");
@@ -324,7 +331,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-3.1-flash-lite",
         contents: {
           parts: [
             {
@@ -406,7 +413,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-3.1-flash-lite",
         contents: {
           parts: [
             {
