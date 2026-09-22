@@ -35,9 +35,12 @@ async function startServer() {
 
   // Helper for Gemini retry with multi-model fallback to survive 503/429 spikes or model transitions
   const callGeminiWithRetry = async (ai: GoogleGenAI, params: any) => {
-    // Models to try in sequence: gemini-3.1-flash-lite is the fastest (under 1s) and most stable
-    const requestedModel = params.model || "gemini-3.1-flash-lite";
-    const defaultCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
+    // Model fallback sequence:
+    // 1. gemini-3.8-flash: primary recommended model for standard text & multimodal tasks
+    // 2. gemini-3.1-flash-lite: ultra-fast lightweight model
+    // 3. gemini-flash-latest: high throughput alias
+    const requestedModel = params.model || "gemini-3.8-flash";
+    const defaultCandidates = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
     const modelCandidates: string[] = [
       requestedModel,
       ...defaultCandidates.filter((m) => m !== requestedModel)
@@ -45,26 +48,32 @@ async function startServer() {
 
     let lastError: any = null;
 
-    for (const currentModel of modelCandidates) {
+    for (let i = 0; i < modelCandidates.length; i++) {
+      const currentModel = modelCandidates[i];
       try {
         const currentParams = { ...params, model: currentModel };
-        // Strict 9-second timeout per candidate to prevent hanging and 504 Gateway Timeout
+        // 12-second per-candidate timeout allows deep reasoning/PDF processing while preventing gateway timeouts
         const result = await Promise.race([
           ai.models.generateContent(currentParams),
           new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error(`Timeout on model ${currentModel}`)), 9000)
+            setTimeout(() => reject(new Error(`Timeout on model ${currentModel}`)), 12000)
           )
         ]);
         return result;
       } catch (error: any) {
         lastError = error;
-        console.warn(`Model ${currentModel} returned error:`, error?.message || error);
-        // Seamlessly try the next model candidate
+        const errMsg = (error?.message || "").toLowerCase();
+        console.log(`[AI Fallback] Candidate ${currentModel} encountered transient condition (${error?.status || error?.code || 'switching'}), testing next candidate...`);
+        
+        // If it's a 503 Service Unavailable (high demand spike), brief 300ms pause before trying next candidate
+        if (errMsg.includes("503") || errMsg.includes("demand") || errMsg.includes("unavailable")) {
+          await new Promise((r) => setTimeout(r, 300));
+        }
         continue;
       }
     }
 
-    throw lastError || new Error("Layanan AI sedang mengalami lonjakan permintaan.");
+    throw lastError || new Error("Layanan AI sedang mengalami lonjakan permintaan. Sistem beralih ke engine cadangan.");
   };
 
   // High quality deterministic fallback generator for E-RPP
@@ -168,6 +177,7 @@ async function startServer() {
 
     return {
       tujuanPembelajaran: `Melalui model pembelajaran Discovery/Inquiry Learning berorientasi Profil Pelajar Pancasila pada materi ${materi}, peserta didik diharapkan mampu:\n1. Mengidentifikasi konsep esensial dan prinsip dasar ${materi} secara cermat dan kritis.\n2. Menganalisis contoh kasus dan penerapan nyata terkait ${materi} dalam kehidupan sehari-hari.\n3. Menyajikan hasil penelaahan serta berkolaborasi aktif dengan sikap santun, mandiri, dan bertanggung jawab.`,
+      isiMateriPenjelas: `1. Konsep Pokok & Pengertian:\n   ${materi} merupakan salah satu materi esensial dalam mata pelajaran ${mataPelajaran} yang membekali peserta didik dengan pemahaman konseptual dan aplikatif secara mendalam.\n\n2. Uraian & Pokok Bahasan:\n   - Mempelajari prinsip dasar, karakteristik, serta struktur yang mendasari ${materi}.\n   - Mengembangkan kemampuan berpikir kritis dan analitis dalam memecahkan persoalan seputar ${materi}.\n   - Menghubungkan konsep teoritis dengan fakta kontekstual di lingkungan sekitar peserta didik.\n\n3. Penerapan & Contoh Nyata:\n   - Pemecahan studi kasus sederhana baik secara mandiri maupun kolaboratif.\n   - Penggunaan analogi konkret dan bahan peraga untuk memperjelas visualisasi materi.`,
       pendahuluan: `1. Orientasi: Guru membuka kelas dengan salam ramah, memimpin doa bersama, dan memeriksa presensi siswa.\n2. Apersepsi: Guru mengaitkan materi sebelumnya dengan topik '${materi}' melalui pertanyaan pemantik kontekstual.\n3. Motivasi: Guru memaparkan tujuan pembelajaran, manfaat mempelajari '${materi}', serta mekanisme kegiatan dan penilaian hari ini.`,
       kegiatanInti: `1. Stimulasi (Pemberian Rangsangan):\n   - Guru menyajikan bahan tayang/ilustrasi kontekstual seputar materi '${materi}'.\n   - Peserta didik mengamati dan mencatat hal-hal penting secara seksama.\n\n2. Identifikasi Masalah (Problem Statement):\n   - Peserta didik dirangsang untuk menyusun pertanyaan kritis seputar penerapan '${materi}'.\n   - Guru mengelompokkan siswa ke dalam tim belajar heterogen.\n\n3. Pengumpulan Data (Data Collection):\n   - Setiap kelompok mengumpulkan data dan referensi relevan mengenai '${materi}' dari buku ajar dan lembar kerja.\n   - Guru berkeliling memfasilitasi dan memberi bimbingan diferensiasi.\n\n4. Pengolahan Data (Data Processing):\n   - Siswa berdiskusi mengolah data temuan untuk merumuskan simpulan kelompok mengenai '${materi}'.\n   - Menyusun draf laporan hasil eksplorasi pada lembar kerja siswa.\n\n5. Pembuktian & Verifikasi (Verification):\n   - Perwakilan kelompok mempresentasikan hasil diskusi di hadapan kelas.\n   - Kelompok lain menanggapi secara konstruktif dan beretika.\n   - Guru memberikan penguatan materi, klarifikasi, dan apresiasi terhadap partisipasi aktif siswa.`,
       penutup: `1. Simpulan: Bersama guru, peserta didik merangkum poin-poin utama materi '${materi}'.\n2. Refleksi: Peserta didik menyampaikan hal yang telah dipahami dan bagian yang masih membutuhkan pendalaman.\n3. Tindak Lanjut: Guru memberikan tugas mandiri/pengayaan serta menyampaikan agenda pertemuan berikutnya.\n4. Doa & Salam: Pembelajaran diakhiri dengan doa penutup dan salam kehangatan.`,
@@ -176,8 +186,8 @@ async function startServer() {
     };
   };
 
-  // API 1: Generate RPP Draft
-  app.post("/api/generate-rpp", async (req, res) => {
+  // API 1: Generate RPP Draft (supports both JSON payload and multipart FormData with PDF module file)
+  app.post("/api/generate-rpp", upload.single("file"), async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
       const ai = getAi();
@@ -185,23 +195,62 @@ async function startServer() {
       const materi = (req.body?.materi || "").toString().trim();
       const questionType = req.body?.questionType === "Uraian" ? "Uraian" : "Pilihan Ganda";
       const questionCount = Math.min(Math.max(parseInt(req.body?.questionCount, 10) || 5, 1), 20);
+      const hasPdf = !!req.file;
 
-      if (!mataPelajaran || !materi) {
-        return res.status(400).json({ error: "Mata pelajaran dan materi wajib diisi." });
+      if (!mataPelajaran && !materi && !hasPdf) {
+        return res.status(400).json({ error: "Mata pelajaran dan materi wajib diisi, atau lampirkan file PDF Modul Ajar." });
       }
 
       const prompt = `
+        Anda adalah pakar kurikulum nasional dan Kurikulum Merdeka Indonesia.
+        ${hasPdf ? `
+        PENTING - MODUL AJAR (PDF) TERLAMPIR:
+        File PDF yang dilampirkan adalah dokumen "Modul Ajar / Bahan Ajar / Buku Referensi".
+        Gunakan seluruh isi, konsep pokok, capaian kompetensi, istilah, dan alur materi yang terdapat dalam file PDF ini sebagai SUMBER RUJUKAN UTAMA (ground truth).
+        Seluruh draf RPP yang disusun (tujuan pembelajaran, tahapan kegiatan, asesmen, dan terutama latihan soal) HARUS SELARAS, TEPAT, dan SESUAI dengan apa yang diajarkan pada modul ajar terlampir.
+        ${!mataPelajaran ? "- Deteksi dan cantumkan nama Mata Pelajaran yang sesuai dari dokumen modul ini." : `- Mata Pelajaran terdaftar: "${mataPelajaran}".`}
+        ${!materi ? "- Deteksi dan cantumkan judul Topik/Materi pokok utama dari dokumen modul ini." : `- Materi Pokok yang dipilih guru: "${materi}".`}
+        ` : `
         Saya sedang menyusun Rencana Pelaksanaan Pembelajaran (RPP) Kurikulum Nasional / Merdeka untuk mata pelajaran "${mataPelajaran}" dengan materi spesifik "${materi}".
-        Tolong buatkan draf RPP yang komprehensif, padat, dan saling terhubung dengan materi tersebut.
+        `}
+        Tolong buatkan draf RPP yang komprehensif, terstruktur, padat, dan terintegrasi secara utuh.
         
+        PENTING KHUSUS BAGIAN 'isiMateriPenjelas' (Kolom Isi Materi Penjelas):
+        Sajikan uraian materi pembelajaran yang padat, jelas, terstruktur, dan edukatif mengenai topik ini.
+        ${hasPdf ? `
+        - KARENA MODUL PDF TERSEDIA: Ekstrak dan susun ringkasan serta uraian materi penjelas langsung dari dokumen modul ajar PDF terlampir secara akurat (meliputi konsep kunci, teori/rumus/istilah utama, langkah, dan contoh yang ada di dalam modul).
+        ` : `
+        - KARENA TANPA MODUL PDF: Rujuklah konsep dan sumber kurikulum nasional resmi / referensi pendidikan terpercaya (Kemdikbudristek, buku guru/siswa resmi, literatur saintifik terpercaya).
+        `}
+        ATURAN PENOMORAN 'isiMateriPenjelas':
+        Setiap nomor WAJIB DIBERIKAN ENTER / BARIS BARU (TIDAK BOLEH BERJEJER DALAM SATU BARIS):
+        1. Pengertian / Konsep Inti:
+           [Uraian konsep kunci]
+
+        2. Uraian & Poin-Poin Pokok Bahasan:
+           - [Pokok bahasan 1]
+           - [Pokok bahasan 2]
+
+        3. Contoh Kontekstual & Penerapan Nyata:
+           [Uraian contoh kontekstual]
+
         PENTING KHUSUS BAGIAN LATIHAN SOAL (${questionCount} butir soal berjenis ${questionType === 'Uraian' ? 'Uraian / Esai' : 'Pilihan Ganda'}):
         Sajikan persis seperti naskah lembar Ujian / PTS (Penilaian Tengah Semester) resmi yang SUDAH MATANG, teks bersih, sangat mudah dibaca, dan bebas dari tanda markdown tebal seperti ** atau ##.
+        ${hasPdf ? `Soal-soal latihan wajib menguji konsep dan materi yang dibahas secara nyata dalam modul ajar PDF terlampir.` : ''}
         
+        PERINGATAN KERAS UNTUK JAWABAN SOAL:
+        JAWABAN / KUNCI JAWABAN DILARANG KERAS BERGABUNG PADA BARIS SOAL. Kunci jawaban HARUS selalu berada di baris baru tersendiri yang diawali dengan enter!
+
         ${questionType === 'Pilihan Ganda' ? `
         Aturan Format Pilihan Ganda (Naskah Matang):
-        - Tiap butir soal diawali dengan nomor urut: "1. ", "2. ", dst. Teks soal ditulis lengkap dan jelas.
-        - Pilihan jawaban A, B, C, D HARUS berada di baris tersendiri dengan format "   A. Teks", "   B. Teks", "   C. Teks", "   D. Teks" (tanpa tanda bintang atau tanda kurung tebal).
-        - Di baris berikutnya setelah opsi D, cantumkan baris Kunci Jawaban dengan format: "   Kunci Jawaban: [Huruf Opsi] (Pembahasan: [Penjelasan singkat dan padat])".
+        - Tiap butir soal diawali dengan nomor urut: "1. ", "2. ", dst. Teks soal ditulis lengkap dan jelas di barisnya sendiri.
+        - Pilihan jawaban A, B, C, D HARUS berada di baris tersendiri dengan format:
+          A. Teks
+          B. Teks
+          C. Teks
+          D. Teks
+        - Di baris berikutnya setelah opsi D (diberi enter), cantumkan baris Kunci Jawaban tersendiri:
+          Kunci Jawaban: [Huruf Opsi] (Pembahasan: [Penjelasan singkat dan padat])
         - Beri jeda 1 baris kosong antar butir soal.
 
         Contoh keluaran yang diinginkan:
@@ -210,6 +259,7 @@ async function startServer() {
            B. Darah selalu beredar di dalam pembuluh darah
            C. Darah tidak memerlukan pompa jantung
            D. Darah bercampur langsung dengan cairan tubuh
+
            Kunci Jawaban: B (Pembahasan: Sistem peredaran darah tertutup selalu mengalirkan darah melalui pembuluh darah dan dipompa oleh jantung.)
 
         2. Pembuluh darah yang membawa darah kaya oksigen dari paru-paru menuju jantung adalah...
@@ -217,33 +267,71 @@ async function startServer() {
            B. Arteri pulmonalis
            C. Vena kava superior
            D. Aorta
+
            Kunci Jawaban: A (Pembahasan: Vena pulmonalis bertugas membawa darah yang kaya oksigen dari paru-paru kembali ke atrium kiri jantung.)
         ` : `
         Aturan Format Uraian / Esai (Naskah Matang):
-        - Tiap butir soal diawali dengan nomor urut: "1. ", "2. ", dst. Teks soal jelas dan berbasis HOTS (Higher Order Thinking Skills).
-        - Di bawah teks soal, cantumkan baris Kunci Jawaban & Rubrik: "   Kunci Jawaban: [Uraian jawaban lengkap serta kriteria penskoran/rubrik]".
+        - Tiap butir soal diawali dengan nomor urut: "1. ", "2. ", dst. Teks soal jelas di barisnya sendiri.
+        - DI BAWAH TEKS SOAL (WAJIB DI-ENTER DI BARIS TERSENDIRI, TIDAK BOLEH GABUNG DENGAN TEKS SOAL), cantumkan baris Kunci Jawaban:
+          Kunci Jawaban: [Uraian jawaban lengkap serta kriteria penskoran/rubrik]
         - Beri jeda 1 baris kosong antar butir soal.
 
         Contoh:
         1. Jelaskan perbedaan mendasar antara pembuluh arteri dan pembuluh vena dilihat dari arah aliran, ketebalan dinding, dan katupnya!
+
            Kunci Jawaban: Arteri membawa darah keluar dari jantung, dinding tebal elastis, dan katup satu di pangkal. Vena membawa darah menuju jantung, dinding tipis kurang elastis, dan memiliki banyak katup di sepanjang pembuluh. Skor maksimal: 20 poin.
         `}
 
         Berikan jawaban dalam format JSON.
       `;
 
-      // Wrap AI call in a strict 14-second overall deadline to prevent 504 Gateway Timeout on any network/proxy
+      let aiContents: any;
+      if (hasPdf && req.file) {
+        let mimeType = req.file.mimetype;
+        if (!mimeType || mimeType === 'application/octet-stream') {
+          mimeType = 'application/pdf';
+        }
+        aiContents = {
+          parts: [
+            {
+              inlineData: {
+                data: req.file.buffer.toString("base64"),
+                mimeType: mimeType
+              }
+            },
+            {
+              text: prompt
+            }
+          ]
+        };
+      } else {
+        aiContents = prompt;
+      }
+
+      // Call Gemini with multi-model fallback and budget sufficient time for PDF analysis and fallback
       const aiPromise = callGeminiWithRetry(ai, {
-        model: "gemini-3.1-flash-lite",
-        contents: prompt,
+        model: "gemini-3.8-flash",
+        contents: aiContents,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
+              mataPelajaran: {
+                type: Type.STRING,
+                description: "Nama mata pelajaran (dari input guru atau hasil deteksi modul PDF)."
+              },
+              materi: {
+                type: Type.STRING,
+                description: "Judul materi atau topik pokok (dari input guru atau hasil deteksi modul PDF)."
+              },
+              isiMateriPenjelas: {
+                type: Type.STRING,
+                description: "Uraian dan penjelasan materi pembelajaran komprehensif mengenai konsep inti, poin-poin pokok bahasan, dan contoh kontekstual nyata (diambil dari modul PDF jika ada, atau referensi pendidikan terpercaya jika tanpa modul)."
+              },
               tujuanPembelajaran: {
                 type: Type.STRING,
-                description: "Tujuan pembelajaran yang ingin dicapai melalui model pembelajaran Discovery/Inquiry Learning."
+                description: "Tujuan pembelajaran yang ingin dicapai melalui model pembelajaran Discovery/Inquiry Learning sesuai modul."
               },
               pendahuluan: {
                 type: Type.STRING,
@@ -251,7 +339,7 @@ async function startServer() {
               },
               kegiatanInti: {
                 type: Type.STRING,
-                description: "Langkah-langkah kegiatan inti (eksplorasi, elaborasi, konfirmasi) yang sangat spesifik tentang materi yang diajarkan."
+                description: "Langkah-langkah kegiatan inti (eksplorasi, elaborasi, konfirmasi) yang sangat spesifik tentang materi yang diajarkan sesuai modul."
               },
               penutup: {
                 type: Type.STRING,
@@ -271,9 +359,10 @@ async function startServer() {
         }
       });
 
+      // Generous 26-second overall ceiling to allow model fallback attempts
       const response: any = await Promise.race([
         aiPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("AI overall request timeout (14s)")), 14000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("AI overall request timeout")), 26000))
       ]);
 
       let rawText = response.text || "";
@@ -292,15 +381,46 @@ async function startServer() {
         }
       }
 
-      if (json && typeof json.latihanSoal === "string") {
-        // Strip markdown asterisks and standardize question lines
-        json.latihanSoal = json.latihanSoal
+      if (json && typeof json.isiMateriPenjelas === "string") {
+        let text = json.isiMateriPenjelas
           .replace(/\*\*(.*?)\*\*/g, "$1")
           .replace(/\*(.*?)\*/g, "$1")
           .replace(/__(.*?)__/g, "$1")
           .replace(/_(.*?)_/g, "$1")
           .replace(/`([^`]+)`/g, "$1")
           .trim();
+        // Pastikan setiap penomoran materi tidak berjejer dalam satu baris, berikan enter ganda
+        text = text.replace(/([^\n])\s*(?=(?:^|[^\w])(?:[0-9]{1,2}[\.\)]|[A-Da-d][\.\)])\s+[A-Z0-9\(\[\"\'\u00C0-\u017F])/g, "$1\n\n");
+        text = text.replace(/([^\n])\s*(?=(?:[\-\*•])\s+[A-Za-z0-9])/g, "$1\n   ");
+        json.isiMateriPenjelas = text;
+      }
+
+      if (json && typeof json.latihanSoal === "string") {
+        // Strip markdown asterisks and standardize question lines
+        let soalText = json.latihanSoal
+          .replace(/\*\*(.*?)\*\*/g, "$1")
+          .replace(/\*(.*?)\*/g, "$1")
+          .replace(/__(.*?)__/g, "$1")
+          .replace(/_(.*?)_/g, "$1")
+          .replace(/`([^`]+)`/g, "$1")
+          .trim();
+
+        // Pastikan penomoran soal dipisahkan baris baru
+        soalText = soalText.replace(/([^\n])\s*(?=(?:^|[^\w])(?:Soal\s*)?[0-9]{1,2}[\.\)]\s+[A-Z0-9\(\[\"\'\u00C0-\u017F])/g, "$1\n\n");
+        // Pastikan Kunci Jawaban / Pembahasan TIDAK GABUNG di baris soal, wajib di-enter
+        soalText = soalText.replace(/([^\n])\s*(?=(?:Kunci\s*(?:Jawaban)?(?:\s*(?:dan|&)\s*Pembahasan)?|Jawaban\s*(?:Benar)?|Rubrik\s*(?:Penilaian)?|Pembahasan)\s*[:\-])/gi, "$1\n   ");
+        // Pastikan pilihan jawaban A, B, C, D di-enter di baris baru tersendiri
+        soalText = soalText.replace(/([^\n])\s*(?=(?:^|\s)[\(\[]?[A-Ea-e][\.\)\]\:]\s+[^\n])/g, "$1\n   ");
+
+        json.latihanSoal = soalText;
+      }
+
+      // Ensure mataPelajaran and materi are preserved if previously given
+      if (mataPelajaran && (!json.mataPelajaran || !json.mataPelajaran.trim())) {
+        json.mataPelajaran = mataPelajaran;
+      }
+      if (materi && (!json.materi || !json.materi.trim())) {
+        json.materi = materi;
       }
 
       res.json(json);
@@ -314,6 +434,124 @@ async function startServer() {
         Math.min(Math.max(parseInt(req.body?.questionCount, 10) || 5, 1), 20)
       );
       return res.json(fallbackData);
+    }
+  });
+
+  // API 1B: Extract Module Metadata from PDF
+  app.post("/api/extract-module-info", upload.single("file"), async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "File PDF modul ajar wajib diunggah." });
+      }
+
+      const ai = getAi();
+      const fileBuffer = req.file.buffer;
+      let mimeType = req.file.mimetype || "application/pdf";
+      if (mimeType === 'application/octet-stream') mimeType = 'application/pdf';
+      const base64Data = fileBuffer.toString("base64");
+
+      const response = await callGeminiWithRetry(ai, {
+        model: "gemini-3.8-flash",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType
+              }
+            },
+            {
+              text: `Analisis dokumen Modul Ajar / Bahan Ajar / Silabus PDF ini.
+Ekstrak informasi pokok identitas dan substansi pembelajaran:
+- 'mataPelajaran': Nama mata pelajaran yang diajarkan (contoh: Matematika, IPAS, Bahasa Indonesia, dll).
+- 'materi': Topik utama atau judul bab/sub-bab pokok (Judul Materi) yang dibahas dalam modul ini.
+- 'isiMateriPenjelas': Uraian dan penjelasan materi pembelajaran komprehensif dari modul ini (konsep inti, poin-poin pokok bahasan, dan contoh/langkah).
+- 'kelasSemester': Tingkat kelas atau fase (contoh: 'Kelas 5', 'Kelas 4 / Ganjil', 'Fase C').
+- 'alokasiWaktu': Perkiraan atau ketentuan alokasi waktu jika tertulis (contoh: '2 x 35 Menit' atau '3 JP').
+- 'ringkasan': Ringkasan singkat 1-2 kalimat mengenai fokus materi pokok pada modul ini.
+- 'tujuanPembelajaran': Tujuan pembelajaran jika sudah tercantum di modul (opsional).`
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              mataPelajaran: { type: Type.STRING, description: "Nama mata pelajaran" },
+              materi: { type: Type.STRING, description: "Judul topik atau materi pokok modul" },
+              isiMateriPenjelas: { type: Type.STRING, description: "Uraian dan penjelasan isi materi pokok dari modul" },
+              kelasSemester: { type: Type.STRING, description: "Tingkat kelas / semester jika ada" },
+              alokasiWaktu: { type: Type.STRING, description: "Alokasi waktu jika ada" },
+              ringkasan: { type: Type.STRING, description: "Ringkasan singkat isi modul" },
+              tujuanPembelajaran: { type: Type.STRING, description: "Tujuan pembelajaran jika tertera" }
+            },
+            required: ["mataPelajaran", "materi"]
+          }
+        }
+      });
+
+      let text = response.text || "";
+      if (!text) throw new Error("Tidak ada respon dari layanan AI.");
+      text = text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) {
+          json = JSON.parse(match[0]);
+        } else {
+          throw new Error("Format hasil analisis modul tidak valid sebagai JSON.");
+        }
+      }
+
+      if (json && typeof json.isiMateriPenjelas === "string") {
+        let materiText = json.isiMateriPenjelas
+          .replace(/\*\*(.*?)\*\*/g, "$1")
+          .replace(/\*(.*?)\*/g, "$1")
+          .replace(/__(.*?)__/g, "$1")
+          .replace(/_(.*?)_/g, "$1")
+          .replace(/`([^`]+)`/g, "$1")
+          .trim();
+        materiText = materiText.replace(/([^\n])\s*(?=(?:^|[^\w])(?:[0-9]{1,2}[\.\)]|[A-Da-d][\.\)])\s+[A-Z0-9\(\[\"\'\u00C0-\u017F])/g, "$1\n\n");
+        materiText = materiText.replace(/([^\n])\s*(?=(?:[\-\*•])\s+[A-Za-z0-9])/g, "$1\n   ");
+        json.isiMateriPenjelas = materiText;
+      }
+
+      res.json(json);
+
+    } catch (error: any) {
+      console.log("[Module Extraction Fallback] Switched to deterministic parser:", error?.message || error);
+      const originalName = req.file ? req.file.originalname : "Modul Ajar";
+      const cleanName = originalName.replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+
+      // Detect mapel from filename if possible
+      let detectedMapel = "Pendidikan Pancasila";
+      const lowerName = cleanName.toLowerCase();
+      if (lowerName.includes("matematika") || lowerName.includes("math")) detectedMapel = "Matematika";
+      else if (lowerName.includes("ipas") || lowerName.includes("ipa") || lowerName.includes("sains")) detectedMapel = "IPAS";
+      else if (lowerName.includes("bahasa indonesia") || lowerName.includes("indo")) detectedMapel = "Bahasa Indonesia";
+      else if (lowerName.includes("bahasa inggris") || lowerName.includes("inggris")) detectedMapel = "Bahasa Inggris";
+      else if (lowerName.includes("pai") || lowerName.includes("agama")) detectedMapel = "Pendidikan Agama Islam";
+      else if (lowerName.includes("pjok") || lowerName.includes("olahraga")) detectedMapel = "PJOK";
+      else if (lowerName.includes("seni")) detectedMapel = "Seni Budaya";
+
+      // Detect kelas from filename
+      let detectedKelas = "Kelas 4";
+      const matchKelas = cleanName.match(/kelas\s*([0-9IVX]+)/i);
+      if (matchKelas) detectedKelas = `Kelas ${matchKelas[1]}`;
+
+      return res.json({
+        mataPelajaran: detectedMapel,
+        materi: cleanName,
+        isiMateriPenjelas: `1. Pengertian & Konsep Inti:\nMateri ${cleanName} berfokus pada penguasaan konsep esensial, pemahaman teori dasar, dan pembentukan keterampilan berpikir kritis sesuai capaian pembelajaran ${detectedKelas}.\n\n2. Uraian & Poin Pokok Bahasan:\n- Pemahaman konsep dan definisi kunci materi ${cleanName}.\n- Langkah-langkah analitis dan pembuktian konsep melalui eksplorasi terbimbing.\n- Hubungan sebab-akibat serta keterkaitan materi dengan materi prasyarat sebelumnya.\n\n3. Contoh Kontekstual & Penerapan Nyata:\nPeserta didik mengamati dan mempraktikkan penyelesaian studi kasus kontekstual dalam kehidupan sehari-hari, serta merumuskan simpulan hasil belajar.`,
+        kelasSemester: `${detectedKelas} / Ganjil`,
+        alokasiWaktu: "2 x 35 Menit (1 Pertemuan)",
+        ringkasan: `Modul ajar ${cleanName} memuat tujuan pembelajaran, materi pokok, dan panduan asesmen ${detectedMapel} untuk ${detectedKelas}.`,
+        tujuanPembelajaran: `Peserta didik mampu memahami, menganalisis, dan mempraktikkan konsep dasar ${cleanName} dengan teliti dan bernalar kritis.`
+      });
     }
   });
 
@@ -331,7 +569,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3.8-flash",
         contents: {
           parts: [
             {
@@ -387,7 +625,7 @@ async function startServer() {
       res.json(json);
 
     } catch (error: any) {
-      console.error(error);
+      console.log("[Extract Questions Error]:", error?.message || error);
       res.status(500).json({ error: error.message || "Failed to extract questions" });
     }
   });
@@ -413,7 +651,7 @@ async function startServer() {
       const base64Data = fileBuffer.toString("base64");
 
       const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3.8-flash",
         contents: {
           parts: [
             {
@@ -493,7 +731,7 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
 
       res.json(json);
     } catch (error: any) {
-      console.error(error);
+      console.log("[Extract Schedule Error]:", error?.message || error);
       res.status(500).json({ error: error.message || "Failed to extract schedule" });
     }
   });

@@ -3,8 +3,9 @@ import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Plus, Trash2, Edit2, Upload, FileDown, Clock, BookOpen, User, MapPin, X, CheckCircle, AlertTriangle, FileSpreadsheet, Filter, Image as ImageIcon } from 'lucide-react';
+import { Calendar, Plus, Trash2, Edit2, Upload, FileDown, Clock, BookOpen, User, MapPin, X, CheckCircle, AlertTriangle, FileSpreadsheet, Filter, Image as ImageIcon, Sparkles, LayoutGrid } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import IllustratedSchedulePoster from '../components/IllustratedSchedulePoster';
 
 interface ScheduleItem {
   id: string;
@@ -30,8 +31,13 @@ export default function SchedulesScreen() {
   );
   
   const [activeTab, setActiveTab] = useState<'pelajaran' | 'ujian'>('pelajaran');
+  const [viewMode, setViewMode] = useState<'poster' | 'cards'>('poster');
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [customImageUrl, setCustomImageUrl] = useState<string | null>(null);
+  const [schoolName, setSchoolName] = useState<string>(
+    (userData?.schoolName || userData?.sekolah || 'SEKOLAH DASAR').trim()
+  );
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -79,8 +85,117 @@ export default function SchedulesScreen() {
       setLoading(false);
     });
 
-    return () => unsub();
+    // Listen for custom image
+    const unsubImage = onSnapshot(doc(db, 'jadwal_images', selectedClass), (docSnap) => {
+      if (docSnap.exists()) {
+        setCustomImageUrl(docSnap.data().imageUrl || null);
+      } else {
+        setCustomImageUrl(null);
+      }
+    });
+
+    return () => {
+      unsub();
+      unsubImage();
+    };
   }, [selectedClass]);
+
+  // Load School Settings
+  useEffect(() => {
+    const unsubSchool = onSnapshot(doc(db, 'settings', 'school'), (snapshot) => {
+      if (snapshot.exists()) {
+        const d = snapshot.data();
+        const detected = (d.schoolName || d.namaSekolah || '').trim();
+        if (detected && !detected.toUpperCase().includes('CERDAS')) {
+          setSchoolName(detected);
+        }
+      }
+    });
+    return () => unsubSchool();
+  }, []);
+
+  // 1-Click Load Illustrated Sample Schedule matching the user's attached design
+  const handleLoadSampleIllustratedSchedule = async () => {
+    try {
+      const sampleItems = [
+        // 07:00 - 07:30 Dzikir Pagi
+        { hari: 'Senin', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Ustadz / Ustadzah', keterangan: 'Doa & Pembiasaan Karakter' },
+        { hari: 'Selasa', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Ustadz / Ustadzah', keterangan: 'Doa & Pembiasaan Karakter' },
+        { hari: 'Rabu', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Ustadz / Ustadzah', keterangan: 'Doa & Pembiasaan Karakter' },
+        { hari: 'Kamis', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Ustadz / Ustadzah', keterangan: 'Doa & Pembiasaan Karakter' },
+        { hari: 'Jumat', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Ustadz / Ustadzah', keterangan: 'Doa & Pembiasaan Karakter' },
+        { hari: 'Sabtu', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Ustadz / Ustadzah', keterangan: 'Doa & Pembiasaan Karakter' },
+
+        // 07:30 - 08:30
+        { hari: 'Senin', jam: '07:30 - 08:30', mataPelajaran: 'Halaqah', pengajar: 'Guru Halaqah', keterangan: 'Tahsin & Tahfidz Quran' },
+        { hari: 'Selasa', jam: '07:30 - 08:30', mataPelajaran: 'Pendidikan Pancasila', pengajar: 'Guru Kelas', keterangan: 'Karakter & Kewarganegaraan' },
+        { hari: 'Rabu', jam: '07:30 - 08:30', mataPelajaran: 'PJOK', pengajar: 'Guru Olahraga', keterangan: 'Olahraga & Senam Sehat' },
+        { hari: 'Kamis', jam: '07:30 - 08:30', mataPelajaran: 'Halaqah', pengajar: 'Guru Halaqah', keterangan: 'Tahsin & Tahfidz Quran' },
+        { hari: 'Jumat', jam: '07:30 - 08:30', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Guru Kelas', keterangan: 'Membaca & Menulis Ceria' },
+        { hari: 'Sabtu', jam: '07:30 - 08:30', mataPelajaran: 'Bahasa Jawa', pengajar: 'Guru Muatan Lokal', keterangan: 'Budaya & Bahasa Daerah' },
+
+        // 08:30 - 08:50 Istirahat Pendek
+        { hari: 'Senin', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Snack & Minum Sehat' },
+        { hari: 'Selasa', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Snack & Minum Sehat' },
+        { hari: 'Rabu', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Snack & Minum Sehat' },
+        { hari: 'Kamis', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Snack & Minum Sehat' },
+        { hari: 'Jumat', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Snack & Minum Sehat' },
+        { hari: 'Sabtu', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Snack & Minum Sehat' },
+
+        // 08:50 - 09:20
+        { hari: 'Senin', jam: '08:50 - 09:20', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Guru Kelas', keterangan: 'Literasi' },
+        { hari: 'Selasa', jam: '08:50 - 09:20', mataPelajaran: 'Halaqah', pengajar: 'Guru Halaqah', keterangan: 'Murajaah' },
+        { hari: 'Rabu', jam: '08:50 - 09:20', mataPelajaran: 'Matematika', pengajar: 'Guru Kelas', keterangan: 'Berhitung & Logika' },
+        { hari: 'Kamis', jam: '08:50 - 09:20', mataPelajaran: 'Matematika', pengajar: 'Guru Kelas', keterangan: 'Berhitung & Logika' },
+        { hari: 'Jumat', jam: '08:50 - 09:20', mataPelajaran: 'Aqidah Akhlak', pengajar: 'Guru Agama', keterangan: 'Adab Mulia' },
+        { hari: 'Sabtu', jam: '08:50 - 09:20', mataPelajaran: 'Halaqah', pengajar: 'Guru Halaqah', keterangan: 'Tahfidz' },
+
+        // 09:50 - 10:20 Istirahat Pendek
+        { hari: 'Senin', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Istirahat' },
+        { hari: 'Selasa', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Istirahat' },
+        { hari: 'Rabu', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Istirahat' },
+        { hari: 'Kamis', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Istirahat' },
+        { hari: 'Jumat', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Istirahat' },
+        { hari: 'Sabtu', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat Pendek', pengajar: 'Wali Kelas', keterangan: 'Istirahat' },
+
+        // 10:20 - 10:50
+        { hari: 'Senin', jam: '10:20 - 10:50', mataPelajaran: 'Bahasa Arab', pengajar: 'Guru B. Arab', keterangan: 'Mufrodat Dasar' },
+        { hari: 'Selasa', jam: '10:20 - 10:50', mataPelajaran: 'Fiqih', pengajar: 'Guru Fiqih', keterangan: 'Praktik Ibadah' },
+        { hari: 'Rabu', jam: '10:20 - 10:50', mataPelajaran: 'Halaqah', pengajar: 'Guru Halaqah', keterangan: 'Tahsin' },
+        { hari: 'Kamis', jam: '10:20 - 10:50', mataPelajaran: 'SBdP', pengajar: 'Guru Seni', keterangan: 'Prakarya & Mewarnai' },
+        { hari: 'Jumat', jam: '10:20 - 10:50', mataPelajaran: 'Infaq & Doa', pengajar: 'Wali Kelas', keterangan: 'Jumat Berkah' },
+        { hari: 'Sabtu', jam: '10:20 - 10:50', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Guru Kelas', keterangan: 'Membaca Cerita' },
+
+        // 11:20 - 11:35 Walas
+        { hari: 'Senin', jam: '11:20 - 11:35', mataPelajaran: 'Walas (Taudi, Piket, Refleksi)', pengajar: 'Wali Kelas', keterangan: 'Refleksi Harian' },
+        { hari: 'Selasa', jam: '11:20 - 11:35', mataPelajaran: 'Walas (Taudi, Piket, Refleksi)', pengajar: 'Wali Kelas', keterangan: 'Refleksi Harian' },
+        { hari: 'Rabu', jam: '11:20 - 11:35', mataPelajaran: 'Walas (Taudi, Piket, Refleksi)', pengajar: 'Wali Kelas', keterangan: 'Refleksi Harian' },
+        { hari: 'Kamis', jam: '11:20 - 11:35', mataPelajaran: 'Walas (Taudi, Piket, Refleksi)', pengajar: 'Wali Kelas', keterangan: 'Refleksi Harian' },
+        { hari: 'Jumat', jam: '11:20 - 11:35', mataPelajaran: 'Walas (Taudi, Piket, Refleksi)', pengajar: 'Wali Kelas', keterangan: 'Refleksi Harian' },
+        { hari: 'Sabtu', jam: '11:20 - 11:35', mataPelajaran: 'Walas (Taudi, Piket, Refleksi)', pengajar: 'Wali Kelas', keterangan: 'Refleksi Harian' },
+      ];
+
+      const batch = writeBatch(db);
+      for (const item of sampleItems) {
+        const newRef = doc(collection(db, 'jadwal_kelas'));
+        batch.set(newRef, {
+          classId: selectedClass,
+          type: 'pelajaran',
+          hari: item.hari,
+          jam: item.jam,
+          mataPelajaran: item.mataPelajaran,
+          pengajar: item.pengajar,
+          ruangan: 'Ruang Kelas',
+          keterangan: item.keterangan
+        });
+      }
+      await batch.commit();
+      showToast(`Berhasil memuat contoh jadwal bergambar lengkap untuk ${selectedClass}!`, 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast('Gagal memuat contoh jadwal: ' + err.message, 'error');
+    }
+  };
 
   const handleOpenModal = (item?: ScheduleItem) => {
     if (item) {
@@ -529,39 +644,110 @@ export default function SchedulesScreen() {
             </select>
           </div>
 
-          <div className="flex bg-slate-200/80 p-1 rounded-2xl text-xs font-semibold w-full sm:w-auto">
-            <button
-              onClick={() => setActiveTab('pelajaran')}
-              className={`flex-1 sm:flex-initial px-5 py-2 rounded-xl transition-all ${activeTab === 'pelajaran' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              Jadwal Pelajaran
-            </button>
-            <button
-              onClick={() => setActiveTab('ujian')}
-              className={`flex-1 sm:flex-initial px-5 py-2 rounded-xl transition-all ${activeTab === 'ujian' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              Jadwal Ujian
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle */}
+            <div className="flex bg-slate-200/90 p-1 rounded-2xl text-xs font-bold">
+              <button
+                onClick={() => setViewMode('poster')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl transition-all ${
+                  viewMode === 'poster'
+                    ? 'bg-white text-indigo-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Tampilan poster grafis kartun ilustrasi menarik sesuai gambar lampiran"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Poster Bergambar</span>
+              </button>
+              <button
+                onClick={() => setViewMode('cards')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl transition-all ${
+                  viewMode === 'cards'
+                    ? 'bg-white text-indigo-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Tampilan daftar kartu per mata pelajaran"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Grid Kartu</span>
+              </button>
+            </div>
+
+            <div className="flex bg-slate-200/80 p-1 rounded-2xl text-xs font-semibold w-full sm:w-auto">
+              <button
+                onClick={() => setActiveTab('pelajaran')}
+                className={`flex-1 sm:flex-initial px-5 py-2 rounded-xl transition-all ${activeTab === 'pelajaran' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Jadwal Pelajaran
+              </button>
+              <button
+                onClick={() => setActiveTab('ujian')}
+                className={`flex-1 sm:flex-initial px-5 py-2 rounded-xl transition-all ${activeTab === 'ujian' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Jadwal Ujian
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Schedule List */}
-        <div className="p-6">
+        {/* Schedule Content */}
+        <div className="p-4 sm:p-6">
           {loading ? (
-            <div className="flex justify-center py-12">
-              <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+            <div className="flex justify-center py-16">
+              <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : filteredSchedules.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 space-y-3">
-              <Calendar className="w-12 h-12 opacity-30" />
-              <p className="text-base font-semibold text-slate-600">
-                Belum ada {activeTab === 'pelajaran' ? 'Jadwal Pelajaran' : 'Jadwal Ujian'} untuk {selectedClass}
-              </p>
-              <p className="text-xs text-slate-400 max-w-sm">
-                Klik tombol "Tambah Jadwal" di atas atau unggah file Excel untuk mengisinya secara otomatis.
-              </p>
+            <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 space-y-4 max-w-lg mx-auto">
+              <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center shadow-xs">
+                <Calendar className="w-8 h-8" />
+              </div>
+              <div>
+                <p className="text-base font-bold text-slate-700">
+                  Belum ada {activeTab === 'pelajaran' ? 'Jadwal Pelajaran' : 'Jadwal Ujian'} untuk {selectedClass}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Mulai dengan menambahkan mata pelajaran atau klik tombol contoh jadwal bergambar di bawah.
+                </p>
+              </div>
+
+              {activeTab === 'pelajaran' && (
+                <button
+                  onClick={handleLoadSampleIllustratedSchedule}
+                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-2xl text-xs font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 text-yellow-200" />
+                  <span>Muat Contoh Jadwal Bergambar (Sesuai Gambar Lampiran)</span>
+                </button>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  onClick={() => handleOpenModal()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs"
+                >
+                  + Tambah Manual
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
+                >
+                  Impor Excel
+                </button>
+              </div>
             </div>
+          ) : viewMode === 'poster' ? (
+            /* Illustrated Graphic Poster View */
+            <IllustratedSchedulePoster
+              classId={selectedClass}
+              schedules={schedules}
+              type={activeTab}
+              schoolName={schoolName}
+              customImageUrl={customImageUrl}
+              onUploadCustomImage={() => imageInputRef.current?.click()}
+              onEditItem={(item) => handleOpenModal(item)}
+            />
           ) : (
+            /* Cards Grid View */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredSchedules.map(item => (
                 <div

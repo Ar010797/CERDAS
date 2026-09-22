@@ -25,7 +25,7 @@ export default function SettingsGuru() {
 
   // --- Kop Surat State ---
   const [schoolSettings, setSchoolSettings] = useState({
-    namaSekolah: 'CERDAS',
+    namaSekolah: '',
     namaKepalaSekolah: '',
     nipKepalaSekolah: ''
   });
@@ -40,7 +40,12 @@ export default function SettingsGuru() {
     // Realtime listener for School Settings
     const unsubSchool = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (docSnap) => {
       if (docSnap.exists()) {
-        setSchoolSettings(docSnap.data() as any);
+        const data = docSnap.data();
+        setSchoolSettings({
+          namaSekolah: data.namaSekolah || data.schoolName || '',
+          namaKepalaSekolah: data.namaKepalaSekolah || data.kepalaSekolah || '',
+          nipKepalaSekolah: data.nipKepalaSekolah || ''
+        });
       }
     });
 
@@ -87,7 +92,14 @@ export default function SettingsGuru() {
     setSavingKop(true);
     try {
       await setDoc(doc(db, 'pengaturan_sekolah', 'utama'), schoolSettings, { merge: true });
-      alert('Kop Surat berhasil disimpan!');
+      // Sinkronkan juga ke settings/school agar RPP dan Bank Soal langsung mendeteksi
+      await setDoc(doc(db, 'settings', 'school'), {
+        schoolName: schoolSettings.namaSekolah,
+        namaSekolah: schoolSettings.namaSekolah,
+        kepalaSekolah: schoolSettings.namaKepalaSekolah,
+        nipKepalaSekolah: schoolSettings.nipKepalaSekolah
+      }, { merge: true });
+      alert('Kop Surat dan Satuan Pendidikan berhasil disimpan!');
     } catch (error) {
       console.error(error);
       alert('Gagal menyimpan Kop Surat.');
@@ -276,16 +288,20 @@ export default function SettingsGuru() {
 
           {/* Pengaturan Kop Surat */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
+            <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center space-x-2">
               <Building className="w-5 h-5 text-indigo-500" />
-              <span>Pengaturan Kop Surat (E-Rapor)</span>
+              <span>Satuan Pendidikan & Kop Surat (RPP & E-Rapor)</span>
             </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Nama sekolah yang dimasukkan di sini akan menjadi identitas "Satuan Pendidikan" pada RPP, lembar soal, dan E-Rapor (bukan nama aplikasi).
+            </p>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nama Sekolah</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nama Sekolah (Satuan Pendidikan)</label>
                 <input
                   type="text"
+                  placeholder="Contoh: SDN 1 Merdeka Belajar"
                   value={schoolSettings.namaSekolah}
                   onChange={e => setSchoolSettings({...schoolSettings, namaSekolah: e.target.value})}
                   className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"

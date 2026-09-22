@@ -4,13 +4,21 @@ import { db } from '../../lib/firebase';
 import { 
   Sparkles, Save, FileDown, BookOpen, Filter, Plus, Trash2, Edit2, ChevronLeft, 
   Calendar, FileText, X, ListOrdered, Edit3, CheckCircle2, HelpCircle, ExternalLink, 
-  Printer, Eye, EyeOff, Copy, Check, AlertTriangle, Layers, Award, CheckSquare 
+  Printer, Eye, EyeOff, Copy, Check, AlertTriangle, Layers, Award, CheckSquare,
+  FileUp, FileCheck, UploadCloud, RefreshCw, Info
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  saveModuleToStorage, 
+  updateModuleMetaInStorage, 
+  getActiveModuleFromStorage, 
+  deleteModuleFromStorage, 
+  clearAllModulesFromStorage 
+} from '../../lib/pdfModuleStorage';
 
 const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
 
@@ -41,14 +49,77 @@ export function cleanMarkdown(str: string): string {
     .replace(/__(.*?)__/g, '$1')
     .replace(/_(.*?)_/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
-    .replace(/^#+\s*/g, '')
+    .replace(/^#+\s*/gm, '')
     .trim();
+}
+
+/**
+ * Merapikan penomoran pada isi materi agar nomor-nomor tidak berjejer dalam satu baris,
+ * melainkan diberi enter/baris baru sehingga cepat dan mudah dibaca.
+ */
+export function formatIsiMateri(text: string): string {
+  if (!text || !text.trim()) return '';
+  let str = cleanMarkdown(text).trim();
+  str = str.replace(/\r\n/g, '\n');
+
+  // Berikan enter ganda sebelum nomor urut (1., 2., 1), 2), A., B., dll) jika didahului karakter biasa
+  str = str.replace(/([^\n])\s*(?=(?:^|[^\w])(?:[0-9]{1,2}[\.\)]|[A-Da-d][\.\)])\s+[A-Z0-9\(\[\"\'\u00C0-\u017F])/g, '$1\n\n');
+
+  // Berikan enter sebelum poin tanda hubung / peluru (- atau •)
+  str = str.replace(/([^\n])\s*(?=(?:[\-\*•])\s+[A-Za-z0-9])/g, '$1\n   ');
+
+  const rawLines = str.split('\n');
+  const result: string[] = [];
+  let prevWasEmpty = false;
+
+  for (const raw of rawLines) {
+    const trimmed = raw.trimEnd();
+    if (!trimmed.trim()) {
+      if (!prevWasEmpty && result.length > 0) {
+        result.push('');
+        prevWasEmpty = true;
+      }
+      continue;
+    }
+    prevWasEmpty = false;
+
+    // Pastikan jika ada nomor seperti "1.", "2." ada jeda baris kosong sebelumnya
+    const isNumbered = /^[0-9]{1,2}[\.\)]\s+/.test(trimmed.trim());
+    if (isNumbered && result.length > 0 && result[result.length - 1] !== '') {
+      result.push('');
+    }
+    result.push(trimmed);
+  }
+
+  return result.join('\n').trim();
+}
+
+/**
+ * Menormalkan teks soal agar nomor soal, pilihan A-D, dan kunci jawaban dipisahkan baris baru secara rapi
+ * sehingga jawaban tidak pernah bergabung pada baris soal.
+ */
+export function normalizePTSQuestionString(text: string): string {
+  if (!text) return '';
+  let str = cleanMarkdown(text).trim();
+  str = str.replace(/\r\n/g, '\n');
+
+  // 1. Enter ganda sebelum nomor soal jika sebelumnya teks biasa
+  str = str.replace(/([^\n])\s*(?=(?:^|[^\w])(?:Soal\s*)?[0-9]{1,2}[\.\)]\s+[A-Z0-9\(\[\"\'\u00C0-\u017F])/g, '$1\n\n');
+
+  // 2. Enter sebelum Kunci Jawaban / Jawaban / Pembahasan agar tidak gabung di baris soal atau opsi
+  str = str.replace(/([^\n])\s*(?=(?:Kunci\s*(?:Jawaban)?(?:\s*(?:dan|&)\s*Pembahasan)?|Jawaban\s*(?:Benar)?|Rubrik\s*(?:Penilaian)?|Pembahasan)\s*[:\-])/gi, '$1\n   ');
+
+  // 3. Enter sebelum pilihan A, B, C, D jika berada dalam satu baris
+  str = str.replace(/([^\n])\s*(?=(?:^|\s)[\(\[]?[A-Ea-e][\.\)\]\:]\s+[^\n])/g, '$1\n   ');
+
+  return str;
 }
 
 export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
   if (!text || !text.trim()) return [];
 
-  const rawLines = text.split('\n');
+  const normalized = normalizePTSQuestionString(text);
+  const rawLines = normalized.split('\n');
   const questions: FormattedPTSQuestion[] = [];
   let currentQ: { number: number; lines: string[] } | null = null;
 
@@ -56,22 +127,33 @@ export function parsePTSQuestions(text: string): FormattedPTSQuestion[] {
     const cleaned = cleanMarkdown(rawLine).trim();
     if (!cleaned) continue;
 
-    // Ignore redundant headers (e.g. "Bagian D", "Latihan Soal", "Pilihan Ganda:", etc.)
-    if (/^(?:Bagian\s+[A-Za-z0-9]|Latihan\s+Soal|Pilihan\s+Ganda|Soal\s+Uraian|Petunjuk\s+Pengerjaan)\s*[:\-]?$/i.test(cleaned)) {
+    // Ignore redundant section headers or exam instructions
+    if (
+      /^(?:(?:Bagian\s+[A-Za-z0-9]|Bab\s+\d+|Latihan\s+Soal|Pilihan\s+Ganda|Soal\s+Uraian|Petunjuk\s+(?:Pengerjaan|Khusus|Umum)|Lembar\s+Soal)\s*[:\-]?)$/i.test(cleaned) ||
+      /^(?:(?:Petunjuk|Pilihlah|Jawablah)\s+.*)$/i.test(cleaned) && !currentQ
+    ) {
       continue;
     }
 
-    // Check if line indicates a new question number (e.g. 1., 1), No. 1, Soal 1:)
-    const isOptionStart = /^[\(\[]?[A-Ea-e][\.\)\]\:]\s+/.test(cleaned);
-    const numMatch = cleaned.match(/^(?:Soal\s+|No\.\s*)?(\d+)[\.\)\:\-]\s*(.*)/i);
+    // Check if line indicates an option (e.g. A. or A) or (A))
+    const isOptionStart = /^[\(\[]?([A-Ea-e])[\.\)\]\:]\s+/.test(cleaned);
+
+    // Check if line starts a new question number (e.g. 1., 1), No. 1, Soal 1:)
+    const numMatch = cleaned.match(/^(?:(?:Soal|No|Nomor)\s*[\.:\-]?\s*)?(\d+)[\.\)\:\-]\s*(.*)/i);
 
     if (numMatch && !isOptionStart) {
       if (currentQ) {
         questions.push(buildPTSQuestion(currentQ.number, currentQ.lines));
       }
-      currentQ = { number: parseInt(numMatch[1], 10), lines: numMatch[2].trim() ? [numMatch[2].trim()] : [] };
+      currentQ = {
+        number: parseInt(numMatch[1], 10),
+        lines: numMatch[2].trim() ? [numMatch[2].trim()] : []
+      };
+    } else if (!currentQ && !isOptionStart) {
+      // First question might not have explicit "1." prefix
+      currentQ = { number: 1, lines: [cleaned] };
     } else if (currentQ) {
-      // Check if line has multiple inline options (e.g. 'A. x   B. y   C. z   D. w')
+      // Check if line contains multiple inline options (e.g. 'A. x   B. y   C. z   D. w')
       const inlineMatches = cleaned.match(/[\(\[]?[A-Ea-e][\.\)\]\:]\s+/g);
       if (inlineMatches && inlineMatches.length > 1) {
         const parts = cleaned.split(/(?=[\(\[]?[A-Ea-e][\.\)\]\:]\s+)/);
@@ -98,19 +180,28 @@ function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
   let inOptions = false;
 
   for (const rawLine of lines) {
-    const line = cleanMarkdown(rawLine).trim();
+    let line = cleanMarkdown(rawLine).trim();
     if (!line) continue;
 
+    // Pastikan jika ada kunci jawaban yang sempat tergabung dalam satu baris dengan soal, langsung dipisahkan
+    const inlineKeyMatch = line.match(/^(.*?)(?:\s+(?:Kunci\s*(?:Jawaban)?(?:\s*(?:dan|&)\s*Pembahasan)?|Jawaban\s*(?:Benar)?|Rubrik\s*(?:Penilaian)?|Pembahasan)\s*[:\-]\s*(.*))$/i);
+    if (inlineKeyMatch && !answerKey) {
+      line = inlineKeyMatch[1].trim();
+      answerKey = inlineKeyMatch[2].trim() || 'Terlampir';
+    }
+
     const optMatch = line.match(/^[\(\[]?([A-Ea-e])[\.\)\]\:]\s*(.*)/);
-    const keyMatch = line.match(/^(?:\*?\s*(?:Kunci\s*(?:Jawaban)?|Jawaban|Rubrik\s*(?:Penilaian)?|Pembahasan|Kunci))\s*[:\-]\s*(.*)/i);
+    const keyMatch = line.match(/^(?:\*?\s*(?:Kunci\s*(?:Jawaban)?(?:\s*(?:dan|&)\s*Pembahasan)?|Jawaban\s*(?:Benar)?|Rubrik\s*(?:Penilaian)?|Pembahasan|Kunci))\s*[:\-]\s*(.*)/i);
 
     if (keyMatch) {
       answerKey = keyMatch[1] || line;
       inOptions = false;
     } else if (optMatch) {
-      options.push({ label: optMatch[1].toUpperCase(), text: cleanMarkdown(optMatch[2]).trim() });
+      const cleanOpt = cleanMarkdown(optMatch[2]).replace(/^\[\s*|\s*\]$/g, '').trim();
+      options.push({ label: optMatch[1].toUpperCase(), text: cleanOpt });
       inOptions = true;
     } else if (inOptions && options.length > 0) {
+      // Continuation of previous option
       options[options.length - 1].text += ' ' + line;
     } else if (!answerKey) {
       questionParts.push(line);
@@ -124,34 +215,49 @@ function buildPTSQuestion(num: number, lines: string[]): FormattedPTSQuestion {
   let explanation = '';
 
   if (rawKey) {
-    const letterMatch = rawKey.match(/^([A-Ea-e])\b(?:\s*[\.\:\-\(]\s*(.*))?/);
+    // Matches option letter e.g. A, B, C, D, E with optional parentheses or bracket
+    const letterMatch = rawKey.match(/^[\(\[]?([A-Ea-e])[\)\]]?\b(?:\s*[\.\:\-\(]\s*(.*)|[\s]+(.*))?/);
     if (letterMatch) {
       keyLetter = letterMatch[1].toUpperCase();
-      let rest = (letterMatch[2] || '').trim();
+      let rest = (letterMatch[2] || letterMatch[3] || '').trim();
       if (rest.endsWith(')')) rest = rest.slice(0, -1).trim();
       rest = rest.replace(/^(?:Pembahasan|Penjelasan|Keterangan)\s*[:\-]\s*/i, '').trim();
       explanation = rest;
     } else {
-      explanation = rawKey;
+      explanation = rawKey.replace(/^(?:Pembahasan|Penjelasan|Keterangan)\s*[:\-]\s*/i, '').trim();
     }
   }
 
+  // Standardize the display key format
+  let standardizedKey = rawKey;
+  if (keyLetter) {
+    standardizedKey = explanation ? `${keyLetter} (Pembahasan: ${explanation})` : keyLetter;
+  }
+
+  // Preserve multi-line question stimuli cleanly
+  const questionStem = questionParts.join('\n').trim() || lines[0] || '';
+
   return {
     number: num,
-    question: cleanMarkdown(questionParts.join(' ').trim() || lines[0] || ''),
+    question: cleanMarkdown(questionStem),
     options,
-    answerKey: rawKey,
+    answerKey: standardizedKey,
     keyLetter,
     explanation
   };
 }
 
 export function formatAsPTS(text: string): string {
-  const parsed = parsePTSQuestions(text);
+  const normalized = normalizePTSQuestionString(text);
+  const parsed = parsePTSQuestions(normalized);
   if (parsed.length === 0) return cleanMarkdown(text);
 
   return parsed.map((q, idx) => {
-    let out = `${idx + 1}. ${q.question}`;
+    const stemLines = q.question.split('\n').map(l => l.trim()).filter(Boolean);
+    let out = `${idx + 1}. ${stemLines[0] || ''}`;
+    for (let i = 1; i < stemLines.length; i++) {
+      out += `\n   ${stemLines[i]}`;
+    }
     if (q.options && q.options.length > 0) {
       q.options.forEach(opt => {
         out += `\n   ${opt.label}. ${opt.text}`;
@@ -264,6 +370,7 @@ export function generateClientSideRPP(
 
   return {
     tujuanPembelajaran: `Melalui model pembelajaran Discovery/Inquiry Learning berorientasi Profil Pelajar Pancasila pada materi ${materi}, peserta didik diharapkan mampu:\n1. Mengidentifikasi konsep esensial dan prinsip dasar ${materi} secara cermat dan kritis.\n2. Menganalisis contoh kasus dan penerapan nyata terkait ${materi} dalam kehidupan sehari-hari.\n3. Menyajikan hasil penelaahan serta berkolaborasi aktif dengan sikap santun, mandiri, dan bertanggung jawab.`,
+    isiMateriPenjelas: `1. Konsep Pokok & Pengertian:\n   ${materi} merupakan salah satu materi pokok esensial dalam mata pelajaran ${mataPelajaran} yang membekali peserta didik dengan pemahaman konsep, struktur berpikir logis, dan keterampilan aplikatif.\n\n2. Uraian & Poin-Poin Pokok Bahasan:\n   - Mempelajari prinsip dasar, karakteristik, serta struktur penting yang mendasari ${materi}.\n   - Mengembangkan kemampuan bernalar kritis dan analitis dalam memecahkan persoalan seputar ${materi}.\n   - Menghubungkan pemahaman teoritis dengan fakta kontekstual di lingkungan sekitar peserta didik.\n\n3. Penerapan & Contoh Kontekstual:\n   - Penyelesaian studi kasus nyata baik secara mandiri maupun berkolaborasi dalam kelompok.\n   - Penggunaan analogi konkret dan bahan ajar pendukung untuk memperkuat pemahaman.`,
     pendahuluan: `1. Orientasi: Guru membuka kelas dengan salam ramah, memimpin doa bersama, dan memeriksa presensi siswa.\n2. Apersepsi: Guru mengaitkan materi sebelumnya dengan topik '${materi}' melalui pertanyaan pemantik kontekstual.\n3. Motivasi: Guru memaparkan tujuan pembelajaran, manfaat mempelajari '${materi}', serta mekanisme kegiatan dan penilaian hari ini.`,
     kegiatanInti: `1. Stimulasi (Pemberian Rangsangan):\n   - Guru menyajikan bahan tayang/ilustrasi kontekstual seputar materi '${materi}'.\n   - Peserta didik mengamati dan mencatat hal-hal penting secara seksama.\n\n2. Identifikasi Masalah (Problem Statement):\n   - Peserta didik dirangsang untuk menyusun pertanyaan kritis seputar penerapan '${materi}'.\n   - Guru mengelompokkan siswa ke dalam tim belajar heterogen.\n\n3. Pengumpulan Data (Data Collection):\n   - Setiap kelompok mengumpulkan data dan referensi relevan mengenai '${materi}' dari buku ajar dan lembar kerja.\n   - Guru berkeliling memfasilitasi dan memberi bimbingan diferensiasi.\n\n4. Pengolahan Data (Data Processing):\n   - Siswa berdiskusi mengolah data temuan untuk merumuskan simpulan kelompok mengenai '${materi}'.\n   - Menyusun draf laporan hasil eksplorasi pada lembar kerja siswa.\n\n5. Pembuktian & Verifikasi (Verification):\n   - Perwakilan kelompok mempresentasikan hasil diskusi di hadapan kelas.\n   - Kelompok lain menanggapi secara konstruktif dan beretika.\n   - Guru memberikan penguatan materi, klarifikasi, dan apresiasi terhadap partisipasi aktif siswa.`,
     penutup: `1. Simpulan: Bersama guru, peserta didik merangkum poin-poin utama materi '${materi}'.\n2. Refleksi: Peserta didik menyampaikan hal yang telah dipahami dan bagian yang masih membutuhkan pendalaman.\n3. Tindak Lanjut: Guru memberikan tugas mandiri/pengayaan serta menyampaikan agenda pertemuan berikutnya.\n4. Doa & Salam: Pembelajaran diakhiri dengan doa penutup dan salam kehangatan.`,
@@ -285,10 +392,12 @@ export default function LessonPlansGuru() {
   );
   
   // Form State
+  const [satuanPendidikan, setSatuanPendidikan] = useState('');
   const [mataPelajaran, setMataPelajaran] = useState('');
   const [kelasSemester, setKelasSemester] = useState(`${selectedClass} / Ganjil`);
   const [alokasiWaktu, setAlokasiWaktu] = useState('');
   const [materi, setMateri] = useState('');
+  const [isiMateriPenjelas, setIsiMateriPenjelas] = useState('');
   const [tujuanPembelajaran, setTujuanPembelajaran] = useState('');
   const [pendahuluan, setPendahuluan] = useState('');
   const [kegiatanInti, setKegiatanInti] = useState('');
@@ -305,14 +414,170 @@ export default function LessonPlansGuru() {
   const [copiedSoal, setCopiedSoal] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Reference Module PDF State (Impor PDF Modul Ajar & Penyimpanan Acuan)
+  const [modulePdfFile, setModulePdfFile] = useState<File | null>(null);
+  const [modulePdfName, setModulePdfName] = useState<string>('');
+  const [modulePdfSize, setModulePdfSize] = useState<string>('');
+  const [storedModuleId, setStoredModuleId] = useState<string | null>(null);
+  const [isExtractingModule, setIsExtractingModule] = useState<boolean>(false);
+  const [moduleSummary, setModuleSummary] = useState<string | null>(null);
+  const [isDraggingPdf, setIsDraggingPdf] = useState<boolean>(false);
+  const pdfInputRef = React.useRef<HTMLInputElement | null>(null);
+
   // Cross-device PDF & modal states
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewFilename, setPdfPreviewFilename] = useState<string>('');
   const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
+  const [deleteModuleConfirmOpen, setDeleteModuleConfirmOpen] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4500);
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Restore stored active reference module on initial mount
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const stored = await getActiveModuleFromStorage();
+        if (isMounted && stored) {
+          setStoredModuleId(stored.id);
+          setModulePdfFile(stored.file);
+          setModulePdfName(stored.name);
+          setModulePdfSize(stored.size);
+          if (stored.summary) setModuleSummary(stored.summary);
+        }
+      } catch (err) {
+        console.warn('Could not restore stored module from IndexedDB:', err);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handlePdfFileSelect = async (file: File) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      showToast('Hanya file PDF (Modul Ajar / Bahan Ajar) yang didukung.', 'error');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      showToast('Ukuran file PDF maksimal 20 MB.', 'error');
+      return;
+    }
+
+    setModulePdfFile(file);
+    setModulePdfName(file.name);
+    setModulePdfSize(formatFileSize(file.size));
+    setModuleSummary(null);
+
+    try {
+      const stored = await saveModuleToStorage(file);
+      setStoredModuleId(stored.id);
+      showToast(`Dokumen Modul Ajar "${file.name}" tersimpan sebagai acuan materi!`, 'success');
+      // Auto-analyze to detect subject, topic, and summary
+      handleAnalyzeModule(file, stored.id);
+    } catch (err) {
+      console.warn('Storage save error:', err);
+      showToast(`Dokumen Modul Ajar "${file.name}" siap dijadikan rujukan!`, 'success');
+      handleAnalyzeModule(file);
+    }
+  };
+
+  const handleAnalyzeModule = async (fileToAnalyze?: File, activeId?: string) => {
+    const targetFile = fileToAnalyze || modulePdfFile;
+    if (!targetFile) return;
+
+    setIsExtractingModule(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', targetFile);
+
+      const res = await fetch('/api/extract-module-info', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (res.ok) {
+        const info = await res.json();
+        if (info.mataPelajaran && (!mataPelajaran.trim() || mataPelajaran === 'Mata Pelajaran')) {
+          setMataPelajaran(info.mataPelajaran);
+        }
+        if (info.materi && (!materi.trim() || materi === 'Materi Pokok')) {
+          setMateri(info.materi);
+        }
+        if (info.isiMateriPenjelas && !isiMateriPenjelas.trim()) {
+          setIsiMateriPenjelas(info.isiMateriPenjelas);
+        }
+        if (info.kelasSemester && (!kelasSemester.trim() || kelasSemester === `${selectedClass} / Ganjil`)) {
+          setKelasSemester(info.kelasSemester);
+        }
+        if (info.alokasiWaktu && info.alokasiWaktu !== 'null' && !alokasiWaktu.trim()) {
+          setAlokasiWaktu(info.alokasiWaktu);
+        }
+        if (info.ringkasan) {
+          setModuleSummary(info.ringkasan);
+        }
+        if (info.tujuanPembelajaran && info.tujuanPembelajaran !== 'null' && !tujuanPembelajaran.trim()) {
+          setTujuanPembelajaran(info.tujuanPembelajaran);
+        }
+
+        const idToUpdate = activeId || storedModuleId;
+        if (idToUpdate) {
+          updateModuleMetaInStorage(idToUpdate, {
+            summary: info.ringkasan,
+            mataPelajaran: info.mataPelajaran,
+            materi: info.materi,
+            kelasSemester: info.kelasSemester
+          });
+        }
+
+        showToast('✨ Struktur dan materi pokok modul ajar berhasil diidentifikasi!', 'success');
+      }
+    } catch (err) {
+      console.warn('Analysis error:', err);
+    } finally {
+      setIsExtractingModule(false);
+    }
+  };
+
+  const handleDeleteStoredModule = async () => {
+    try {
+      if (storedModuleId) {
+        await deleteModuleFromStorage(storedModuleId);
+      } else {
+        await clearAllModulesFromStorage();
+      }
+    } catch (err) {
+      console.warn('Delete error:', err);
+    }
+    setStoredModuleId(null);
+    setModulePdfFile(null);
+    setModulePdfName('');
+    setModulePdfSize('');
+    setModuleSummary(null);
+    if (pdfInputRef.current) {
+      pdfInputRef.current.value = '';
+    }
+    setDeleteModuleConfirmOpen(false);
+    showToast('Acuan modul ajar PDF berhasil dihapus dari penyimpanan.', 'success');
+  };
+
+  const handleClearModulePdf = () => {
+    setModulePdfFile(null);
+    setModulePdfName('');
+    setModulePdfSize('');
+    setModuleSummary(null);
+    if (pdfInputRef.current) {
+      pdfInputRef.current.value = '';
+    }
+    showToast('File referensi modul ajar telah dilepas dari form aktif.', 'success');
   };
 
   const handleFormatPTS = () => {
@@ -320,6 +585,13 @@ export default function LessonPlansGuru() {
     const formatted = formatAsPTS(latihanSoal);
     setLatihanSoal(formatted);
     showToast('Naskah soal berhasil dirapikan sesuai format resmi PTS/Ujian!', 'success');
+  };
+
+  const handleFormatIsiMateri = () => {
+    if (!isiMateriPenjelas.trim()) return;
+    const formatted = formatIsiMateri(isiMateriPenjelas);
+    setIsiMateriPenjelas(formatted);
+    showToast('Format nomor materi berhasil dirapikan dengan enter!', 'success');
   };
 
   const handleCopyQuestions = () => {
@@ -334,25 +606,53 @@ export default function LessonPlansGuru() {
     setTimeout(() => setCopiedSoal(false), 2500);
   };
 
+  const defaultSchoolName = (userData?.schoolName || userData?.sekolah || 'SD / SMP / SMA Negeri').trim();
+
   const [schoolSettings, setSchoolSettings] = useState({
-    namaSekolah: 'CERDAS',
+    namaSekolah: defaultSchoolName,
     namaKepalaSekolah: '',
     nipKepalaSekolah: ''
   });
 
-  // Load Settings
+  // Load Settings from both 'pengaturan_sekolah/utama' and 'settings/school'
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'settings', 'school'), (doc) => {
-      if (doc.exists()) {
-        setSchoolSettings({
-          namaSekolah: doc.data().schoolName || 'CERDAS',
-          namaKepalaSekolah: doc.data().kepalaSekolah || '',
-          nipKepalaSekolah: doc.data().nipKepalaSekolah || ''
-        });
+    const unsub1 = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (snapshot) => {
+      if (snapshot.exists()) {
+        const d = snapshot.data();
+        const detectedName = (d.namaSekolah || d.schoolName || '').trim();
+        if (detectedName && !detectedName.toUpperCase().includes('CERDAS')) {
+          setSchoolSettings(prev => ({
+            ...prev,
+            namaSekolah: detectedName,
+            namaKepalaSekolah: d.namaKepalaSekolah || d.kepalaSekolah || prev.namaKepalaSekolah,
+            nipKepalaSekolah: d.nipKepalaSekolah || prev.nipKepalaSekolah
+          }));
+          setSatuanPendidikan(prev => prev.trim() ? prev : detectedName);
+        }
       }
     });
-    return () => unsub();
-  }, []);
+
+    const unsub2 = onSnapshot(doc(db, 'settings', 'school'), (snapshot) => {
+      if (snapshot.exists()) {
+        const d = snapshot.data();
+        const detectedName = (d.schoolName || d.namaSekolah || '').trim();
+        if (detectedName && !detectedName.toUpperCase().includes('CERDAS')) {
+          setSchoolSettings(prev => ({
+            ...prev,
+            namaSekolah: detectedName,
+            namaKepalaSekolah: d.kepalaSekolah || d.namaKepalaSekolah || prev.namaKepalaSekolah,
+            nipKepalaSekolah: d.nipKepalaSekolah || prev.nipKepalaSekolah
+          }));
+          setSatuanPendidikan(prev => prev.trim() ? prev : detectedName);
+        }
+      }
+    });
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
+  }, [userData]);
 
   // Load Saved RPPs
   useEffect(() => {
@@ -374,38 +674,82 @@ export default function LessonPlansGuru() {
     return () => unsub();
   }, [userData, isAdmin]);
 
-  const resetForm = () => {
+  const resetForm = async () => {
     setEditingId(null);
+    setSatuanPendidikan(
+      (schoolSettings.namaSekolah && !schoolSettings.namaSekolah.toUpperCase().includes('CERDAS') ? schoolSettings.namaSekolah : '') ||
+      userData?.schoolName ||
+      userData?.sekolah ||
+      'SD / SMP / SMA Negeri'
+    );
     setMataPelajaran('');
     setKelasSemester(`${selectedClass} / Ganjil`);
     setAlokasiWaktu('');
     setMateri('');
+    setIsiMateriPenjelas('');
     setTujuanPembelajaran('');
     setPendahuluan('');
     setKegiatanInti('');
     setPenutup('');
     setLatihanSoal('');
     setPenilaian('');
+
+    // If there is an active reference module saved in IndexedDB, preserve it for the next lesson plan
+    try {
+      const stored = await getActiveModuleFromStorage();
+      if (stored) {
+        setStoredModuleId(stored.id);
+        setModulePdfFile(stored.file);
+        setModulePdfName(stored.name);
+        setModulePdfSize(stored.size);
+        if (stored.summary) setModuleSummary(stored.summary);
+        return;
+      }
+    } catch (e) {
+      console.warn('Error reading stored module:', e);
+    }
+
+    setModulePdfFile(null);
+    setModulePdfName('');
+    setModulePdfSize('');
+    setModuleSummary(null);
+    setStoredModuleId(null);
+    if (pdfInputRef.current) {
+      pdfInputRef.current.value = '';
+    }
   };
 
-  const handleOpenForm = (rpp?: any) => {
+  const handleOpenForm = async (rpp?: any, triggerPdfUpload: boolean = false) => {
     if (rpp) {
       setEditingId(rpp.id);
-      setSelectedClass(rpp.kelasSemester.split(' / ')[0] || selectedClass);
+      setSelectedClass(rpp.kelasSemester ? rpp.kelasSemester.split(' / ')[0] : selectedClass);
+      setSatuanPendidikan(
+        rpp.satuanPendidikan ||
+        (schoolSettings.namaSekolah && !schoolSettings.namaSekolah.toUpperCase().includes('CERDAS') ? schoolSettings.namaSekolah : '') ||
+        userData?.schoolName ||
+        userData?.sekolah ||
+        'SD / SMP / SMA Negeri'
+      );
       setMataPelajaran(rpp.mataPelajaran || '');
       setKelasSemester(rpp.kelasSemester || `${selectedClass} / Ganjil`);
       setAlokasiWaktu(rpp.alokasiWaktu || '');
       setMateri(rpp.materi || '');
+      setIsiMateriPenjelas(rpp.isiMateriPenjelas ? formatIsiMateri(rpp.isiMateriPenjelas) : '');
       setTujuanPembelajaran(rpp.tujuanPembelajaran || '');
       setPendahuluan(rpp.pendahuluan || '');
       setKegiatanInti(rpp.kegiatanInti || '');
       setPenutup(rpp.penutup || '');
-      setLatihanSoal(rpp.latihanSoal || '');
+      setLatihanSoal(rpp.latihanSoal ? formatAsPTS(rpp.latihanSoal) : '');
       setPenilaian(rpp.penilaian || '');
     } else {
-      resetForm();
+      await resetForm();
     }
     setView('form');
+    if (triggerPdfUpload) {
+      setTimeout(() => {
+        pdfInputRef.current?.click();
+      }, 150);
+    }
   };
 
   const confirmDelete = async () => {
@@ -425,30 +769,46 @@ export default function LessonPlansGuru() {
     const cleanMapel = mataPelajaran.trim();
     const cleanMateri = materi.trim();
 
-    if (!cleanMapel || !cleanMateri) {
-      showToast("Silakan isi Mata Pelajaran dan Materi terlebih dahulu, atau gunakan tombol rekomendasi di bawah.", "error");
+    if (!modulePdfFile && (!cleanMapel || !cleanMateri)) {
+      showToast("Silakan isi Mata Pelajaran dan Materi terlebih dahulu, atau unggah file PDF modul ajar di atas.", "error");
       return;
     }
     
     setIsGenerating(true);
     const controller = new AbortController();
-    // 15 seconds client timeout so mobile devices never hang
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    // 30 seconds client timeout ensures enough time for PDF processing and multi-model fallback
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     let data: any = null;
 
     try {
-      const response = await fetch('/api/generate-rpp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          mataPelajaran: cleanMapel, 
-          materi: cleanMateri, 
-          questionType, 
-          questionCount 
-        }),
-        signal: controller.signal
-      });
+      let response: Response;
+      if (modulePdfFile) {
+        const formData = new FormData();
+        formData.append('file', modulePdfFile);
+        formData.append('mataPelajaran', cleanMapel);
+        formData.append('materi', cleanMateri);
+        formData.append('questionType', questionType);
+        formData.append('questionCount', questionCount.toString());
+
+        response = await fetch('/api/generate-rpp', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal
+        });
+      } else {
+        response = await fetch('/api/generate-rpp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            mataPelajaran: cleanMapel, 
+            materi: cleanMateri, 
+            questionType, 
+            questionCount 
+          }),
+          signal: controller.signal
+        });
+      }
       clearTimeout(timeoutId);
       
       if (response.ok) {
@@ -466,21 +826,33 @@ export default function LessonPlansGuru() {
 
     // Seamless Fallback: if server was unreachable, 504 gateway timeout, or AI busy
     if (!data || !data.tujuanPembelajaran) {
-      data = generateClientSideRPP(cleanMapel, cleanMateri, questionType, questionCount);
+      data = generateClientSideRPP(cleanMapel || "Mata Pelajaran", cleanMateri || "Materi Pokok", questionType, questionCount);
     }
 
     try {
+      if (data.mataPelajaran && (!cleanMapel || cleanMapel === 'Mata Pelajaran')) {
+        setMataPelajaran(data.mataPelajaran);
+      }
+      if (data.materi && (!cleanMateri || cleanMateri === 'Materi Pokok')) {
+        setMateri(data.materi);
+      }
       setKelasSemester(`${selectedClass} / Ganjil`);
       if (!alokasiWaktu.trim()) {
         setAlokasiWaktu("2 x 45 Menit (1 Pertemuan)");
       }
       if (data.tujuanPembelajaran) setTujuanPembelajaran(data.tujuanPembelajaran);
+      if (data.isiMateriPenjelas) setIsiMateriPenjelas(formatIsiMateri(data.isiMateriPenjelas));
       if (data.pendahuluan) setPendahuluan(data.pendahuluan);
       if (data.kegiatanInti) setKegiatanInti(data.kegiatanInti);
       if (data.penutup) setPenutup(data.penutup);
       if (data.latihanSoal) setLatihanSoal(formatAsPTS(data.latihanSoal));
       if (data.penilaian) setPenilaian(data.penilaian);
-      showToast("✨ Draf E-RPP & bank soal PTS berhasil disusun otomatis!", "success");
+
+      if (modulePdfFile) {
+        showToast("✨ Draf E-RPP & bank soal berhasil disusun selaras dengan Modul Ajar PDF!", "success");
+      } else {
+        showToast("✨ Draf E-RPP & bank soal PTS berhasil disusun otomatis!", "success");
+      }
     } catch (renderErr) {
       console.error(renderErr);
       showToast("Gagal memproses draf RPP.", "error");
@@ -491,23 +863,33 @@ export default function LessonPlansGuru() {
 
   const handleSave = async () => {
     if (!mataPelajaran.trim() || !materi.trim()) {
-      showToast("Mata Pelajaran dan Materi harus diisi.", "error");
+      showToast("Mata Pelajaran dan Judul Materi harus diisi.", "error");
       return;
     }
     setSaving(true);
     try {
+      const cleanSchool = (
+        satuanPendidikan.trim() ||
+        (schoolSettings.namaSekolah && !schoolSettings.namaSekolah.toUpperCase().includes('CERDAS') ? schoolSettings.namaSekolah : '') ||
+        userData?.schoolName ||
+        userData?.sekolah ||
+        'SD / SMP / SMA Negeri'
+      ).trim();
+
       const payload = {
         teacherId: userData?.uid,
         teacherName: userData?.name || 'Guru',
+        satuanPendidikan: cleanSchool,
         mataPelajaran: mataPelajaran.trim(),
         kelasSemester,
         alokasiWaktu: alokasiWaktu || "2 x 45 Menit (1 Pertemuan)",
         materi: materi.trim(),
+        isiMateriPenjelas: formatIsiMateri(isiMateriPenjelas),
         tujuanPembelajaran,
         pendahuluan,
         kegiatanInti,
         penutup,
-        latihanSoal,
+        latihanSoal: formatAsPTS(latihanSoal),
         penilaian,
         updatedAt: new Date().toISOString()
       };
@@ -533,10 +915,12 @@ export default function LessonPlansGuru() {
 
   const exportPDF = (rppData?: any) => {
     const dataToExport = rppData || {
+      satuanPendidikan,
       mataPelajaran,
       kelasSemester,
       alokasiWaktu,
       materi,
+      isiMateriPenjelas,
       tujuanPembelajaran,
       pendahuluan,
       kegiatanInti,
@@ -592,10 +976,18 @@ export default function LessonPlansGuru() {
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(30, 41, 59);
 
+    const resolvedSchoolName = (
+      dataToExport.satuanPendidikan ||
+      (schoolSettings.namaSekolah && !schoolSettings.namaSekolah.toUpperCase().includes('CERDAS') ? schoolSettings.namaSekolah : '') ||
+      userData?.schoolName ||
+      userData?.sekolah ||
+      'SD / SMP / SMA Negeri'
+    ).trim();
+
     // Left Column
     pdf.text('Satuan Pendidikan', 22, yPos + 5);
     pdf.setFont("helvetica", "normal");
-    pdf.text(`: ${schoolSettings.namaSekolah || 'Sekolah'}`, 54, yPos + 5);
+    pdf.text(`: ${resolvedSchoolName}`, 54, yPos + 5);
 
     pdf.setFont("helvetica", "bold");
     pdf.text('Mata Pelajaran', 22, yPos + 10.5);
@@ -603,7 +995,7 @@ export default function LessonPlansGuru() {
     pdf.text(`: ${dataToExport.mataPelajaran || '-'}`, 54, yPos + 10.5);
 
     pdf.setFont("helvetica", "bold");
-    pdf.text('Materi Pokok', 22, yPos + 16);
+    pdf.text('Judul Materi', 22, yPos + 16);
     pdf.setFont("helvetica", "normal");
     const cleanMateri = (dataToExport.materi || '-');
     const materiLines = pdf.splitTextToSize(`: ${cleanMateri}`, 64);
@@ -667,7 +1059,62 @@ export default function LessonPlansGuru() {
 
     // 3. SECTIONS
     printRegularSection('A. TUJUAN PEMBELAJARAN', dataToExport.tujuanPembelajaran);
-    printRegularSection('B. MATERI PEMBELAJARAN', dataToExport.materi);
+
+    // B. MATERI PEMBELAJARAN (Judul Materi & Isi Materi Penjelas)
+    printSectionHeader('B. MATERI PEMBELAJARAN');
+    checkPageBreak(8);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('1. Judul Materi:', 20, yPos);
+    yPos += 4.5;
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(51, 65, 85);
+    const materiLinesSection = pdf.splitTextToSize(dataToExport.materi || '-', 166);
+    for (const line of materiLinesSection) {
+      checkPageBreak(5);
+      pdf.text(line, 24, yPos);
+      yPos += 4.5;
+    }
+    yPos += 2;
+
+    if (dataToExport.isiMateriPenjelas && dataToExport.isiMateriPenjelas.trim()) {
+      checkPageBreak(8);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(30, 41, 59);
+      pdf.text('2. Isi Materi Penjelas (Uraian Konsep Pokok):', 20, yPos);
+      yPos += 5.0;
+
+      const formattedMateri = formatIsiMateri(dataToExport.isiMateriPenjelas);
+      const paragraphs = formattedMateri.split('\n');
+      for (const p of paragraphs) {
+        const trimmed = p.trim();
+        if (!trimmed) {
+          yPos += 2.0;
+          continue;
+        }
+
+        const isNumbered = /^[0-9]{1,2}[\.\)]\s+/.test(trimmed);
+        if (isNumbered) {
+          yPos += 1.2;
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(15, 23, 42);
+        } else {
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(51, 65, 85);
+        }
+
+        const explLines = pdf.splitTextToSize(trimmed, 166);
+        for (const line of explLines) {
+          checkPageBreak(5);
+          pdf.text(line, 24, yPos);
+          yPos += 4.5;
+        }
+      }
+      yPos += 2.5;
+    }
+    yPos += 3;
 
     // Langkah Kegiatan
     printSectionHeader('C. LANGKAH-LANGKAH KEGIATAN PEMBELAJARAN');
@@ -737,8 +1184,37 @@ export default function LessonPlansGuru() {
 
     if (parsedQuestions.length > 0) {
       for (const q of parsedQuestions) {
-        // Prevent awkward question breaking
-        checkPageBreak(24);
+        const cleanQText = cleanMarkdown(q.question);
+        const qStemParagraphs = cleanQText.split('\n').map(p => p.trim()).filter(Boolean);
+        let qStemLinesCount = 0;
+        for (const p of qStemParagraphs) {
+          qStemLinesCount += pdf.splitTextToSize(p, 163).length;
+        }
+        const qStemHeight = Math.max(qStemLinesCount * 4.6, 6);
+
+        let optionsHeight = 0;
+        if (q.options && q.options.length > 0) {
+          for (const opt of q.options) {
+            const optLines = pdf.splitTextToSize(cleanMarkdown(opt.text), 153);
+            optionsHeight += (optLines.length * 4.4) + 0.8;
+          }
+        }
+
+        let keyBoxHeight = 0;
+        if (q.answerKey) {
+          const explText = cleanMarkdown(q.explanation || (!q.keyLetter ? q.answerKey : ''));
+          const explLines = explText ? pdf.splitTextToSize(explText, 154) : [];
+          keyBoxHeight = (explLines.length > 0 ? (explLines.length * 4.0) + 8.5 : 7.0) + 3.5;
+        }
+
+        const totalQuestionBlockHeight = qStemHeight + optionsHeight + keyBoxHeight + 6;
+
+        // Prevent breaking: If the full question block fits on a single page, keep it together!
+        if (totalQuestionBlockHeight <= 240) {
+          checkPageBreak(totalQuestionBlockHeight);
+        } else {
+          checkPageBreak(28);
+        }
 
         // Question Number & Text with proper hanging indent
         pdf.setFont("helvetica", "bold");
@@ -746,30 +1222,42 @@ export default function LessonPlansGuru() {
         pdf.setTextColor(15, 23, 42);
         pdf.text(`${q.number}.`, 20, yPos);
 
-        const cleanQText = cleanMarkdown(q.question);
-        const qTextLines = pdf.splitTextToSize(cleanQText, 163);
-        for (let i = 0; i < qTextLines.length; i++) {
-          if (i > 0) checkPageBreak(5);
-          pdf.text(qTextLines[i], 27, yPos);
-          yPos += 4.6;
+        for (let pIdx = 0; pIdx < qStemParagraphs.length; pIdx++) {
+          const pText = qStemParagraphs[pIdx];
+          const qTextLines = pdf.splitTextToSize(pText, 163);
+          pdf.setFont("helvetica", pIdx === 0 ? "bold" : "normal");
+          pdf.setTextColor(15, 23, 42);
+          for (let i = 0; i < qTextLines.length; i++) {
+            if (yPos > 275) {
+              pdf.addPage();
+              yPos = 20;
+            }
+            pdf.text(qTextLines[i], 27, yPos);
+            yPos += 4.5;
+          }
+          if (pIdx < qStemParagraphs.length - 1) yPos += 1.0;
         }
-        yPos += 1;
+        yPos += 1.2;
 
         // Options (A, B, C, D)
         if (q.options && q.options.length > 0) {
           pdf.setFontSize(8.5);
           for (const opt of q.options) {
-            checkPageBreak(6);
+            const cleanOptText = cleanMarkdown(opt.text);
+            const optLines = pdf.splitTextToSize(cleanOptText, 153);
+
+            if (yPos + (optLines.length * 4.4) > 275) {
+              pdf.addPage();
+              yPos = 20;
+            }
+
             pdf.setFont("helvetica", "bold");
             pdf.setTextColor(67, 56, 202);
             pdf.text(`${opt.label}.`, 28, yPos);
 
             pdf.setFont("helvetica", "normal");
             pdf.setTextColor(51, 65, 85);
-            const cleanOptText = cleanMarkdown(opt.text);
-            const optLines = pdf.splitTextToSize(cleanOptText, 153);
             for (let j = 0; j < optLines.length; j++) {
-              if (j > 0) checkPageBreak(4.5);
               pdf.text(optLines[j], 34, yPos);
               yPos += 4.4;
             }
@@ -779,20 +1267,24 @@ export default function LessonPlansGuru() {
 
         // Answer Key & Pembahasan Box
         if (q.answerKey) {
-          checkPageBreak(14);
-          pdf.setFontSize(8);
-
-          const keyLabel = q.keyLetter ? `Kunci Jawaban: [ ${q.keyLetter} ]` : 'Kunci Jawaban / Rubrik Penilaian:';
           const explText = cleanMarkdown(q.explanation || (!q.keyLetter ? q.answerKey : ''));
           const explLines = explText ? pdf.splitTextToSize(explText, 154) : [];
-          const keyBoxHeight = (explLines.length > 0 ? (explLines.length * 4.0) + 8.5 : 7.0);
+          const actualBoxHeight = (explLines.length > 0 ? (explLines.length * 4.0) + 8.5 : 7.0);
+
+          if (yPos + actualBoxHeight > 275) {
+            pdf.addPage();
+            yPos = 20;
+          }
+
+          const keyLabel = q.keyLetter ? `Kunci Jawaban: [ Pilihan ${q.keyLetter} ]` : 'Kunci Jawaban / Rubrik Penilaian:';
 
           pdf.setFillColor(248, 250, 252);
           pdf.setDrawColor(203, 213, 225);
           pdf.setLineWidth(0.2);
-          pdf.roundedRect(26, yPos, 164, keyBoxHeight, 1.5, 1.5, 'FD');
+          pdf.roundedRect(26, yPos, 164, actualBoxHeight, 1.5, 1.5, 'FD');
 
           pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(8);
           pdf.setTextColor(13, 148, 136); // teal
           pdf.text(keyLabel, 29, yPos + 4.2);
 
@@ -805,14 +1297,14 @@ export default function LessonPlansGuru() {
               currentKeyY += 4.0;
             }
           }
-          yPos += keyBoxHeight + 3.5;
+          yPos += actualBoxHeight + 3.5;
         }
 
         // Question Divider
         pdf.setDrawColor(226, 232, 240);
         pdf.setLineWidth(0.2);
         pdf.line(20, yPos, 190, yPos);
-        yPos += 3.5;
+        yPos += 3.8;
       }
       yPos += 2;
     } else {
@@ -935,13 +1427,23 @@ export default function LessonPlansGuru() {
           </div>
 
           {view === 'list' ? (
-            <button
-              onClick={() => handleOpenForm()}
-              className="flex items-center space-x-2 bg-white text-indigo-700 hover:bg-indigo-50 px-5 py-3 rounded-2xl text-sm font-bold shadow-lg transition-all hover:scale-105"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Buat RPP Baru</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                onClick={() => handleOpenForm(undefined, true)}
+                className="flex items-center space-x-2 bg-indigo-500/80 hover:bg-indigo-500 text-white border border-white/20 px-4 py-3 rounded-2xl text-sm font-bold shadow-lg transition-all hover:scale-105 backdrop-blur-sm"
+                title="Unggah file PDF Modul Ajar untuk menyusun draf RPP otomatis"
+              >
+                <FileUp className="w-5 h-5 text-amber-300" />
+                <span>Impor Modul (PDF)</span>
+              </button>
+              <button
+                onClick={() => handleOpenForm()}
+                className="flex items-center space-x-2 bg-white text-indigo-700 hover:bg-indigo-50 px-5 py-3 rounded-2xl text-sm font-bold shadow-lg transition-all hover:scale-105"
+              >
+                <Plus className="w-5 h-5" />
+                <span>Buat RPP Baru</span>
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => setView('list')}
@@ -974,13 +1476,22 @@ export default function LessonPlansGuru() {
               </div>
               <h3 className="text-slate-700 dark:text-slate-200 font-bold text-lg mb-2">Belum Ada RPP</h3>
               <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mb-6">Anda belum membuat RPP apapun. Klik tombol "Buat RPP Baru" di atas untuk mulai membuat RPP menggunakan AI.</p>
-              <button
-                onClick={() => handleOpenForm()}
-                className="flex items-center space-x-2 bg-indigo-600 text-white hover:bg-indigo-700 px-6 py-3 rounded-2xl text-sm font-bold shadow-md transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Buat RPP Pertama</span>
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => handleOpenForm(undefined, true)}
+                  className="flex items-center space-x-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-5 py-3 rounded-2xl text-sm font-bold shadow-md transition-all hover:scale-105"
+                >
+                  <FileUp className="w-4 h-4" />
+                  <span>Impor dari Modul (PDF)</span>
+                </button>
+                <button
+                  onClick={() => handleOpenForm()}
+                  className="flex items-center space-x-2 bg-indigo-600 text-white hover:bg-indigo-700 px-6 py-3 rounded-2xl text-sm font-bold shadow-md transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Buat RPP Manual / AI</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1024,7 +1535,15 @@ export default function LessonPlansGuru() {
                     </div>
                     
                     <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1">{rpp.mataPelajaran}</h3>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">{rpp.materi}</p>
+                    <div className="mb-1.5">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block">Judul Materi:</span>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 line-clamp-1">{rpp.materi}</p>
+                    </div>
+                    {rpp.isiMateriPenjelas && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 line-clamp-2 italic leading-relaxed">
+                        "{rpp.isiMateriPenjelas}"
+                      </p>
+                    )}
                     
                     <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 dark:text-slate-500 font-medium">
                       <div className="flex items-center gap-1.5">
@@ -1063,7 +1582,7 @@ export default function LessonPlansGuru() {
                   ) : (
                     <Sparkles className="w-4 h-4" />
                   )}
-                  <span>{isGenerating ? 'Menyusun Draft AI...' : 'Isi Otomatis (AI)'}</span>
+                  <span>{isGenerating ? 'Menyusun Draft AI...' : (modulePdfFile ? 'Isi Otomatis (Dari Modul)' : 'Isi Otomatis (AI)')}</span>
                 </button>
                 <button
                   onClick={() => exportPDF()}
@@ -1094,15 +1613,183 @@ export default function LessonPlansGuru() {
                   <div className="w-5 h-5 border-2 border-indigo-300 dark:border-indigo-700 border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin shrink-0" />
                   <div className="text-xs text-indigo-900 dark:text-indigo-200">
                     <span className="font-bold">AI sedang menyusun draf E-RPP & bank soal secara otomatis...</span>
-                    <span className="block text-[11px] text-indigo-600 dark:text-indigo-400 mt-0.5">Memproses tujuan, langkah kegiatan pendahuluan-inti-penutup, soal latihan, dan instrumen asesmen.</span>
+                    <span className="block text-[11px] text-indigo-600 dark:text-indigo-400 mt-0.5">
+                      {modulePdfFile 
+                        ? `Memproses modul "${modulePdfName}" untuk menyelaraskan capaian materi, aktivitas, dan bank soal.` 
+                        : 'Memproses tujuan, langkah kegiatan pendahuluan-inti-penutup, soal latihan, dan instrumen asesmen.'}
+                    </span>
                   </div>
                 </div>
               )}
 
+              {/* Hidden File Input for PDF */}
+              <input
+                type="file"
+                ref={pdfInputRef}
+                accept=".pdf,application/pdf"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handlePdfFileSelect(e.target.files[0]);
+                  }
+                }}
+                className="hidden"
+              />
+
+              {/* Referensi Modul Ajar (Impor PDF) Card */}
+              <div className="mb-8 p-5 bg-gradient-to-br from-slate-50 via-indigo-50/30 to-purple-50/20 dark:from-slate-800/80 dark:to-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-slate-800 transition-all shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3.5">
+                  <div className="flex items-start sm:items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white flex items-center justify-center shadow-xs shrink-0">
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-800 dark:text-white flex items-center gap-2 flex-wrap">
+                        <span>Referensi Modul Ajar (Impor PDF)</span>
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          modulePdfFile 
+                            ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' 
+                            : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                        }`}>
+                          {modulePdfFile ? '✓ Tersimpan sebagai Acuan Materi' : 'Opsional'}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Unggah Modul Ajar PDF agar materi pembelajaran dan naskah latihan soal selaras dengan modul Anda. File tersimpan otomatis di perangkat untuk acuan materi selanjutnya dan dapat dihapus sewaktu-waktu jika sudah tidak terpakai.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {modulePdfFile && (
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleAnalyzeModule()}
+                        disabled={isExtractingModule}
+                        className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-50 shadow-2xs"
+                        title="Ekstrak ulang judul materi dan isi materi penjelas dari file modul"
+                      >
+                        {isExtractingModule ? (
+                          <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-indigo-700 rounded-full animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        )}
+                        <span>{isExtractingModule ? 'Membaca...' : 'Deteksi Data'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => pdfInputRef.current?.click()}
+                        className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Ganti PDF</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteModuleConfirmOpen(true)}
+                        className="px-2.5 py-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border border-red-200 dark:border-red-900/40"
+                        title="Hapus file PDF acuan ini dari penyimpanan"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus Acuan</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {!modulePdfFile ? (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setIsDraggingPdf(true); }}
+                    onDragLeave={() => setIsDraggingPdf(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDraggingPdf(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        handlePdfFileSelect(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    onClick={() => pdfInputRef.current?.click()}
+                    className={`cursor-pointer border-2 border-dashed rounded-2xl p-4 sm:p-5 text-center transition-all ${
+                      isDraggingPdf 
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/60 scale-[1.01]' 
+                        : 'border-slate-300 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-white/80 dark:hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                      <div className="w-11 h-11 rounded-2xl bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                        <FileUp className="w-6 h-6" />
+                      </div>
+                      <div className="text-center sm:text-left">
+                        <div className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center justify-center sm:justify-start gap-2">
+                          <span>Tarik atau Pilih Dokumen Modul Ajar (PDF)</span>
+                          <span className="hidden sm:inline-block text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 underline">Pilih File</span>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          Mendukung file PDF hingga 20 MB. Materi pokok, kegiatan inti, dan soal PTS otomatis berorientasi pada isi modul ajar ini.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3.5 bg-white dark:bg-slate-850 rounded-xl border border-emerald-200 dark:border-emerald-850/80 shadow-2xs gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                          <FileCheck className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-800 dark:text-white truncate flex items-center gap-2 flex-wrap">
+                            <span>{modulePdfName}</span>
+                            <span className="text-[10px] font-medium text-slate-400">({modulePdfSize})</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              ✓ Tersimpan sebagai Acuan
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5 mt-0.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>Tersimpan untuk acuan RPP ini & berikutnya. Dapat dihapus sewaktu-waktu.</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteModuleConfirmOpen(true)}
+                        className="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-xl transition-colors shrink-0"
+                        title="Hapus acuan modul PDF ini dari penyimpanan"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {moduleSummary && (
+                      <div className="p-3 bg-indigo-50/60 dark:bg-indigo-950/40 rounded-xl border border-indigo-100 dark:border-indigo-900/60 text-xs text-indigo-900 dark:text-indigo-200 flex items-start gap-2">
+                        <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold">Ringkasan Materi Modul: </span>
+                          <span>{moduleSummary}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Identitas Section */}
               <div className="mb-8">
                 <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-4 border-b border-slate-100 dark:border-slate-800 pb-2 uppercase tracking-wide">1. Identitas Pembelajaran</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Satuan Pendidikan <span className="text-xs font-normal text-slate-400">(Sekolah)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={schoolSettings.namaSekolah || "Contoh: SDN 1 Merdeka"}
+                      value={satuanPendidikan}
+                      onChange={(e) => setSatuanPendidikan(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 dark:text-white placeholder:font-normal placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                    />
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 block">Nama sekolah (bukan nama aplikasi)</span>
+                  </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Mata Pelajaran <span className="text-red-500">*</span></label>
                     <input
@@ -1138,7 +1825,7 @@ export default function LessonPlansGuru() {
                 <div className="mt-4">
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">
-                      Materi yang Disampaikan <span className="text-red-500">*</span>
+                      Judul Materi <span className="text-red-500">*</span>
                     </label>
                     <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">Contoh topik dapat dipilih di bawah</span>
                   </div>
@@ -1173,6 +1860,62 @@ export default function LessonPlansGuru() {
                     </div>
                   </div>
                 </div>
+
+                {/* Kolom Isi Materi Penjelas */}
+                <div className="mt-5 p-4 bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <label className="block text-sm font-bold text-slate-800 dark:text-white">
+                          Isi Materi Penjelas (Uraian Konsep Pembelajaran)
+                        </label>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          modulePdfFile 
+                            ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                            : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                        }`}>
+                          {modulePdfFile ? '📄 Terisi Otomatis Sesuai Modul Ajar PDF' : '🌐 Terisi Otomatis dari Referensi Internet/Kurikulum Terpercaya'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Uraian materi pokok, konsep esensial, dan rangkuman yang diajarkan kepada siswa. Terisi otomatis dari modul PDF terlampir atau referensi internet pendidikan terpercaya.
+                      </p>
+                    </div>
+                    {isiMateriPenjelas && (
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={handleFormatIsiMateri}
+                          className="px-2.5 py-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 dark:hover:text-indigo-100 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center gap-1 shadow-2xs transition-colors"
+                          title="Rapikan format nomor materi agar diberi enter dan tidak berjejer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>Rapikan Enter Nomor</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(isiMateriPenjelas);
+                            showToast('Isi materi penjelas berhasil disalin!', 'success');
+                          }}
+                          className="px-2.5 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center gap-1 shadow-2xs"
+                          title="Salin isi materi penjelas"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <textarea
+                    rows={5}
+                    placeholder={`Uraian materi penjelas terisi otomatis saat mengklik tombol "Isi Otomatis (AI)" atau "Deteksi Data" dari modul PDF.\n\nContoh Uraian:\n1. Pengertian & Konsep Inti: ...\n2. Uraian & Poin Pokok Bahasan: ...\n3. Contoh Kontekstual & Penerapan Nyata: ...`}
+                    value={isiMateriPenjelas}
+                    onChange={(e) => setIsiMateriPenjelas(e.target.value)}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-normal text-slate-800 dark:text-white leading-relaxed placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                  />
+                </div>
                 
                 {/* AI Configuration Box */}
                 <div className="mt-6 p-5 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-slate-800/80 dark:to-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-slate-800 flex flex-col lg:flex-row items-center gap-4 relative overflow-hidden transition-colors">
@@ -1201,7 +1944,7 @@ export default function LessonPlansGuru() {
                       className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200 shadow-sm"
                     />
                   </div>
-                  <div className="w-full lg:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2 relative z-10">
+                  <div className="w-full lg:w-auto flex flex-col items-stretch lg:items-end gap-1.5 relative z-10">
                     <button
                       type="button"
                       onClick={handleGenerateTemplate}
@@ -1213,8 +1956,14 @@ export default function LessonPlansGuru() {
                       ) : (
                         <Sparkles className="w-4 h-4" />
                       )}
-                      <span>{isGenerating ? 'Menyusun Draft...' : '⚡ Isi Otomatis dengan AI'}</span>
+                      <span>{isGenerating ? 'Menyusun Draft...' : (modulePdfFile ? '⚡ Isi Otomatis dari Modul PDF' : '⚡ Isi Otomatis dengan AI')}</span>
                     </button>
+                    {modulePdfFile && (
+                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                        <FileCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate max-w-[200px]">Acuan: {modulePdfName}</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1496,8 +2245,8 @@ export default function LessonPlansGuru() {
                                       <span className="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800/80 text-indigo-700 dark:text-indigo-300 font-black text-sm flex items-center justify-center shrink-0">
                                         {q.number}
                                       </span>
-                                      <div className="flex-1 pt-0.5">
-                                        <p className="text-slate-900 dark:text-slate-100 font-bold text-[14.5px] leading-relaxed select-text">
+                                       <div className="flex-1 pt-0.5">
+                                        <p className="text-slate-900 dark:text-slate-100 font-bold text-[14.5px] leading-relaxed select-text whitespace-pre-line">
                                           {cleanMarkdown(q.question)}
                                         </p>
                                       </div>
@@ -1505,7 +2254,7 @@ export default function LessonPlansGuru() {
 
                                     {/* Options (A, B, C, D) */}
                                     {q.options && q.options.length > 0 && (
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pl-0 sm:pl-10">
+                                      <div className={`grid grid-cols-1 ${q.options.some(o => o.text.length > 65) ? '' : 'md:grid-cols-2'} gap-2.5 pl-0 sm:pl-10`}>
                                         {q.options.map((opt) => (
                                           <div
                                             key={opt.label}
@@ -1514,7 +2263,7 @@ export default function LessonPlansGuru() {
                                             <span className="w-6 h-6 rounded-lg bg-white dark:bg-slate-750 border border-slate-300 dark:border-slate-650 text-slate-800 dark:text-slate-200 font-extrabold text-xs flex items-center justify-center shrink-0 group-hover:border-indigo-400 group-hover:text-indigo-600 transition-colors">
                                               {opt.label}
                                             </span>
-                                            <span className="text-slate-800 dark:text-slate-200 font-medium text-sm leading-relaxed pt-0.5">
+                                            <span className="text-slate-800 dark:text-slate-200 font-medium text-sm leading-relaxed pt-0.5 select-text">
                                               {cleanMarkdown(opt.text)}
                                             </span>
                                           </div>
@@ -1624,8 +2373,8 @@ export default function LessonPlansGuru() {
                                     {cleanMarkdown(q.question)}
                                   </div>
 
-                                  {q.options && q.options.length > 0 && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                                   {q.options && q.options.length > 0 && (
+                                    <div className={`grid grid-cols-1 ${q.options.some(o => o.text.length > 65) ? '' : 'md:grid-cols-2'} gap-2.5 pt-1`}>
                                       {q.options.map((opt) => (
                                         <div
                                           key={opt.label}
@@ -1634,7 +2383,7 @@ export default function LessonPlansGuru() {
                                           <span className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-extrabold text-xs flex items-center justify-center shrink-0">
                                             {opt.label}
                                           </span>
-                                          <span className="text-slate-700 dark:text-slate-200 font-medium pt-0.5 leading-snug">
+                                          <span className="text-slate-700 dark:text-slate-200 font-medium pt-0.5 leading-snug select-text">
                                             {cleanMarkdown(opt.text)}
                                           </span>
                                         </div>
@@ -1841,6 +2590,45 @@ export default function LessonPlansGuru() {
                 className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
               >
                 Ya, Hapus Sekarang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Stored PDF Module Confirmation Modal */}
+      {deleteModuleConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4 transition-colors">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 dark:bg-red-950/60 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-base">Hapus Acuan Modul PDF?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate max-w-xs">{modulePdfName || 'Modul Ajar PDF'}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-800 p-3.5 rounded-xl border border-slate-100 dark:border-slate-700">
+              File PDF modul ajar yang tersimpan di memori perangkat ini akan dihapus. Anda dapat mengunggah file modul ajar baru sewaktu-waktu jika diperlukan.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteModuleConfirmOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await handleDeleteStoredModule();
+                  setDeleteModuleConfirmOpen(false);
+                }}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
+              >
+                Ya, Hapus Acuan Modul
               </button>
             </div>
           </div>

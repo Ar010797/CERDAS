@@ -14,6 +14,8 @@ export interface UserData {
   academicYear?: string;
   nisn?: string;
   absen_number?: string;
+  schoolName?: string;
+  sekolah?: string;
 }
 
 interface AuthContextType {

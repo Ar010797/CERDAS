@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Calendar, Clock, BookOpen, User, MapPin, FileText, ChevronRight, Sparkles, Image as ImageIcon, X } from 'lucide-react';
+import { Calendar, Clock, BookOpen, User, MapPin, FileText, ChevronRight, Sparkles, Image as ImageIcon, X, Download, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import IllustratedSchedulePoster from './IllustratedSchedulePoster';
 
 export interface ScheduleItem {
   id: string;
@@ -29,6 +30,21 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
   const [loading, setLoading] = useState(true);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showPosterModal, setShowPosterModal] = useState(false);
+  const [schoolName, setSchoolName] = useState<string>('SEKOLAH DASAR');
+
+  useEffect(() => {
+    const unsubSchool = onSnapshot(doc(db, 'settings', 'school'), (snapshot) => {
+      if (snapshot.exists()) {
+        const d = snapshot.data();
+        const detected = (d.schoolName || d.namaSekolah || '').trim();
+        if (detected && !detected.toUpperCase().includes('CERDAS')) {
+          setSchoolName(detected);
+        }
+      }
+    });
+    return () => unsubSchool();
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -87,8 +103,18 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
               {title || `Jadwal ${classId}`}
               <Sparkles className="w-4 h-4 text-amber-500" />
             </h3>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex flex-wrap items-center gap-2 mt-1">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 bg-white/60 dark:bg-slate-800/80 px-2 py-0.5 rounded-md inline-block backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/50">Jadwal Harian & Ujian</p>
+              
+              <button
+                onClick={() => setShowPosterModal(true)}
+                className="text-xs font-black text-amber-800 dark:text-amber-200 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900/80 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1.5 transition-all border border-amber-300 dark:border-amber-700 shadow-2xs"
+                title="Buka tampilan poster grafis berilustrasi menarik dan unduh gambar"
+              >
+                <Sparkles className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                <span>Format Poster Gambar</span>
+              </button>
+
               {imageUrl && (
                 <button
                   onClick={() => setShowImageModal(true)}
@@ -232,6 +258,51 @@ export default function ScheduleWidget({ classId, title }: ScheduleWidgetProps) 
           )}
         </AnimatePresence>
       </div>
+
+      {/* Full Illustrated Schedule Poster Modal */}
+      <AnimatePresence>
+        {showPosterModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden my-auto"
+            >
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/80 dark:bg-slate-800/80">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  <h3 className="font-extrabold text-slate-800 dark:text-white text-base">
+                    Poster Grafis {activeTab === 'pelajaran' ? 'Jadwal Pelajaran' : 'Jadwal Ujian'} {classId}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowPosterModal(false)}
+                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/60 dark:bg-slate-950">
+                <IllustratedSchedulePoster
+                  classId={classId}
+                  schedules={schedules}
+                  type={activeTab}
+                  schoolName={schoolName}
+                  customImageUrl={imageUrl}
+                  readOnly={true}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Image Modal */}
       <AnimatePresence>

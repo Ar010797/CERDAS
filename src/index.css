@@ -26,3 +26,27 @@
     background-color: rgba(71, 85, 105, 0.6);
   }
 }
+
+@media print {
+  /* Preserves formatting, line breaks, and page structure when printing documents */
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-preserve-breaks {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+  }
+  .page-break-inside-avoid {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+}
