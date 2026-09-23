@@ -152,7 +152,7 @@ export default function Announcements() {
       const authorName =
         userData?.name || (isAdmin ? 'Admin Sekolah' : `Guru ${userData?.assigned_class || ''}`);
 
-      await addDoc(collection(db, 'announcements'), {
+      const docRef = await addDoc(collection(db, 'announcements'), {
         title: title.trim(),
         content: content.trim(),
         authorName,
@@ -167,7 +167,27 @@ export default function Announcements() {
         createdAt: new Date().toISOString()
       });
 
-      showToast('Pemberitahuan berhasil diterbitkan & disiarkan!', 'success');
+      // Siarkan Push Notification ke seluruh HP wali murid & guru (Median APK & Web Push)
+      try {
+        await fetch('/api/send-push-announcement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: docRef.id,
+            title: title.trim(),
+            content: content.trim(),
+            targetClass,
+            targetRole,
+            authorName,
+            category,
+            priority
+          })
+        });
+      } catch (pushErr) {
+        console.warn('Push announcement broadcast notice:', pushErr);
+      }
+
+      showToast('Pemberitahuan berhasil diterbitkan & disiarkan ke HP wali murid!', 'success');
       setIsModalOpen(false);
       setTitle('');
       setContent('');

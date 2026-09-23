@@ -1327,6 +1327,94 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
     }
   });
 
+  // API 4: Push Notification Trigger for Announcements (Median Native & Web Push)
+  app.post("/api/send-push-announcement", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const {
+        title = "Pengumuman Sekolah",
+        content = "",
+        targetClass = "Semua Kelas",
+        targetRole = "Semua",
+        authorName = "Pihak Sekolah",
+        category = "Pengumuman",
+        priority = "Normal"
+      } = req.body || {};
+
+      console.log(`[Push Notification] Broadcasting announcement: "${title}" for target "${targetClass}" (${targetRole})`);
+
+      const oneSignalAppId = process.env.ONESIGNAL_APP_ID;
+      const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY;
+      let oneSignalSuccess = false;
+      let oneSignalError: string | null = null;
+
+      // If OneSignal credentials are configured (used by Median.co native APK)
+      if (oneSignalAppId && oneSignalRestKey) {
+        try {
+          const filters: any[] = [];
+          if (targetClass && targetClass !== "Semua Kelas") {
+            filters.push({ field: "tag", key: "kelas", relation: "=", value: targetClass });
+          }
+          if (targetRole && targetRole !== "Semua") {
+            if (filters.length > 0) filters.push({ operator: "AND" });
+            filters.push({ field: "tag", key: "role", relation: "=", value: targetRole });
+          }
+
+          const notificationPayload: any = {
+            app_id: oneSignalAppId,
+            headings: { en: `📢 ${title}`, id: `📢 ${title}` },
+            contents: {
+              en: `${authorName}: ${content.slice(0, 140)}`,
+              id: `${authorName}: ${content.slice(0, 140)}`
+            },
+            url: "/?tab=pengumuman",
+            priority: priority === "Penting" ? 10 : 5,
+            android_channel_id: "cerdas_announcements",
+            small_icon: "ic_stat_onesignal_default"
+          };
+
+          if (filters.length > 0) {
+            notificationPayload.filters = filters;
+          } else {
+            notificationPayload.included_segments = ["Subscribed Users"];
+          }
+
+          const osResponse = await fetch("https://onesignal.com/api/v1/notifications", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              Authorization: `Basic ${oneSignalRestKey}`
+            },
+            body: JSON.stringify(notificationPayload)
+          });
+
+          if (osResponse.ok) {
+            oneSignalSuccess = true;
+          } else {
+            const errText = await osResponse.text();
+            oneSignalError = errText;
+            console.warn("[OneSignal Push Error]:", errText);
+          }
+        } catch (osErr: any) {
+          oneSignalError = osErr.message || String(osErr);
+          console.warn("[OneSignal Exception]:", osErr);
+        }
+      }
+
+      res.json({
+        success: true,
+        broadcasted: true,
+        medianOneSignalConfigured: !!(oneSignalAppId && oneSignalRestKey),
+        oneSignalSuccess,
+        oneSignalError,
+        summary: `Notifikasi "${title}" telah disiarkan ke antrean perangkat.`
+      });
+    } catch (error: any) {
+      console.error("[Send Push Announcement Error]:", error);
+      res.status(500).json({ error: error.message || "Failed to broadcast push notification" });
+    }
+  });
+
   // Explicit 404 for unhandled API routes so they NEVER fall through to Vite SPA HTML
   app.all("/api/*", (req, res) => {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });

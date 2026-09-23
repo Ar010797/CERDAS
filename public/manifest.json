@@ -1,0 +1,18 @@
+{
+  "name": "CERDAS - Administrasi Sekolah",
+  "short_name": "CERDAS",
+  "description": "Catatan Edukasi, Rapor, & Data Administrasi Sekolah dengan Notifikasi Pengumuman Real-Time",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4338ca",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

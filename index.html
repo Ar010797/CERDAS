@@ -9,6 +9,23 @@
     <meta property="og:description" content="Catatan Edukasi, Rapor, & Data Administrasi Sekolah" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <meta name="theme-color" content="#4338ca" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <script>
+      // Daftarkan Service Worker untuk notifikasi push latar belakang
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
+            console.warn('SW register error:', err);
+          });
+        });
+      }
+    </script>
     <script>
       (function() {
         try {

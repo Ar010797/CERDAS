@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { showDeviceNotification } from '../lib/pushNotification';
 
 export interface AnnouncementItem {
   id: string;
@@ -123,9 +124,19 @@ export function useAnnouncementsNotification(studentClassId?: string) {
         setAnnouncements(items);
         setLoading(false);
 
-        // Play chime if new announcement arrived after initial load
+        // Notifikasi visual HP & suara jika ada pengumuman baru setelah load awal
         if (prevCountRef.current !== -1 && items.length > prevCountRef.current) {
-          if (soundEnabled) {
+          const newest = items[0];
+          if (newest) {
+            const authorText = newest.authorName ? `Dari ${newest.authorName}: ` : '';
+            const previewText = newest.content.length > 100 ? newest.content.slice(0, 100) + '...' : newest.content;
+            showDeviceNotification({
+              title: `📢 ${newest.title}`,
+              body: `${authorText}${previewText}`,
+              url: '/?tab=pengumuman',
+              tag: newest.id
+            });
+          } else if (soundEnabled) {
             playAnnouncementChime();
           }
         }

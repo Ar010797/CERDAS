@@ -31,6 +31,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ScheduleWidget from '../../components/ScheduleWidget';
 import CalendarWidget from '../../components/CalendarWidget';
+import PushNotificationManager from '../../components/PushNotificationManager';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { useAnnouncementsNotification, AnnouncementItem } from '../../hooks/useAnnouncementsNotification';
@@ -408,6 +409,9 @@ export default function WaliMuridDashboard() {
       {/* Kalender Pendidikan & Tanggal Penting Widget */}
       <CalendarWidget targetRole="walimurid" classFilter={studentData?.classId || 'Kelas 1'} />
 
+      {/* Push Notification Manager (Median & PWA Device Sync) */}
+      <PushNotificationManager />
+
       {/* Tabs */}
       <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl w-full max-w-3xl mx-auto md:mx-0 overflow-x-auto border border-slate-200/60 dark:border-slate-700/60">
         <button
@@ -712,15 +716,18 @@ export default function WaliMuridDashboard() {
                 </p>
               </div>
 
-              {unreadCount > 0 && (
-                <button
-                  onClick={markAllAsRead}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-colors shrink-0"
-                >
-                  <CheckCheck className="w-4 h-4 text-emerald-500" />
-                  <span>Tandai Semua Telah Dibaca</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <PushNotificationManager compact />
+                {unreadCount > 0 && (
+                  <button
+                    onClick={markAllAsRead}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-colors"
+                  >
+                    <CheckCheck className="w-4 h-4 text-emerald-500" />
+                    <span>Tandai Semua Telah Dibaca</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Filter Tabs & Search Bar */}
