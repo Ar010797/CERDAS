@@ -109,7 +109,23 @@ export function getCategoryBadgeStyle(cat?: string) {
   };
 }
 
-const CLASSES = ['Semua Kelas', 'Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
+export const SD_CLASSES = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
+export const MTS_CLASSES = ['Kelas 7', 'Kelas 8', 'Kelas 9'];
+
+export const CLASSES = [
+  'Semua Kelas',
+  ...SD_CLASSES,
+  ...MTS_CLASSES
+];
+
+export const formatClassBadge = (cls?: string) => {
+  if (!cls || cls === 'Semua Kelas') return 'Semua Kelas (SD & MTs)';
+  const sd = SD_CLASSES.find((c) => cls === c || cls.startsWith(c + ' '));
+  if (sd) return `${sd} (SD)`;
+  const mts = MTS_CLASSES.find((c) => cls === c || cls.startsWith(c + ' '));
+  if (mts) return `${mts} (MTs)`;
+  return cls;
+};
 
 export default function Announcements() {
   const { userData } = useAuth();
@@ -130,6 +146,9 @@ export default function Announcements() {
   const [category, setCategory] = useState('Pengumuman Umum');
   const [priority, setPriority] = useState<'Normal' | 'Penting'>('Normal');
   const [saving, setSaving] = useState(false);
+
+  const [announcementToDelete, setAnnouncementToDelete] = useState<Announcement | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Filter state
   const [selectedFilterClass, setSelectedFilterClass] = useState<string>('Semua');
@@ -158,8 +177,14 @@ export default function Announcements() {
   }, []);
 
   const handleOpenModal = () => {
+    const defaultSigner = isGuru && userData?.assigned_class
+      ? `Wali Kelas ${userData.assigned_class} & Dewan Guru`
+      : 'Pihak Sekolah & Dewan Guru';
+
     setTitle('');
-    setContent('');
+    setContent(
+      `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Wali Murid,\n\n[Tuliskan isi pengumuman atau informasi sekolah secara lengkap di sini...]\n\nDemikian pemberitahuan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${defaultSigner}`
+    );
     setCategory('Pengumuman Umum');
     setPriority('Normal');
     setTargetRole('Semua');
@@ -167,77 +192,105 @@ export default function Announcements() {
     setIsModalOpen(true);
   };
 
+  const insertFullSalam = () => {
+    const defaultSigner = isGuru && userData?.assigned_class
+      ? `Wali Kelas ${userData.assigned_class} & Dewan Guru`
+      : 'Pihak Sekolah & Dewan Guru';
+
+    const opening = "Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\n";
+    const closing = `\n\nDemikian pemberitahuan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${defaultSigner}`;
+
+    if (!content.trim()) {
+      setContent(`${opening}Yth. Bapak/Ibu Wali Murid,\n\n[Tuliskan isi pengumuman di sini...]${closing}`);
+    } else {
+      let updated = content;
+      if (!updated.includes("Assalamu'alaikum Warahmatullahi Wabarakatuh")) {
+        updated = opening + updated;
+      }
+      if (!updated.includes("Wassalamu'alaikum Warahmatullahi Wabarakatuh")) {
+        updated = updated + closing;
+      }
+      setContent(updated);
+    }
+    showToast('Salam pembuka & penutup lengkap berhasil disisipkan.', 'success');
+  };
+
   const applyTemplate = (type: 'pulang_mendadak' | 'libur_mendadak' | 'imunisasi_skrining' | 'himbauan_umum' | 'pts' | 'libur' | 'paguyuban' | 'tugas') => {
     const defaultClass = isGuru && userData?.assigned_class ? userData.assigned_class : 'Semua Kelas';
+    const signer = isGuru && userData?.assigned_class ? `Wali Kelas ${userData.assigned_class} & Dewan Guru` : 'Pihak Sekolah & Dewan Guru';
 
     if (type === 'pulang_mendadak') {
       setTitle('Pemberitahuan: Peserta Didik Dipulangkan Lebih Awal Hari Ini');
       setContent(
-        `Yth. Bapak/Ibu Wali Murid,\n\nDengan ini kami menginformasikan bahwa pada hari ini kegiatan pembelajaran selesai lebih awal dikarenakan [alasan: rapat dewan guru / cuaca ekstrem / kegiatan kedinasan].\n\nPeserta didik akan dipulangkan pada pukul: [contoh: 10.30 WIB].\n\nBagi Bapak/Ibu yang biasa menjemput ananda, dimohon hadir tepat waktu demi keamanan dan keselamatan bersama. Bagi siswa yang mandiri/berjalan kaki, bapak/ibu guru telah mengimbau untuk langsung pulang ke rumah masing-masing.\n\nDemikian pemberitahuan mendadak ini disampaikan, terima kasih atas pengertian dan kerja samanya.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Wali Murid,\n\nDengan ini kami menginformasikan bahwa pada hari ini kegiatan pembelajaran di sekolah selesai lebih awal dikarenakan [alasan: rapat evaluasi dewan guru / cuaca ekstrem / kegiatan kedinasan].\n\nPeserta didik akan dipulangkan pada pukul: [contoh: 10.30 WIB].\n\nBagi Bapak/Ibu yang biasa menjemput ananda, dimohon hadir tepat waktu demi keamanan dan keselamatan bersama. Bagi siswa yang mandiri atau berjalan kaki, dewan guru telah mengimbau untuk langsung pulang ke rumah masing-masing dan tidak bermain di luar.\n\nDemikian pemberitahuan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Pulang Mendadak / Lebih Awal');
       setPriority('Penting');
       setTargetRole('Wali Murid');
-      showToast('Templat Pulang Lebih Awal diterapkan. Silakan sesuaikan waktu & alasan sebelum menerbitkan.', 'success');
+      showToast('Templat Pulang Lebih Awal diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'libur_mendadak') {
-      setTitle('Pemberitahuan: Libur Mendadak / Pembelajaran Daring di Rumah');
+      setTitle('Pemberitahuan: Libur Mendadak / Pembelajaran Mandiri di Rumah');
       setContent(
-        `Yth. Bapak/Ibu Guru dan Wali Murid,\n\nSehubungan dengan adanya [alasan: kondisi cuaca ekstrem / perbaikan mendesak fasilitas sekolah / agenda kedinasan], kami menginformasikan bahwa kegiatan pembelajaran tatap muka di sekolah pada hari [Hari, Tanggal] DITIADAKAN / dialihkan menjadi pembelajaran mandiri di rumah.\n\nSeluruh peserta didik diharapkan tetap berada di rumah, mempelajari materi yang ditugaskan guru, dan menjaga kesehatan.\n\nKegiatan pembelajaran tatap muka akan aktif kembali seperti biasa pada hari [Hari berikutnya].\n\nDemikian pemberitahuan ini disampaikan. Terima kasih atas pengertian dan kerja samanya.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Guru dan Wali Murid,\n\nSehubungan dengan adanya [alasan: kondisi cuaca ekstrem / pemeliharaan darurat fasilitas sekolah / agenda kedinasan], kami menginformasikan bahwa kegiatan pembelajaran tatap muka di sekolah pada hari [Hari, Tanggal] dialihkan menjadi pembelajaran mandiri di rumah (daring).\n\nSeluruh peserta didik diharapkan tetap berada di rumah, mempelajari materi pelajaran yang ditugaskan bapak/ibu guru, serta senantiasa menjaga kesehatan dan keselamatan.\n\nKegiatan pembelajaran tatap muka di sekolah akan aktif kembali seperti biasa pada hari [Hari berikutnya].\n\nDemikian pemberitahuan ini kami sampaikan. Atas perhatian, pengertian, dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Libur Mendadak / Insidental');
       setPriority('Penting');
       setTargetRole('Semua');
-      showToast('Templat Libur Mendadak diterapkan. Silakan sesuaikan tanggal & alasan sebelum menerbitkan.', 'success');
+      showToast('Templat Libur Mendadak diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'imunisasi_skrining') {
       setTitle('Himbauan & Pemberitahuan: Pelaksanaan Skrining Kesehatan & Imunisasi Berkala Siswa');
       setContent(
-        `Yth. Bapak/Ibu Wali Murid,\n\nBekerja sama dengan UPTD Puskesmas setempat, pihak sekolah akan menyelenggarakan kegiatan Skrining Kesehatan Berkala dan Imunisasi (BIAS) untuk peserta didik yang dijadwalkan pada:\n\n• Hari/Tanggal: [Hari, Tanggal]\n• Waktu: Pukul 08.00 WIB s.d. selesai\n• Tempat: Ruang UKS / Kelas Masing-masing\n• Rincian Kegiatan: Pemeriksaan kesehatan gigi & mulut, mata, telinga, pengukuran tumbuh kembang (TB/BB), serta pemberian imunisasi.\n\nHimbauan penting bagi Orang Tua:\n1. Pastikan ananda sudah sarapan bergizi dari rumah sebelum berangkat ke sekolah.\n2. Pastikan ananda dalam kondisi sehat dan cukup tidur.\n3. Apabila ananda memiliki riwayat alergi khusus atau sedang dalam pengobatan, mohon menginformasikannya terlebih dahulu kepada wali kelas.\n\nMari bersama mendukung kesehatan dan tumbuh kembang anak-anak kita. Terima kasih atas dukungan Bapak/Ibu.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Wali Murid,\n\nBekerja sama dengan UPTD Puskesmas setempat, pihak sekolah akan menyelenggarakan kegiatan Skrining Kesehatan Berkala dan Imunisasi (Bulan Imunisasi Anak Sekolah / BIAS) untuk peserta didik yang dijadwalkan pada:\n\n• Hari/Tanggal: [Hari, Tanggal]\n• Waktu: Pukul 08.00 WIB sampai dengan selesai\n• Tempat: Ruang UKS / Ruang Kelas Masing-masing\n• Rincian Kegiatan: Pemeriksaan kesehatan gigi dan mulut, pemeriksaan penglihatan, pengukuran tumbuh kembang (tinggi badan & berat badan), serta pemberian imunisasi berkala.\n\nHimbauan penting bagi Bapak/Ibu Wali Murid:\n1. Pastikan ananda sudah sarapan bergizi dari rumah sebelum berangkat ke sekolah.\n2. Pastikan ananda dalam kondisi sehat, bugar, dan cukup istirahat.\n3. Apabila ananda memiliki riwayat alergi khusus atau sedang dalam pengobatan, mohon menginformasikannya terlebih dahulu kepada wali kelas.\n\nMari bersama mendukung kesehatan dan tumbuh kembang anak-anak kita tercinta.\n\nDemikian himbauan dan pemberitahuan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\nTim UKS & ${signer}`
       );
       setCategory('Himbauan Imunisasi & Skrining');
       setPriority('Normal');
       setTargetRole('Wali Murid');
-      showToast('Templat Himbauan Imunisasi & Skrining diterapkan.', 'success');
+      showToast('Templat Himbauan Imunisasi diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'himbauan_umum') {
       setTitle('Himbauan Umum: Ketertiban Lingkungan Sekolah & Kewaspadaan Cuaca');
       setContent(
-        `Yth. Seluruh Warga Sekolah & Bapak/Ibu Wali Murid,\n\nDalam rangka menciptakan suasana sekolah yang tertib, sehat, dan kondusif, kami menyampaikan beberapa himbauan umum sebagai berikut:\n\n1. Kewaspadaan Cuaca: Mengingat kondisi cuaca yang sering hujan, mohon membekali ananda dengan payung/jas hujan saat berangkat ke sekolah.\n2. Ketertiban Antar-Jemput: Demi kelancaran lalu lintas bersama, dimohon penjemput tidak memarkir kendaraan di badan jalan depan gerbang sekolah.\n3. Kebersihan & Jajanan Sehat: Mengingatkan ananda untuk selalu mencuci tangan dan membiasakan membawa bekal/botol minum higienis dari rumah.\n\nTerima kasih atas kepedulian dan kerja sama seluruh keluarga besar sekolah.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Seluruh Warga Sekolah & Bapak/Ibu Wali Murid,\n\nDalam rangka menciptakan suasana sekolah yang senantiasa tertib, sehat, aman, dan kondusif, kami menyampaikan beberapa himbauan umum sebagai berikut:\n\n1. Kewaspadaan Cuaca: Mengingat kondisi cuaca yang sering turun hujan, dimohon membekali ananda dengan payung atau jas hujan saat berangkat ke sekolah.\n2. Ketertiban Antar-Jemput: Demi keamanan dan kelancaran bersama, dimohon para penjemput tidak memarkir kendaraan di badan jalan depan gerbang utama sekolah.\n3. Kebersihan & Jajanan Sehat: Mengingatkan ananda untuk selalu mencuci tangan dengan sabun dan membiasakan membawa bekal makanan serta botol minum yang higienis dari rumah.\n\nDemikian himbauan ini kami sampaikan. Atas kepedulian dan kerja sama seluruh keluarga besar sekolah, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Himbauan & Ketertiban Umum');
       setPriority('Normal');
       setTargetRole('Semua');
-      showToast('Templat Himbauan Umum & Ketertiban diterapkan.', 'success');
+      showToast('Templat Himbauan Umum diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'pts') {
       setTitle(`Pemberitahuan Pelaksanaan Penilaian Tengah Semester (PTS) ${defaultClass}`);
       setContent(
-        `Yth. Bapak/Ibu Wali Murid,\n\nDengan ini kami menginformasikan bahwa Penilaian Tengah Semester (PTS) untuk ${defaultClass} akan dilaksanakan mulai pekan depan. Mohon bimbingan dan pendampingan di rumah agar peserta didik dapat belajar dengan optimal serta menjaga kesehatan.\n\nJadwal mata pelajaran dan kisi-kisi telah diunggah di sistem CERDAS.\n\nTerima kasih atas kerja samanya.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Wali Murid ${defaultClass},\n\nDengan ini kami menginformasikan bahwa Penilaian Tengah Semester (PTS) untuk ${defaultClass} akan dilaksanakan mulai pekan depan. Mohon bimbingan, pendampingan, dan doa di rumah agar peserta didik dapat belajar dengan optimal, percaya diri, serta senantiasa menjaga kesehatan.\n\nJadwal mata pelajaran dan kisi-kisi telah diunggah di sistem CERDAS sekolah.\n\nDemikian pemberitahuan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Akademik & Ujian');
       setPriority('Penting');
       setTargetRole('Wali Murid');
+      showToast('Templat PTS diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'libur') {
-      setTitle('Pemberitahuan Hari Libur Nasional & Kegiatan Belajar');
+      setTitle('Pemberitahuan Hari Libur Nasional & Kegiatan Belajar Mandiri');
       setContent(
-        `Yth. Bapak/Ibu Guru dan Wali Murid,\n\nSehubungan dengan Hari Libur Nasional, kegiatan pembelajaran tatap muka ditiadakan pada tanggal tersebut. Peserta didik diharapkan memanfaatkan waktu untuk membaca materi literasi mandiri di rumah.\n\nKegiatan pembelajaran tatap muka akan aktif kembali seperti biasa pada hari berikutnya.\n\nDemikian pemberitahuan ini disampaikan.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Guru dan Wali Murid,\n\nSehubungan dengan ketetapan Hari Libur Nasional, kegiatan pembelajaran tatap muka di sekolah ditiadakan pada tanggal tersebut. Peserta didik diharapkan memanfaatkan waktu luang untuk membaca materi literasi mandiri di rumah dan berkegiatan positif bersama keluarga.\n\nKegiatan pembelajaran tatap muka akan aktif kembali seperti biasa pada hari berikutnya.\n\nDemikian pemberitahuan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Libur Sekolah');
       setPriority('Normal');
       setTargetRole('Semua');
+      showToast('Templat Libur Sekolah diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'paguyuban') {
       setTitle(`Undangan Pertemuan Paguyuban Orang Tua / Wali Murid ${defaultClass}`);
       setContent(
-        `Yth. Bapak/Ibu Wali Murid ${defaultClass},\n\nKami mengundang Bapak/Ibu untuk hadir dalam kegiatan Silaturahmi dan Pertemuan Paguyuban Wali Murid guna membahas program belajar dan perkembangan ananda di sekolah.\n\nHari/Tanggal: Sabtu pekan ini\nWaktu: Pukul 08.30 - 10.30 WIB\nTempat: Ruang Kelas ${defaultClass}\n\nKehadiran dan masukan Bapak/Ibu sangat berarti bagi kemajuan belajar ananda.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Wali Murid ${defaultClass},\n\nKami mengundang Bapak/Ibu untuk hadir dalam kegiatan Silaturahmi dan Pertemuan Paguyuban Wali Murid guna mempererat tali silaturahmi serta membahas program belajar dan perkembangan ananda di sekolah:\n\n• Hari/Tanggal: Sabtu pekan ini\n• Waktu: Pukul 08.30 sampai dengan 10.30 WIB\n• Tempat: Ruang Kelas ${defaultClass}\n\nKehadiran dan masukan berharga dari Bapak/Ibu sangat berarti bagi kemajuan belajar ananda.\n\nDemikian undangan ini kami sampaikan. Atas perhatian dan kehadiran Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Informasi Wali Murid');
       setPriority('Normal');
       setTargetRole('Wali Murid');
+      showToast('Templat Paguyuban diterapkan dengan salam lengkap.', 'success');
     } else if (type === 'tugas') {
       setTitle(`Pengingat Pengumpulan Tugas Proyek Belajar Siswa (${defaultClass})`);
       setContent(
-        `Yth. Bapak/Ibu Wali Murid,\n\nKami mengingatkan kembali perihal penyelesaian tugas proyek tematik siswa untuk ${defaultClass}. Batas akhir pengumpulan hasil karya adalah pada hari Jumat pekan ini.\n\nMohon dukungan untuk memeriksa kelengkapan buku dan lembar kerja ananda sebelum dibawa ke sekolah.\n\nTerima kasih.`
+        `Assalamu'alaikum Warahmatullahi Wabarakatuh,\n\nSalam sejahtera bagi kita semua.\n\nYth. Bapak/Ibu Wali Murid ${defaultClass},\n\nKami mengingatkan kembali perihal penyelesaian tugas proyek tematik siswa untuk ${defaultClass}. Batas akhir pengumpulan hasil karya adalah pada hari Jumat pekan ini.\n\nMohon dukungan dan pendampingan Bapak/Ibu untuk memeriksa kelengkapan buku tugas dan lembar kerja ananda sebelum dibawa ke sekolah.\n\nDemikian pengingat ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu sekalian, kami ucapkan terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.\n\nHormat kami,\n${signer}`
       );
       setCategory('Akademik & Ujian');
       setPriority('Normal');
       setTargetRole('Wali Murid');
+      showToast('Templat Tugas Proyek diterapkan dengan salam lengkap.', 'success');
     }
   };
 
@@ -301,14 +354,18 @@ export default function Announcements() {
     }
   };
 
-  const handleDelete = async (annId: string) => {
-    if (!window.confirm('Yakin ingin menghapus pengumuman ini?')) return;
+  const confirmDeleteAnnouncement = async () => {
+    if (!announcementToDelete) return;
+    setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'announcements', annId));
-      showToast('Pengumuman berhasil dihapus.', 'success');
+      await deleteDoc(doc(db, 'announcements', announcementToDelete.id));
+      showToast('Pengumuman berhasil dihapus dari sistem.', 'success');
+      setAnnouncementToDelete(null);
     } catch (error: any) {
-      console.error(error);
-      showToast('Gagal menghapus pengumuman: ' + (error.message || ''), 'error');
+      console.error('Error deleting announcement:', error);
+      showToast('Gagal menghapus pengumuman: ' + (error.message || 'Terjadi kesalahan sistem'), 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -358,11 +415,21 @@ export default function Announcements() {
               className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
             >
               <option value="Semua">Semua Sasaran</option>
-              {CLASSES.map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}
-                </option>
-              ))}
+              <option value="Semua Kelas">📢 Semua Kelas (SD & MTs)</option>
+              <optgroup label="🏫 Tingkat SD / MI (Kelas 1 - 6)">
+                {SD_CLASSES.map((cls) => (
+                  <option key={cls} value={cls}>
+                    {cls} (SD)
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="🕌 Tingkat MTs / SMP (Kelas 7 - 9)">
+                {MTS_CLASSES.map((cls) => (
+                  <option key={cls} value={cls}>
+                    {cls} (MTs)
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -386,6 +453,14 @@ export default function Announcements() {
         <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
           Menampilkan <span className="font-bold text-indigo-600 dark:text-indigo-400">{filteredAnnouncements.length}</span> dari {announcements.length} pengumuman
         </div>
+      </div>
+
+      {/* Info Tip about Deleting and Clean Archive */}
+      <div className="flex items-center gap-2.5 px-4 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl text-xs text-indigo-900 dark:text-indigo-200">
+        <span className="text-base">🗑️</span>
+        <p>
+          <b>Fitur Hapus Aktif:</b> Untuk menjaga kerapian informasi, Anda dapat menghapus pengumuman yang salah ketik atau yang masa kegiatannya sudah berlalu kapan saja menggunakan tombol <b>Hapus</b> berwarna merah pada kartu pengumuman.
+        </p>
       </div>
 
       {/* Announcements List */}
@@ -464,7 +539,7 @@ export default function Announcements() {
 
                         {/* Target Class Badge */}
                         <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                          Sasaran: {ann.targetClass || 'Semua Kelas'}
+                          Sasaran: {formatClassBadge(ann.targetClass)}
                         </span>
 
                         {/* Category */}
@@ -499,14 +574,18 @@ export default function Announcements() {
                   </div>
 
                   {/* Actions */}
-                  <div className="shrink-0">
-                    <button
-                      onClick={() => handleDelete(ann.id)}
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors"
-                      title="Hapus Pengumuman"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div className="shrink-0 flex items-center gap-1.5">
+                    {(isAdmin || isGuru || userData?.role !== 'Wali Murid') && (
+                      <button
+                        type="button"
+                        onClick={() => setAnnouncementToDelete(ann)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800/60 transition-all cursor-pointer hover:shadow-2xs active:scale-95"
+                        title="Hapus pengumuman ini (yang salah atau sudah berlalu)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -514,6 +593,62 @@ export default function Announcements() {
           })
         )}
       </div>
+
+      {/* Modal Konfirmasi Hapus Pengumuman */}
+      {announcementToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 p-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3.5 mb-4">
+              <div className="p-3 bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 rounded-2xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Hapus Pengumuman?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Untuk pengumuman yang salah atau sudah berlalu
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-800/70 rounded-2xl p-3.5 mb-4 border border-slate-200/80 dark:border-slate-700/80 text-xs">
+              <p className="font-bold text-slate-800 dark:text-slate-200 mb-1 leading-snug">
+                {announcementToDelete.title}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span>Sasaran: {formatClassBadge(announcementToDelete.targetClass)}</span>
+                <span>•</span>
+                <span>Kategori: {announcementToDelete.category || 'Pengumuman Umum'}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+              Apakah Anda yakin ingin menghapus pengumuman ini secara permanen? Pengumuman yang sudah dihapus tidak akan lagi muncul di dashboard aplikasi Wali Murid maupun Guru.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setAnnouncementToDelete(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmDeleteAnnouncement}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all shadow-md shadow-rose-600/20 disabled:opacity-50 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? 'Menghapus...' : 'Ya, Hapus Pengumuman'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Form for Composing Announcement */}
       {isModalOpen && (
@@ -655,11 +790,21 @@ export default function Announcements() {
                     onChange={(e) => setTargetClass(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
-                    {CLASSES.map((cls) => (
-                      <option key={cls} value={cls}>
-                        {cls}
-                      </option>
-                    ))}
+                    <option value="Semua Kelas">📢 Semua Kelas (Kelas 1 SD s.d. Kelas 9 MTs)</option>
+                    <optgroup label="🏫 Tingkat SD / MI (Kelas 1 - 6)">
+                      {SD_CLASSES.map((cls) => (
+                        <option key={cls} value={cls}>
+                          {cls} (SD)
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="🕌 Tingkat MTs / SMP (Kelas 7 - 9)">
+                      {MTS_CLASSES.map((cls) => (
+                        <option key={cls} value={cls}>
+                          {cls} (MTs)
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
 
@@ -724,15 +869,33 @@ export default function Announcements() {
 
               {/* Content */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Isi Pemberitahuan <span className="text-red-500">*</span>
-                </label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Isi Pemberitahuan / Pengumuman <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={insertFullSalam}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline cursor-pointer"
+                  >
+                    <span>✨</span>
+                    <span>Sisipkan Salam Pembuka & Penutup Lengkap</span>
+                  </button>
+                </div>
+
+                <div className="mb-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/40 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                  <span className="shrink-0 text-sm">💡</span>
+                  <span>
+                    <b>Standar Pesan:</b> Diawali dengan salam pembuka lengkap (<i>Assalamu'alaikum Warahmatullahi Wabarakatuh</i>) dan diakhiri salam penutup lengkap (<i>Wassalamu'alaikum Warahmatullahi Wabarakatuh</i>) tanpa singkatan.
+                  </span>
+                </div>
+
                 <textarea
                   required
-                  rows={6}
+                  rows={8}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-normal text-slate-800 dark:text-white leading-relaxed placeholder:text-slate-400"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-normal text-slate-800 dark:text-white leading-relaxed placeholder:text-slate-400 font-sans"
                   placeholder="Tuliskan isi informasi secara rinci untuk orang tua / guru..."
                 />
               </div>

@@ -35,7 +35,7 @@ import PushNotificationManager from '../../components/PushNotificationManager';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { useAnnouncementsNotification, AnnouncementItem } from '../../hooks/useAnnouncementsNotification';
-import { getCategoryBadgeStyle } from '../admin/Announcements';
+import { getCategoryBadgeStyle, formatClassBadge } from '../admin/Announcements';
 
 export default function WaliMuridDashboard() {
   const { userData } = useAuth();
@@ -915,7 +915,7 @@ export default function WaliMuridDashboard() {
                             {/* Target Class */}
                             {item.targetClass && (
                               <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item.targetClass}
+                                {formatClassBadge(item.targetClass)}
                               </span>
                             )}
 
@@ -1027,6 +1027,9 @@ export default function WaliMuridDashboard() {
                         Penting / Mendesak
                       </span>
                     )}
+                    <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      Sasaran: {formatClassBadge(selectedAnnouncementModal.targetClass)}
+                    </span>
                   </div>
                   <button
                     onClick={() => setSelectedAnnouncementModal(null)}
