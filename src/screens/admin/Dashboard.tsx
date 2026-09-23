@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
 import ScheduleWidget from '../../components/ScheduleWidget';
+import CalendarWidget from '../../components/CalendarWidget';
 
 interface LogAktivitas {
   id: string;
@@ -155,6 +156,9 @@ export default function AdminDashboard() {
 
       {/* Schedule Widget for Admin */}
       <ScheduleWidget classId={selectedClass} title={`Monitoring Jadwal Pelajaran & Ujian (${selectedClass})`} />
+
+      {/* Calendar Widget for Admin */}
+      <CalendarWidget targetRole="admin" classFilter={selectedClass} />
 
       {/* Monitoring Aktivitas & Danger Zone Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

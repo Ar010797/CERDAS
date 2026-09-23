@@ -19,6 +19,7 @@ import QuestionBankGuru from './screens/guru/QuestionBank';
 import FinanceGuru from './screens/guru/Finance';
 import WaliMuridDashboard from './screens/walimurid/Dashboard';
 import SchedulesScreen from './screens/Schedules';
+import AcademicCalendar from './screens/AcademicCalendar';
 
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles: string[] }) => {
   const { userData, loading } = useAuth();
@@ -74,6 +75,7 @@ export default function App() {
                 <Route path="attendance" element={<AttendanceGuru />} />
                 <Route path="grades" element={<GradesGuru />} />
                 <Route path="schedules" element={<SchedulesScreen />} />
+                <Route path="calendar" element={<AcademicCalendar />} />
                 <Route path="lesson-plans" element={<LessonPlansGuru />} />
                 <Route path="question-bank" element={<QuestionBankGuru />} />
                 <Route path="finance" element={<FinanceGuru />} />
@@ -92,9 +94,11 @@ export default function App() {
                 <Route path="attendance" element={<AttendanceGuru />} />
                 <Route path="grades" element={<GradesGuru />} />
                 <Route path="schedules" element={<SchedulesScreen />} />
+                <Route path="calendar" element={<AcademicCalendar />} />
                 <Route path="lesson-plans" element={<LessonPlansGuru />} />
                 <Route path="question-bank" element={<QuestionBankGuru />} />
                 <Route path="finance" element={<FinanceGuru />} />
+                <Route path="announcements" element={<AnnouncementsAdmin />} />
                 <Route path="settings" element={<SettingsGuru />} />
               </Route>
 
@@ -105,6 +109,8 @@ export default function App() {
               }>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<WaliMuridDashboard />} />
+                <Route path="calendar" element={<AcademicCalendar />} />
+                <Route path="announcements" element={<AnnouncementsAdmin />} />
               </Route>
 
               {/* Catch-all route to prevent blank page on any unknown path or 404 */}

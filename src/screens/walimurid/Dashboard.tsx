@@ -1,17 +1,44 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { collection, query, where, doc, onSnapshot, updateDoc, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { FileDown, CalendarDays, BookOpen, UserCircle, CheckCircle2, Edit2, X, Save, MessageSquare, Clock, Image as ImageIcon, Wallet, Coins } from 'lucide-react';
+import {
+  FileDown,
+  CalendarDays,
+  BookOpen,
+  UserCircle,
+  CheckCircle2,
+  Edit2,
+  X,
+  Save,
+  MessageSquare,
+  Clock,
+  Image as ImageIcon,
+  Wallet,
+  Coins,
+  Bell,
+  Megaphone,
+  AlertCircle,
+  ArrowRight,
+  CheckCheck,
+  Search,
+  Filter,
+  Calendar,
+  Sparkles
+} from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ScheduleWidget from '../../components/ScheduleWidget';
+import CalendarWidget from '../../components/CalendarWidget';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
+import { useAnnouncementsNotification, AnnouncementItem } from '../../hooks/useAnnouncementsNotification';
 
 export default function WaliMuridDashboard() {
   const { userData } = useAuth();
-  const [activeTab, setActiveTab] = useState<'profil' | 'akademik' | 'galeri' | 'keuangan'>('profil');
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState<'profil' | 'akademik' | 'galeri' | 'keuangan' | 'pengumuman'>('profil');
   
   // Real-time data
   const [studentData, setStudentData] = useState<any>(null);
@@ -30,6 +57,29 @@ export default function WaliMuridDashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({ name: '', gender: 'L', address: '', birthDate: '', birthPlace: '' });
   const [saving, setSaving] = useState(false);
+
+  // Announcements Notifications Hook for Wali Murid
+  const {
+    announcements,
+    unreadAnnouncements,
+    unreadCount,
+    latestUnread,
+    markAsRead,
+    markAllAsRead,
+    isUnread
+  } = useAnnouncementsNotification(studentData?.classId);
+
+  // Announcement tab filters
+  const [announcementFilter, setAnnouncementFilter] = useState<'semua' | 'unread' | 'penting' | 'guru' | 'admin'>('semua');
+  const [announcementSearch, setAnnouncementSearch] = useState('');
+  const [selectedAnnouncementModal, setSelectedAnnouncementModal] = useState<AnnouncementItem | null>(null);
+
+  // Sync tab from navigation location state
+  useEffect(() => {
+    if (location.state?.tab === 'pengumuman') {
+      setActiveTab('pengumuman');
+    }
+  }, [location.state]);
 
   useEffect(() => {
     if (!userData?.uid) return;
@@ -261,6 +311,66 @@ export default function WaliMuridDashboard() {
         </div>
       </div>
 
+      {/* Top Notification Banner for Wali Murid: Pemberitahuan Baru dari Admin / Guru */}
+      {unreadCount > 0 && latestUnread && (
+        <div className="bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 p-[1.5px] rounded-3xl shadow-lg">
+          <div className="bg-white dark:bg-slate-900 rounded-[22px] p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-4 flex-1">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-200 dark:border-rose-900/50 shadow-xs">
+                <Bell className="w-6 h-6 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-xs">
+                    Pemberitahuan Baru ({unreadCount})
+                  </span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      latestUnread.authorRole === 'Guru'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                        : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                    }`}
+                  >
+                    Dari: {latestUnread.authorName || (latestUnread.authorRole === 'Guru' ? 'Guru Kelas' : 'Admin Sekolah')}
+                  </span>
+                  {latestUnread.category && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      • {latestUnread.category}
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+                  {latestUnread.title}
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-1 mt-1 leading-relaxed">
+                  {latestUnread.content}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => {
+                  markAsRead(latestUnread.id);
+                  setActiveTab('pengumuman');
+                }}
+                className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/20 flex items-center justify-center gap-1.5"
+              >
+                <span>Baca Sekarang</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => markAsRead(latestUnread.id)}
+                className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition-colors"
+                title="Tandai telah dibaca"
+              >
+                Tandai Dibaca
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Catatan / Pesan Khusus dari Wali Kelas */}
       <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 rounded-3xl p-6 border border-amber-200/80 shadow-xs relative overflow-hidden">
         <div className="flex items-start space-x-4">
@@ -295,36 +405,63 @@ export default function WaliMuridDashboard() {
       {/* Jadwal Pelajaran & Ujian Widget */}
       <ScheduleWidget classId={studentData?.classId || 'Kelas 1'} title={`Jadwal Pelajaran & Ujian Ananda (${studentData?.classId || 'Kelas 1'})`} />
 
+      {/* Kalender Pendidikan & Tanggal Penting Widget */}
+      <CalendarWidget targetRole="walimurid" classFilter={studentData?.classId || 'Kelas 1'} />
+
       {/* Tabs */}
-      <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-full max-w-2xl mx-auto md:mx-0 overflow-x-auto">
+      <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl w-full max-w-3xl mx-auto md:mx-0 overflow-x-auto border border-slate-200/60 dark:border-slate-700/60">
         <button
           onClick={() => setActiveTab('profil')}
-          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
-            activeTab === 'profil' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          className={`flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap ${
+            activeTab === 'profil'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           Data Profil
         </button>
         <button
           onClick={() => setActiveTab('akademik')}
-          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
-            activeTab === 'akademik' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          className={`flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap ${
+            activeTab === 'akademik'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           Akademik & Nilai
         </button>
         <button
+          onClick={() => setActiveTab('pengumuman')}
+          className={`flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${
+            activeTab === 'pengumuman'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+        >
+          <Bell className="w-3.5 h-3.5" />
+          <span>Pengumuman</span>
+          {unreadCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-2xs">
+              {unreadCount}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => setActiveTab('galeri')}
-          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
-            activeTab === 'galeri' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          className={`flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap ${
+            activeTab === 'galeri'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           Galeri Kelas
         </button>
         <button
           onClick={() => setActiveTab('keuangan')}
-          className={`flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
-            activeTab === 'keuangan' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          className={`flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap ${
+            activeTab === 'keuangan'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           Keuangan
@@ -553,6 +690,349 @@ export default function WaliMuridDashboard() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab Content: Pengumuman & Pemberitahuan */}
+      {activeTab === 'pengumuman' && (
+        <div className="space-y-6">
+          {/* Header & Filter Controls */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold mb-1.5">
+                  <Megaphone className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Pusat Informasi & Notifikasi Wali Murid</span>
+                </div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                  Pengumuman Resmi Sekolah & Guru
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Pemberitahuan khusus untuk siswa kelas {studentData?.classId || '1'} serta informasi umum sekolah.
+                </p>
+              </div>
+
+              {unreadCount > 0 && (
+                <button
+                  onClick={markAllAsRead}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-colors shrink-0"
+                >
+                  <CheckCheck className="w-4 h-4 text-emerald-500" />
+                  <span>Tandai Semua Telah Dibaca</span>
+                </button>
+              )}
+            </div>
+
+            {/* Filter Tabs & Search Bar */}
+            <div className="flex flex-col md:flex-row gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex flex-wrap gap-1.5 flex-1">
+                <button
+                  onClick={() => setAnnouncementFilter('semua')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    announcementFilter === 'semua'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  Semua ({announcements.length})
+                </button>
+
+                <button
+                  onClick={() => setAnnouncementFilter('unread')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    announcementFilter === 'unread'
+                      ? 'bg-rose-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>Belum Dibaca</span>
+                  {unreadCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-200 text-rose-900">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setAnnouncementFilter('penting')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                    announcementFilter === 'penting'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Penting</span>
+                </button>
+
+                <button
+                  onClick={() => setAnnouncementFilter('guru')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    announcementFilter === 'guru'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  Dari Guru
+                </button>
+
+                <button
+                  onClick={() => setAnnouncementFilter('admin')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    announcementFilter === 'admin'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  Dari Admin
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="relative min-w-[200px] sm:min-w-[240px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={announcementSearch}
+                  onChange={(e) => setAnnouncementSearch(e.target.value)}
+                  placeholder="Cari pengumuman..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Announcements Grid / List */}
+          <div className="space-y-4">
+            {announcements
+              .filter((a) => {
+                // Filter type
+                if (announcementFilter === 'unread') return isUnread(a.id);
+                if (announcementFilter === 'penting') return a.priority === 'Penting' || a.priority === 'Tinggi (Penting)';
+                if (announcementFilter === 'guru') return a.authorRole === 'Guru';
+                if (announcementFilter === 'admin') return a.authorRole !== 'Guru';
+                return true;
+              })
+              .filter((a) => {
+                // Search term
+                if (!announcementSearch.trim()) return true;
+                const term = announcementSearch.toLowerCase();
+                return (
+                  a.title.toLowerCase().includes(term) ||
+                  a.content.toLowerCase().includes(term) ||
+                  (a.category && a.category.toLowerCase().includes(term))
+                );
+              })
+              .map((item) => {
+                const unread = isUnread(item.id);
+                const isUrgent = item.priority === 'Penting' || item.priority === 'Tinggi (Penting)';
+                const isFromGuru = item.authorRole === 'Guru';
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`bg-white dark:bg-slate-900 rounded-3xl p-6 border transition-all duration-200 relative overflow-hidden ${
+                      unread
+                        ? 'border-indigo-300 dark:border-indigo-700/80 shadow-md ring-1 ring-indigo-200 dark:ring-indigo-900/50'
+                        : 'border-slate-200/80 dark:border-slate-800 shadow-2xs hover:shadow-md'
+                    }`}
+                  >
+                    {/* Left Accent indicator for unread or urgent */}
+                    {isUrgent ? (
+                      <div className="absolute top-0 left-0 bottom-0 w-2 bg-rose-500" />
+                    ) : unread ? (
+                      <div className="absolute top-0 left-0 bottom-0 w-2 bg-indigo-600" />
+                    ) : null}
+
+                    <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+                      <div className="flex items-start gap-4 flex-1">
+                        <div
+                          className={`p-3 rounded-2xl shrink-0 ${
+                            isUrgent
+                              ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                              : isFromGuru
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
+                          }`}
+                        >
+                          <Megaphone className="w-6 h-6" />
+                        </div>
+
+                        <div className="flex-1">
+                          {/* Badges */}
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            {/* Author */}
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                isFromGuru
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                              }`}
+                            >
+                              {isFromGuru ? `Guru ${item.authorClass || ''}` : 'Admin Sekolah'}
+                            </span>
+
+                            {/* Priority */}
+                            {isUrgent && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                                Penting
+                              </span>
+                            )}
+
+                            {/* Target Class */}
+                            {item.targetClass && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                {item.targetClass}
+                              </span>
+                            )}
+
+                            {/* Category */}
+                            {item.category && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-100 dark:border-purple-900/40">
+                                {item.category}
+                              </span>
+                            )}
+
+                            {/* Unread Pill */}
+                            {unread && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-600 text-white shadow-2xs">
+                                BARU
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Title */}
+                          <h4 className="text-lg font-bold text-slate-900 dark:text-white leading-snug">
+                            {item.title}
+                          </h4>
+
+                          {/* Timestamp */}
+                          <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500 font-medium my-2">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5" />
+                              {item.date?.toDate
+                                ? format(item.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', {
+                                    locale: id
+                                  })
+                                : 'Baru saja'}
+                            </span>
+                          </div>
+
+                          {/* Content Snippet */}
+                          <div className="text-sm text-slate-700 dark:text-slate-200 bg-slate-50/80 dark:bg-slate-800/60 p-4 rounded-2xl leading-relaxed whitespace-pre-wrap border border-slate-100 dark:border-slate-800/80 mt-2">
+                            {item.content}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right action buttons */}
+                      <div className="flex sm:flex-col items-center gap-2 shrink-0 self-end sm:self-start w-full sm:w-auto justify-end pt-2 sm:pt-0">
+                        <button
+                          onClick={() => {
+                            markAsRead(item.id);
+                            setSelectedAnnouncementModal(item);
+                          }}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                        >
+                          <span>Rincian</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => markAsRead(item.id)}
+                          className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                            unread
+                              ? 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                              : 'bg-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                          }`}
+                        >
+                          {unread ? 'Tandai Dibaca' : 'Sudah Dibaca'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+            {announcements.length === 0 && (
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-12 text-center border border-slate-200/80 dark:border-slate-800">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-500 mx-auto mb-3">
+                  <Megaphone className="w-8 h-8" />
+                </div>
+                <h4 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                  Belum Ada Pengumuman
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+                  Pengumuman dan pemberitahuan resmi dari pihak Admin atau Guru sekolah akan tampil
+                  secara otomatis di sini.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Announcement Detail Modal */}
+          {selectedAnnouncementModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                        selectedAnnouncementModal.authorRole === 'Guru'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                      }`}
+                    >
+                      Pengirim: {selectedAnnouncementModal.authorName || (selectedAnnouncementModal.authorRole === 'Guru' ? 'Guru Kelas' : 'Admin Sekolah')}
+                    </span>
+                    {selectedAnnouncementModal.priority === 'Penting' && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
+                        Penting / Mendesak
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setSelectedAnnouncementModal(null)}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 leading-snug">
+                  {selectedAnnouncementModal.title}
+                </h3>
+
+                <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {selectedAnnouncementModal.date?.toDate
+                      ? format(selectedAnnouncementModal.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', {
+                          locale: id
+                        })
+                      : 'Baru saja'}
+                  </span>
+                  {selectedAnnouncementModal.category && (
+                    <span>• {selectedAnnouncementModal.category}</span>
+                  )}
+                </div>
+
+                <div className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap font-normal mb-6 bg-slate-50 dark:bg-slate-800/60 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
+                  {selectedAnnouncementModal.content}
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    onClick={() => setSelectedAnnouncementModal(null)}
+                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
+                  >
+                    Tutup Pengumuman
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

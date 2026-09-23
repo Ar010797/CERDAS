@@ -1,7 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Bell, Plus, Trash2, CheckCircle, AlertTriangle, X } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import {
+  Bell,
+  Plus,
+  Trash2,
+  CheckCircle,
+  AlertTriangle,
+  X,
+  Megaphone,
+  Sparkles,
+  Users,
+  GraduationCap,
+  Calendar,
+  Filter,
+  Send,
+  AlertCircle
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 
@@ -9,18 +25,50 @@ interface Announcement {
   id: string;
   title: string;
   content: string;
+  authorName?: string;
+  authorRole?: string;
+  authorId?: string;
+  authorClass?: string;
+  targetClass?: string;
+  targetRole?: string;
+  category?: string;
+  priority?: 'Normal' | 'Penting' | string;
   date: any;
 }
 
+const CATEGORIES = [
+  'Pengumuman Umum',
+  'Akademik & Ujian',
+  'Kegiatan Sekolah',
+  'Informasi Wali Murid',
+  'Administrasi & Keuangan',
+  'Libur Sekolah'
+];
+
+const CLASSES = ['Semua Kelas', 'Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
+
 export default function Announcements() {
+  const { userData } = useAuth();
+  const isAdmin = userData?.role === 'Admin';
+  const isGuru = userData?.role === 'Guru';
+
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
+
+  // Form states
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [targetClass, setTargetClass] = useState<string>(
+    isGuru && userData?.assigned_class ? userData.assigned_class : 'Semua Kelas'
+  );
+  const [targetRole, setTargetRole] = useState<'Semua' | 'Wali Murid' | 'Guru'>('Semua');
+  const [category, setCategory] = useState('Pengumuman Umum');
+  const [priority, setPriority] = useState<'Normal' | 'Penting'>('Normal');
   const [saving, setSaving] = useState(false);
-  
+
+  // Filter state
+  const [selectedFilterClass, setSelectedFilterClass] = useState<string>('Semua');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -30,159 +78,485 @@ export default function Announcements() {
 
   useEffect(() => {
     const q = query(collection(db, 'announcements'), orderBy('date', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      setAnnouncements(snap.docs.map(d => ({ id: d.id, ...d.data() } as Announcement)));
-      setLoading(false);
-    }, (err) => {
-      console.warn("Announcements snapshot error:", err);
-      setLoading(false);
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Announcement)));
+        setLoading(false);
+      },
+      (err) => {
+        console.warn('Announcements snapshot error:', err);
+        setLoading(false);
+      }
+    );
     return () => unsub();
   }, []);
 
+  const handleOpenModal = () => {
+    setTitle('');
+    setContent('');
+    setCategory('Pengumuman Umum');
+    setPriority('Normal');
+    setTargetRole('Semua');
+    setTargetClass(isGuru && userData?.assigned_class ? userData.assigned_class : 'Semua Kelas');
+    setIsModalOpen(true);
+  };
+
+  const applyTemplate = (type: 'pts' | 'libur' | 'paguyuban' | 'tugas') => {
+    const defaultClass = isGuru && userData?.assigned_class ? userData.assigned_class : 'Kelas';
+    if (type === 'pts') {
+      setTitle(`Pemberitahuan Pelaksanaan Penilaian Tengah Semester (PTS) ${defaultClass}`);
+      setContent(
+        `Yth. Bapak/Ibu Wali Murid,\n\nDengan ini kami menginformasikan bahwa Penilaian Tengah Semester (PTS) untuk ${defaultClass} akan dilaksanakan mulai pekan depan. Mohon bimbingan dan pendampingan di rumah agar peserta didik dapat belajar dengan optimal serta menjaga kesehatan.\n\nJadwal mata pelajaran dan kisi-kisi telah diunggah di sistem CERDAS.\n\nTerima kasih atas kerja samanya.`
+      );
+      setCategory('Akademik & Ujian');
+      setPriority('Penting');
+      setTargetRole('Wali Murid');
+    } else if (type === 'libur') {
+      setTitle('Pemberitahuan Hari Libur Nasional & Kegiatan Belajar');
+      setContent(
+        `Yth. Bapak/Ibu Guru dan Wali Murid,\n\nSehubungan dengan Hari Libur Nasional, kegiatan pembelajaran tatap muka ditiadakan pada tanggal tersebut. Peserta didik diharapkan memanfaatkan waktu untuk membaca materi literasi mandiri di rumah.\n\nKegiatan pembelajaran tatap muka akan aktif kembali seperti biasa pada hari berikutnya.\n\nDemikian pemberitahuan ini disampaikan.`
+      );
+      setCategory('Libur Sekolah');
+      setPriority('Normal');
+      setTargetRole('Semua');
+    } else if (type === 'paguyuban') {
+      setTitle(`Undangan Pertemuan Paguyuban Orang Tua / Wali Murid ${defaultClass}`);
+      setContent(
+        `Yth. Bapak/Ibu Wali Murid ${defaultClass},\n\nKami mengundang Bapak/Ibu untuk hadir dalam kegiatan Silaturahmi dan Pertemuan Paguyuban Wali Murid guna membahas program belajar dan perkembangan ananda di sekolah.\n\nHari/Tanggal: Sabtu pekan ini\nWaktu: Pukul 08.30 - 10.30 WIB\nTempat: Ruang Kelas ${defaultClass}\n\nKehadiran dan masukan Bapak/Ibu sangat berarti bagi kemajuan belajar ananda.`
+      );
+      setCategory('Informasi Wali Murid');
+      setPriority('Normal');
+      setTargetRole('Wali Murid');
+    } else if (type === 'tugas') {
+      setTitle(`Pengingat Pengumpulan Tugas Proyek Belajar Siswa (${defaultClass})`);
+      setContent(
+        `Yth. Bapak/Ibu Wali Murid,\n\nKami mengingatkan kembali perihal penyelesaian tugas proyek tematik siswa untuk ${defaultClass}. Batas akhir pengumpulan hasil karya adalah pada hari Jumat pekan ini.\n\nMohon dukungan untuk memeriksa kelengkapan buku dan lembar kerja ananda sebelum dibawa ke sekolah.\n\nTerima kasih.`
+      );
+      setCategory('Akademik & Ujian');
+      setPriority('Normal');
+      setTargetRole('Wali Murid');
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!title.trim() || !content.trim()) {
+      showToast('Judul dan isi pengumuman wajib diisi!', 'error');
+      return;
+    }
+
     setSaving(true);
     try {
+      const authorRole = isAdmin ? 'Admin' : isGuru ? 'Guru' : 'Staf Sekolah';
+      const authorName =
+        userData?.name || (isAdmin ? 'Admin Sekolah' : `Guru ${userData?.assigned_class || ''}`);
+
       await addDoc(collection(db, 'announcements'), {
-        title,
-        content,
-        date: serverTimestamp()
+        title: title.trim(),
+        content: content.trim(),
+        authorName,
+        authorRole,
+        authorId: userData?.uid || '',
+        authorClass: userData?.assigned_class || '',
+        targetClass,
+        targetRole,
+        category,
+        priority,
+        date: serverTimestamp(),
+        createdAt: new Date().toISOString()
       });
-      showToast('Pengumuman berhasil ditambahkan!', 'success');
+
+      showToast('Pemberitahuan berhasil diterbitkan & disiarkan!', 'success');
       setIsModalOpen(false);
       setTitle('');
       setContent('');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      showToast('Gagal menambahkan pengumuman.', 'error');
+      showToast('Gagal menerbitkan pengumuman: ' + (error.message || 'Kesalahan sistem'), 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (annId: string) => {
-    
+    if (!window.confirm('Yakin ingin menghapus pengumuman ini?')) return;
     try {
       await deleteDoc(doc(db, 'announcements', annId));
-      showToast('Pengumuman dihapus.', 'success');
-    } catch (error) {
+      showToast('Pengumuman berhasil dihapus.', 'success');
+    } catch (error: any) {
       console.error(error);
-      showToast('Gagal menghapus pengumuman.', 'error');
+      showToast('Gagal menghapus pengumuman: ' + (error.message || ''), 'error');
     }
   };
 
+  // Filter announcements
+  const filteredAnnouncements = announcements.filter((ann) => {
+    if (selectedFilterClass === 'Semua') return true;
+    return ann.targetClass === selectedFilterClass || ann.targetClass === 'Semua Kelas';
+  });
+
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Manajemen Pengumuman</h1>
-          <p className="text-sm text-slate-500 mt-1">Buat informasi yang akan disiarkan ke dashboard Guru dan Wali Murid.</p>
+    <div className="space-y-6 max-w-5xl mx-auto pb-10">
+      {/* Top Banner & Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+        <div className="relative z-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-semibold text-indigo-200 mb-2">
+            <Megaphone className="w-3.5 h-3.5 text-amber-300" />
+            <span>Pusat Siaran & Notifikasi</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight">Manajemen Pengumuman</h1>
+          <p className="text-xs sm:text-sm text-indigo-100 max-w-xl mt-1 leading-relaxed">
+            Terbitkan informasi dan pemberitahuan resmi dari Admin atau Guru secara langsung ke
+            dashboard Wali Murid dengan notifikasi otomatis.
+          </p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl transition-all font-bold text-sm shadow-sm shadow-indigo-200"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Buat Pengumuman Baru</span>
-        </button>
+
+        <div className="relative z-10 shrink-0">
+          <button
+            onClick={handleOpenModal}
+            className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-slate-900 px-5 py-3 rounded-2xl transition-all font-bold text-sm shadow-lg shadow-amber-900/30 hover:scale-102 active:scale-98"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>Buat Pengumuman Baru</span>
+          </button>
+        </div>
       </div>
 
+      {/* Filter and stats */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+          <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          <span>Filter Sasaran Kelas:</span>
+          <select
+            value={selectedFilterClass}
+            onChange={(e) => setSelectedFilterClass(e.target.value)}
+            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="Semua">Semua Sasaran</option>
+            {CLASSES.map((cls) => (
+              <option key={cls} value={cls}>
+                {cls}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+          Menampilkan <span className="font-bold text-indigo-600 dark:text-indigo-400">{filteredAnnouncements.length}</span> dari {announcements.length} pengumuman
+        </div>
+      </div>
+
+      {/* Announcements List */}
       <div className="grid grid-cols-1 gap-4">
         {loading ? (
-          <div className="bg-white rounded-2xl p-8 text-center text-slate-500 border border-slate-100">
-            <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            Memuat pengumuman...
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-10 text-center text-slate-500 border border-slate-200/80 dark:border-slate-800">
+            <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-xs font-semibold">Memuat daftar pengumuman...</p>
           </div>
-        ) : announcements.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center text-slate-500 border border-slate-100 flex flex-col items-center justify-center">
-            <Bell className="w-12 h-12 text-slate-300 mb-4" />
-            <h3 className="text-lg font-bold text-slate-700">Belum Ada Pengumuman</h3>
-            <p className="text-sm mt-1">Gunakan tombol di atas untuk membuat pengumuman pertama.</p>
+        ) : filteredAnnouncements.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-12 text-center text-slate-500 border border-slate-200/80 dark:border-slate-800 flex flex-col items-center justify-center">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-500 mb-3">
+              <Megaphone className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Belum Ada Pengumuman</h3>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-sm">
+              Klik tombol "Buat Pengumuman Baru" untuk menerbitkan pemberitahuan kepada Wali Murid.
+            </p>
           </div>
         ) : (
-          announcements.map((ann) => (
-            <div key={ann.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-start gap-4 hover:shadow-md transition-shadow group">
-              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
-                <Bell className="w-6 h-6" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-start justify-between">
-                  <h3 className="text-lg font-bold text-slate-800">{ann.title}</h3>
-                  <button
-                    onClick={() => handleDelete(ann.id)}
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                    title="Hapus Pengumuman"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+          filteredAnnouncements.map((ann) => {
+            const isUrgent = ann.priority === 'Penting' || ann.priority === 'Tinggi (Penting)';
+            const isGuruAuthor = ann.authorRole === 'Guru';
+
+            return (
+              <div
+                key={ann.id}
+                className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 hover:shadow-md transition-all group relative overflow-hidden"
+              >
+                {isUrgent && (
+                  <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-rose-500" />
+                )}
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                    <div
+                      className={`p-3 rounded-2xl shrink-0 ${
+                        isUrgent
+                          ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                          : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
+                      }`}
+                    >
+                      <Bell className="w-5 h-5" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      {/* Badges */}
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        {/* Author Badge */}
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                            isGuruAuthor
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                              : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300'
+                          }`}
+                        >
+                          Pengirim: {ann.authorName || (isGuruAuthor ? 'Guru Kelas' : 'Admin')}
+                        </span>
+
+                        {/* Priority Badge */}
+                        {isUrgent && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            Penting / Mendesak
+                          </span>
+                        )}
+
+                        {/* Target Class Badge */}
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          Sasaran: {ann.targetClass || 'Semua Kelas'}
+                        </span>
+
+                        {/* Category */}
+                        {ann.category && (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-100 dark:border-purple-900/40">
+                            {ann.category}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Title */}
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-snug">
+                        {ann.title}
+                      </h3>
+
+                      {/* Timestamp */}
+                      <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mb-3 mt-1 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {ann.date?.toDate
+                          ? format(ann.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', {
+                              locale: id
+                            })
+                          : 'Baru saja'}
+                      </p>
+
+                      {/* Content */}
+                      <div className="text-sm text-slate-700 dark:text-slate-200 bg-slate-50/80 dark:bg-slate-800/60 p-4 rounded-xl leading-relaxed whitespace-pre-wrap border border-slate-100 dark:border-slate-800">
+                        {ann.content}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="shrink-0">
+                    <button
+                      onClick={() => handleDelete(ann.id)}
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors"
+                      title="Hapus Pengumuman"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 font-medium mb-3 mt-1">
-                  {ann.date?.toDate ? format(ann.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', { locale: id }) : 'Baru saja'}
-                </p>
-                <div className="text-sm text-slate-700 bg-slate-50 p-4 rounded-xl leading-relaxed">
-                  {ann.content.split('\n').map((line, i) => (
-                    <React.Fragment key={i}>
-                      {line}
-                      <br />
-                    </React.Fragment>
-                  ))}
-                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* Modal Form */}
+      {/* Modal Form for Composing Announcement */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
-              <h2 className="text-lg font-bold text-slate-800">Buat Pengumuman Baru</h2>
-              <button onClick={() => setIsModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden my-6 border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in duration-200">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-indigo-900 to-indigo-800 text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-white/10 rounded-xl">
+                  <Megaphone className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold">Terbitkan Pemberitahuan Baru</h2>
+                  <p className="text-xs text-indigo-200">
+                    Pemberitahuan otomatis disiarkan ke akun Wali Murid
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="p-2 text-white/70 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
-            <form onSubmit={handleSave} className="p-6 space-y-5">
+
+            {/* Quick Templates */}
+            <div className="p-5 bg-indigo-50/50 dark:bg-indigo-950/20 border-b border-indigo-100/60 dark:border-indigo-900/40">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 dark:text-indigo-300 mb-2">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Pilih Templat Cepat:</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('pts')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
+                >
+                  📝 Pengumuman Ujian / PTS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('paguyuban')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
+                >
+                  🤝 Pertemuan Wali Murid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('libur')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
+                >
+                  🏖️ Libur Sekolah
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('tugas')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
+                >
+                  📌 Pengingat Tugas Proyek
+                </button>
+              </div>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSave} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Judul Pengumuman</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Judul Pengumuman / Pemberitahuan <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
-                  placeholder="Misal: Libur Nasional Semester Ganjil"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-semibold text-slate-800 dark:text-white"
+                  placeholder="Misal: Pelaksanaan PTS & Pertemuan Wali Murid"
                 />
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Target Class */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Sasaran Kelas
+                  </label>
+                  <select
+                    value={targetClass}
+                    onChange={(e) => setTargetClass(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    {CLASSES.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {cls}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Target Role */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Sasaran Pengguna
+                  </label>
+                  <select
+                    value={targetRole}
+                    onChange={(e) => setTargetRole(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="Semua">Semua (Guru & Wali)</option>
+                    <option value="Wali Murid">Khusus Wali Murid</option>
+                    <option value="Guru">Khusus Guru</option>
+                  </select>
+                </div>
+
+                {/* Priority */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Tingkat Prioritas
+                  </label>
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as any)}
+                    className={`w-full px-3 py-2 border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      priority === 'Penting'
+                        ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-950/40 dark:border-rose-900 dark:text-rose-300'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white'
+                    }`}
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="Penting">🚨 Penting / Mendesak</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Category */}
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Isi Pengumuman</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Kategori Pengumuman
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {CATEGORIES.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategory(cat)}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        category === cat
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Content */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Isi Pemberitahuan <span className="text-red-500">*</span>
+                </label>
                 <textarea
                   required
-                  rows={5}
+                  rows={6}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800 leading-relaxed"
-                  placeholder="Tulis detail informasi di sini..."
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-normal text-slate-800 dark:text-white leading-relaxed placeholder:text-slate-400"
+                  placeholder="Tuliskan isi informasi secara rinci untuk orang tua / guru..."
                 />
               </div>
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-sm transition-colors"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl transition-colors font-bold text-sm shadow-sm disabled:opacity-50"
-                >
-                  <span>{saving ? 'Menyimpan...' : 'Terbitkan'}</span>
-                </button>
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-xs text-slate-400">
+                  Pengirim: <b>{userData?.name || (isAdmin ? 'Admin' : 'Guru')}</b>
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium text-xs transition-colors"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl transition-all font-bold text-xs shadow-md shadow-indigo-600/20 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{saving ? 'Menyimpan & Menyiarkan...' : 'Terbitkan Sekarang'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -191,9 +565,17 @@ export default function Announcements() {
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className={`flex items-center space-x-3 px-5 py-3.5 rounded-2xl shadow-xl text-white ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
-            {toast.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
-            <span className="text-sm font-medium">{toast.message}</span>
+          <div
+            className={`flex items-center space-x-3 px-5 py-3.5 rounded-2xl shadow-xl text-white ${
+              toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'
+            }`}
+          >
+            {toast.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+            )}
+            <span className="text-xs font-semibold">{toast.message}</span>
           </div>
         </div>
       )}

@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "AcademicEvent": {
+      "title": "AcademicEvent",
+      "description": "Agenda, hari libur, atau jadwal ujian dalam kalender pendidikan sekolah.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Judul kegiatan, ujian, atau hari libur" },
+        "category": { "type": "string", "description": "Kategori event: libur, ujian, kegiatan, rapat, atau penting" },
+        "startDate": { "type": "string", "description": "Tanggal mulai format YYYY-MM-DD" },
+        "endDate": { "type": "string", "description": "Tanggal selesai format YYYY-MM-DD" },
+        "description": { "type": "string", "description": "Deskripsi atau catatan tambahan" },
+        "targetClass": { "type": "string", "description": "Kelas target atau 'Semua Kelas'" },
+        "isHoliday": { "type": "boolean", "description": "Apakah hari tersebut libur sekolah" },
+        "color": { "type": "string", "description": "Kode warna aksen kategori" },
+        "createdBy": { "type": "string", "description": "Nama pembuat event" },
+        "createdAt": { "type": "string", "description": "Waktu pembuatan ISO timestamp" }
+      },
+      "required": ["title", "category", "startDate", "endDate"]
+    },
+    "ClassSchedule": {
+      "title": "ClassSchedule",
+      "description": "Jadwal pelajaran harian atau jadwal ujian kelas.",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string", "description": "Tingkat kelas" },
+        "type": { "type": "string", "description": "pelajaran atau ujian" },
+        "hari": { "type": "string", "description": "Hari (Senin-Sabtu) atau tanggal YYYY-MM-DD untuk ujian" },
+        "jam": { "type": "string", "description": "Rentang waktu pelaksanaan" },
+        "mataPelajaran": { "type": "string", "description": "Nama mata pelajaran" },
+        "pengajar": { "type": "string", "description": "Nama guru pengampu" },
+        "ruangan": { "type": "string", "description": "Ruang kelas atau lokasi" },
+        "keterangan": { "type": "string", "description": "Catatan tambahan materi" }
+      },
+      "required": ["classId", "type", "hari", "jam", "mataPelajaran"]
+    }
+  },
+  "firestore": {
+    "/kalender_akademik/{eventId}": {
+      "schema": { "$ref": "#/entities/AcademicEvent" },
+      "description": "Koleksi acara kalender akademik, hari libur nasional/sekolah, dan agenda ujian."
+    },
+    "/jadwal_kelas/{scheduleId}": {
+      "schema": { "$ref": "#/entities/ClassSchedule" },
+      "description": "Koleksi jadwal pelajaran dan jadwal ujian per kelas."
+    }
+  }
+}

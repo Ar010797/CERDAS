@@ -6,6 +6,7 @@ import { CalendarDays, Bell } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import ScheduleWidget from '../../components/ScheduleWidget';
+import CalendarWidget from '../../components/CalendarWidget';
 
 export default function GuruDashboard() {
   const { userData } = useAuth();
@@ -48,6 +49,9 @@ export default function GuruDashboard() {
 
           {/* Schedule Widget */}
           <ScheduleWidget classId={assignedClass} title={`Jadwal Pengajaran (${assignedClass})`} />
+
+          {/* Academic Calendar Widget */}
+          <CalendarWidget targetRole="guru" classFilter={assignedClass} />
         </div>
 
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col transition-colors">

@@ -1,6 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { Download, Sparkles, Image as ImageIcon, Calendar, Clock, Printer, Check, Copy, Share2, ZoomIn, X, Eye } from 'lucide-react';
+import { Download, Sparkles, Image as ImageIcon, Calendar, Clock, Printer, Check, Eye, BookOpen, FileText } from 'lucide-react';
 import { toPng } from 'html-to-image';
+import {
+  FlourishDivider,
+  TopLeftRocketBooks,
+  TopRightBellAndPens,
+  BottomLeftDinoAndPaint,
+  BottomCenterSketchbook,
+  BottomRightGlobeAndArt,
+} from './SchedulePosterIllustrations';
 
 export interface ScheduleItem {
   id: string;
@@ -25,196 +33,120 @@ interface IllustratedSchedulePosterProps {
   readOnly?: boolean;
 }
 
-const DEFAULT_DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const DEFAULT_DAYS = ['SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'];
 
-// Day color styling matching the uploaded illustration
-const DAY_STYLES: Record<string, { headerBg: string; headerText: string; cellBg: string; border: string }> = {
-  Senin: { headerBg: 'bg-[#93c5fd]', headerText: 'text-slate-900', cellBg: 'bg-[#e0f2fe]/60', border: 'border-sky-300' },
-  Selasa: { headerBg: 'bg-[#86efac]', headerText: 'text-slate-900', cellBg: 'bg-[#dcfce7]/60', border: 'border-emerald-300' },
-  Rabu: { headerBg: 'bg-[#fef08a]', headerText: 'text-slate-900', cellBg: 'bg-[#fef9c3]/60', border: 'border-amber-300' },
-  Kamis: { headerBg: 'bg-[#fdba74]', headerText: 'text-slate-900', cellBg: 'bg-[#ffedd5]/60', border: 'border-orange-300' },
-  Jumat: { headerBg: 'bg-[#f9a8d4]', headerText: 'text-slate-900', cellBg: 'bg-[#fce7f3]/60', border: 'border-pink-300' },
-  Sabtu: { headerBg: 'bg-[#d8b4fe]', headerText: 'text-slate-900', cellBg: 'bg-[#f3e8ff]/60', border: 'border-purple-300' },
-  Minggu: { headerBg: 'bg-[#fca5a5]', headerText: 'text-slate-900', cellBg: 'bg-[#fee2e2]/60', border: 'border-rose-300' },
+// Day header color theme matching the uploaded reference poster
+const DAY_HEADER_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  SENIN: { bg: 'bg-[#d1fae5]', text: 'text-slate-900', border: 'border-slate-700' }, // mint
+  SELASA: { bg: 'bg-[#e0f2fe]', text: 'text-slate-900', border: 'border-slate-700' }, // cyan/sky
+  RABU: { bg: 'bg-[#fef9c3]', text: 'text-slate-900', border: 'border-slate-700' }, // lemon/mint
+  KAMIS: { bg: 'bg-[#ffedd5]', text: 'text-slate-900', border: 'border-slate-700' }, // peach/orange
+  JUMAT: { bg: 'bg-[#fce7f3]', text: 'text-slate-900', border: 'border-slate-700' }, // pink
+  SABTU: { bg: 'bg-[#fed7aa]', text: 'text-slate-900', border: 'border-slate-700' }, // warm peach
+  MINGGU: { bg: 'bg-[#fee2e2]', text: 'text-slate-900', border: 'border-slate-700' },
 };
 
-// Clock colors for left column
-const CLOCK_COLORS = [
-  '#0284c7', // blue
-  '#dc2626', // red
-  '#d97706', // amber
-  '#b91c1c', // dark red
-  '#ea580c', // orange
-  '#e11d48', // rose
-  '#4338ca', // indigo
-  '#059669', // emerald
+// High-fidelity sample schedule matching the reference image if database has no items yet
+const SAMPLE_LESSON_ITEMS: ScheduleItem[] = [
+  // Morning Routine
+  { id: 's-1', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Wali Kelas' },
+  { id: 's-2', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Wali Kelas' },
+  { id: 's-3', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Wali Kelas' },
+  { id: 's-4', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Wali Kelas' },
+  { id: 's-5', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Wali Kelas' },
+  { id: 's-6', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '07:00 - 07:30', mataPelajaran: 'Dzikir Pagi', pengajar: 'Wali Kelas' },
+
+  // Period 1 (07:30 - 08:00)
+  { id: 's-7', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '07:30 - 08:00', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-8', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '07:30 - 08:00', mataPelajaran: 'Pendidikan Pancasila', pengajar: 'Ibu Fatimah' },
+  { id: 's-9', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '07:30 - 08:00', mataPelajaran: 'PJOK', pengajar: 'Pak Budi' },
+  { id: 's-10', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '07:30 - 08:00', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-11', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '07:30 - 08:00', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah' },
+  { id: 's-12', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '07:30 - 08:00', mataPelajaran: 'Bahasa Jawa', pengajar: 'Pak Joko' },
+
+  // Period 2 (08:00 - 08:30)
+  { id: 's-13', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '08:00 - 08:30', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-14', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '08:00 - 08:30', mataPelajaran: 'Pendidikan Pancasila', pengajar: 'Ibu Fatimah' },
+  { id: 's-15', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '08:00 - 08:30', mataPelajaran: 'PJOK', pengajar: 'Pak Budi' },
+  { id: 's-16', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '08:00 - 08:30', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-17', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '08:00 - 08:30', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah' },
+  { id: 's-18', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '08:00 - 08:30', mataPelajaran: 'Bahasa Jawa', pengajar: 'Pak Joko' },
+
+  // Snack / Istirahat 1 (08:30 - 08:50)
+  { id: 's-19', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat / Snack', pengajar: '-' },
+  { id: 's-20', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat / Snack', pengajar: '-' },
+  { id: 's-21', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat / Snack', pengajar: '-' },
+  { id: 's-22', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat / Snack', pengajar: '-' },
+  { id: 's-23', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat / Snack', pengajar: '-' },
+  { id: 's-24', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '08:30 - 08:50', mataPelajaran: 'Istirahat / Snack', pengajar: '-' },
+
+  // Period 3 (08:50 - 09:20)
+  { id: 's-25', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '08:50 - 09:20', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah' },
+  { id: 's-26', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '08:50 - 09:20', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-27', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '08:50 - 09:20', mataPelajaran: 'Matematika', pengajar: 'Pak Hendra' },
+  { id: 's-28', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '08:50 - 09:20', mataPelajaran: 'Matematika', pengajar: 'Pak Hendra' },
+  { id: 's-29', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '08:50 - 09:20', mataPelajaran: 'Aqidah Akhlak', pengajar: 'Ust. Wildan' },
+  { id: 's-30', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '08:50 - 09:20', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+
+  // Period 4 (09:20 - 09:50)
+  { id: 's-31', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '09:20 - 09:50', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah' },
+  { id: 's-32', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '09:20 - 09:50', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-33', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '09:20 - 09:50', mataPelajaran: 'Matematika', pengajar: 'Pak Hendra' },
+  { id: 's-34', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '09:20 - 09:50', mataPelajaran: 'Matematika', pengajar: 'Pak Hendra' },
+  { id: 's-35', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '09:20 - 09:50', mataPelajaran: 'Aqidah Akhlak', pengajar: 'Ust. Wildan' },
+  { id: 's-36', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '09:20 - 09:50', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+
+  // Istirahat 2 / Sholat Dhuha (09:50 - 10:20)
+  { id: 's-37', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat & Sholat Dhuha', pengajar: '-' },
+  { id: 's-38', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat & Sholat Dhuha', pengajar: '-' },
+  { id: 's-39', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat & Sholat Dhuha', pengajar: '-' },
+  { id: 's-40', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat & Sholat Dhuha', pengajar: '-' },
+  { id: 's-41', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat & Sholat Dhuha', pengajar: '-' },
+  { id: 's-42', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '09:50 - 10:20', mataPelajaran: 'Istirahat & Sholat Dhuha', pengajar: '-' },
+
+  // Period 5 (10:20 - 10:50)
+  { id: 's-43', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '10:20 - 10:50', mataPelajaran: 'Bahasa Arab', pengajar: 'Ust. Fadhil' },
+  { id: 's-44', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '10:20 - 10:50', mataPelajaran: 'Fiqih', pengajar: 'Ust. Mansur' },
+  { id: 's-45', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '10:20 - 10:50', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-46', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '10:20 - 10:50', mataPelajaran: 'SBdP', pengajar: 'Ibu Ratna' },
+  { id: 's-47', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '10:20 - 10:50', mataPelajaran: 'Keputrian / Sholat Jumat', pengajar: 'Guru PAI' },
+  { id: 's-48', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '10:20 - 10:50', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah' },
+
+  // Period 6 (10:50 - 11:20)
+  { id: 's-49', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '10:50 - 11:20', mataPelajaran: 'Bahasa Arab', pengajar: 'Ust. Fadhil' },
+  { id: 's-50', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '10:50 - 11:20', mataPelajaran: 'Fiqih', pengajar: 'Ust. Mansur' },
+  { id: 's-51', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '10:50 - 11:20', mataPelajaran: 'Halaqah', pengajar: 'Ust. Rahman' },
+  { id: 's-52', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '10:50 - 11:20', mataPelajaran: 'SBdP', pengajar: 'Ibu Ratna' },
+  { id: 's-53', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '10:50 - 11:20', mataPelajaran: 'Persiapan Pulang', pengajar: 'Wali Kelas' },
+  { id: 's-54', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '10:50 - 11:20', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah' },
+
+  // Closing Period (11:20 - 11:35)
+  { id: 's-55', classId: '1A', type: 'pelajaran', hari: 'Senin', jam: '11:20 - 11:35', mataPelajaran: 'WALAS (TAUDI, PIKET, REFLEKSI)', pengajar: 'Wali Kelas' },
+  { id: 's-56', classId: '1A', type: 'pelajaran', hari: 'Selasa', jam: '11:20 - 11:35', mataPelajaran: 'WALAS (TAUDI, PIKET, REFLEKSI)', pengajar: 'Wali Kelas' },
+  { id: 's-57', classId: '1A', type: 'pelajaran', hari: 'Rabu', jam: '11:20 - 11:35', mataPelajaran: 'WALAS (TAUDI, PIKET, REFLEKSI)', pengajar: 'Wali Kelas' },
+  { id: 's-58', classId: '1A', type: 'pelajaran', hari: 'Kamis', jam: '11:20 - 11:35', mataPelajaran: 'WALAS (TAUDI, PIKET, REFLEKSI)', pengajar: 'Wali Kelas' },
+  { id: 's-59', classId: '1A', type: 'pelajaran', hari: 'Jumat', jam: '11:20 - 11:35', mataPelajaran: 'WALAS (TAUDI, PIKET, REFLEKSI)', pengajar: 'Wali Kelas' },
+  { id: 's-60', classId: '1A', type: 'pelajaran', hari: 'Sabtu', jam: '11:20 - 11:35', mataPelajaran: 'WALAS (TAUDI, PIKET, REFLEKSI)', pengajar: 'Wali Kelas' },
 ];
 
-// Helper to determine cute stickers and theme for each subject
-export function getSubjectVisuals(mapelName: string, keterangan: string = '', isExam: boolean = false) {
-  const text = (mapelName + ' ' + keterangan).toLowerCase();
-
-  if (isExam) {
-    return {
-      stickers: ['📝', '⏱️', '⭐'],
-      label: 'Ujian / Asesmen',
-      accentColor: 'text-purple-700',
-    };
-  }
-
-  // Dzikir / Doa Pagi
-  if (text.includes('dzikir') || text.includes('doa') || text.includes('tadarus')) {
-    return {
-      stickers: ['🕌', '🤲'],
-      isFullRow: true,
-      accentColor: 'text-emerald-800',
-    };
-  }
-
-  // Istirahat
-  if (text.includes('istirahat') || text.includes('snack') || text.includes('makan')) {
-    return {
-      stickers: ['🍱', '🍎'],
-      isBreak: true,
-      accentColor: 'text-amber-900',
-    };
-  }
-
-  // Walas / Refleksi / Piket / Pulang
-  if (text.includes('walas') || text.includes('piket') || text.includes('refleksi') || text.includes('taudi') || text.includes('pulang')) {
-    return {
-      stickers: ['👩‍🏫', '🧹', '🧠'],
-      isFullRow: true,
-      accentColor: 'text-slate-800',
-    };
-  }
-
-  // Halaqah / Tahfidz / Quran / PAI
-  if (text.includes('halaqah') || text.includes('tahfidz') || text.includes('quran') || text.includes('pai') || text.includes('agama islam')) {
-    return {
-      stickers: ['📖', '👦🏻'],
-      accentColor: 'text-amber-800',
-    };
-  }
-
-  // Pancasila / PKn
-  if (text.includes('pancasila') || text.includes('pkn') || text.includes('kewarganegaraan')) {
-    return {
-      stickers: ['🇮🇩', '🦅'],
-      accentColor: 'text-red-700',
-    };
-  }
-
-  // PJOK / Olahraga
-  if (text.includes('pjok') || text.includes('olahraga') || text.includes('penjas') || text.includes('senam')) {
-    return {
-      stickers: ['⚽', '🏃‍♂️'],
-      accentColor: 'text-emerald-700',
-    };
-  }
-
-  // Matematika / Berhitung
-  if (text.includes('matematika') || text.includes('math') || text.includes('berhitung')) {
-    return {
-      stickers: ['🔢', '🧮', '📐'],
-      mathBadge: '12=',
-      accentColor: 'text-sky-800',
-    };
-  }
-
-  // Bahasa Indonesia
-  if (text.includes('bahasa indonesia') || text.includes('b. indonesia') || text.includes('indo')) {
-    return {
-      stickers: ['📚', '✏️'],
-      accentColor: 'text-rose-700',
-    };
-  }
-
-  // Bahasa Arab
-  if (text.includes('bahasa arab') || text.includes('b. arab') || text.includes('arab')) {
-    return {
-      stickers: ['🌴', '🐪', '🌴'],
-      accentColor: 'text-emerald-800',
-    };
-  }
-
-  // Fiqih
-  if (text.includes('fiqih') || text.includes('fikih') || text.includes('wudhu') || text.includes('shalat')) {
-    return {
-      stickers: ['💧', '👦🏻'],
-      accentColor: 'text-cyan-800',
-    };
-  }
-
-  // SBdP / Kesenian / Prakarya
-  if (text.includes('sbdp') || text.includes('seni') || text.includes('prakarya') || text.includes('gambar') || text.includes('musik')) {
-    return {
-      stickers: ['🎨', '🎵'],
-      accentColor: 'text-orange-700',
-    };
-  }
-
-  // Aqidah Akhlak
-  if (text.includes('aqidah') || text.includes('akhlak') || text.includes('adab')) {
-    return {
-      stickers: ['💖', '🤲'],
-      accentColor: 'text-pink-700',
-    };
-  }
-
-  // Bahasa Jawa / Sunda / Daerah
-  if (text.includes('jawa') || text.includes('sunda') || text.includes('daerah') || text.includes('budaya')) {
-    return {
-      stickers: ['🎭', '📜'],
-      subtextBadge: 'ꦗꦮ',
-      accentColor: 'text-amber-900',
-    };
-  }
-
-  // IPA / Sains
-  if (text.includes('ipa') || text.includes('sains') || text.includes('biologi') || text.includes('fisika')) {
-    return {
-      stickers: ['🔬', '🧪', '🌱'],
-      accentColor: 'text-teal-700',
-    };
-  }
-
-  // IPS / Sejarah
-  if (text.includes('ips') || text.includes('sejarah') || text.includes('geografi')) {
-    return {
-      stickers: ['🌍', '🧭'],
-      accentColor: 'text-amber-800',
-    };
-  }
-
-  // Bahasa Inggris
-  if (text.includes('inggris') || text.includes('english')) {
-    return {
-      stickers: ['🗣️', '🇬🇧', '✨'],
-      accentColor: 'text-indigo-700',
-    };
-  }
-
-  // Komputer / TIK / Informatika
-  if (text.includes('tik') || text.includes('komputer') || text.includes('informatika') || text.includes('koding')) {
-    return {
-      stickers: ['💻', '🖱️'],
-      accentColor: 'text-blue-700',
-    };
-  }
-
-  // Default / Umum
-  return {
-    stickers: ['📖', '⭐'],
-    accentColor: 'text-slate-800',
-  };
-}
+const SAMPLE_EXAM_ITEMS: ScheduleItem[] = [
+  { id: 'u-1', classId: '1A', type: 'ujian', hari: 'Senin', jam: '07:30 - 09:00', mataPelajaran: 'Pendidikan Pancasila', pengajar: 'Ibu Fatimah', ruangan: 'Ruang 1A', keterangan: 'Materi Bab 1 - 2' },
+  { id: 'u-2', classId: '1A', type: 'ujian', hari: 'Senin', jam: '09:30 - 11:00', mataPelajaran: 'Pendidikan Agama Islam (PAI)', pengajar: 'Ust. Wildan', ruangan: 'Ruang 1A', keterangan: 'Surah pendek & adab' },
+  { id: 'u-3', classId: '1A', type: 'ujian', hari: 'Selasa', jam: '07:30 - 09:00', mataPelajaran: 'Bahasa Indonesia', pengajar: 'Ibu Aisyah', ruangan: 'Ruang 1A', keterangan: 'Membaca lancar & menyalin' },
+  { id: 'u-4', classId: '1A', type: 'ujian', hari: 'Selasa', jam: '09:30 - 11:00', mataPelajaran: 'Seni Budaya dan Prakarya (SBdP)', pengajar: 'Ibu Ratna', ruangan: 'Ruang 1A', keterangan: 'Membawa pensil warna' },
+  { id: 'u-5', classId: '1A', type: 'ujian', hari: 'Rabu', jam: '07:30 - 09:00', mataPelajaran: 'Matematika', pengajar: 'Pak Hendra', ruangan: 'Ruang 1A', keterangan: 'Penjumlahan & pengurangan 1-20' },
+  { id: 'u-6', classId: '1A', type: 'ujian', hari: 'Rabu', jam: '09:30 - 11:00', mataPelajaran: 'PJOK (Teori)', pengajar: 'Pak Budi', ruangan: 'Ruang 1A', keterangan: 'Gerak dasar lokomotor' },
+  { id: 'u-7', classId: '1A', type: 'ujian', hari: 'Kamis', jam: '07:30 - 09:00', mataPelajaran: 'Bahasa Arab', pengajar: 'Ust. Fadhil', ruangan: 'Ruang 1A', keterangan: 'Mufrodat benda kelas' },
+  { id: 'u-8', classId: '1A', type: 'ujian', hari: 'Kamis', jam: '09:30 - 11:00', mataPelajaran: 'Fiqih', pengajar: 'Ust. Mansur', ruangan: 'Ruang 1A', keterangan: 'Tata cara wudhu dan sholat' },
+  { id: 'u-9', classId: '1A', type: 'ujian', hari: 'Jumat', jam: '07:30 - 09:00', mataPelajaran: 'Aqidah Akhlak', pengajar: 'Ust. Wildan', ruangan: 'Ruang 1A', keterangan: 'Kalimat thoyyibah & Asmaul Husna' },
+  { id: 'u-10', classId: '1A', type: 'ujian', hari: 'Sabtu', jam: '07:30 - 09:00', mataPelajaran: 'Bahasa Jawa', pengajar: 'Pak Joko', ruangan: 'Ruang 1A', keterangan: 'Unggah-ungguh basa & tembang' },
+];
 
 export default function IllustratedSchedulePoster({
   classId,
   schedules,
   type,
-  schoolName = 'SEKOLAH DASAR ISLAM TERPADU',
+  schoolName = 'SEKOLAH DASAR',
   customImageUrl,
   onUploadCustomImage,
   onEditItem,
@@ -225,13 +157,17 @@ export default function IllustratedSchedulePoster({
   const [showFullCustomImage, setShowFullCustomImage] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
 
-  // Group schedules by time intervals and days
-  const filtered = schedules.filter((s) => s.type === type);
+  // Filter schedules by type
+  const actualItems = schedules.filter((s) => s.type === type);
+  const isUsingSample = actualItems.length === 0;
+  const activeItems = isUsingSample
+    ? (type === 'pelajaran' ? SAMPLE_LESSON_ITEMS : SAMPLE_EXAM_ITEMS)
+    : actualItems;
+
+  const isExam = type === 'ujian';
 
   // Distinct time intervals sorted
-  const rawTimes = Array.from(new Set(filtered.map((s) => s.jam.trim()))).filter(Boolean);
-  
-  // Custom sorting for time (extract hour & minute)
+  const rawTimes = Array.from(new Set(activeItems.map((s) => s.jam.trim()))).filter(Boolean);
   const sortedTimes = rawTimes.sort((a, b) => {
     const parseTime = (str: string) => {
       const match = str.match(/(\d{1,2})[:.](\d{2})/);
@@ -241,73 +177,75 @@ export default function IllustratedSchedulePoster({
   });
 
   // Extract distinct days
-  const daysInSchedules = Array.from(new Set(filtered.map((s) => s.hari.trim()))).filter(Boolean);
-  
-  // Sort days following DEFAULT_DAYS or dates if ujian
-  const activeDays = type === 'pelajaran'
-    ? DEFAULT_DAYS.filter((d) => daysInSchedules.length === 0 || daysInSchedules.includes(d) || daysInSchedules.length < 4)
-    : (daysInSchedules.length > 0 ? daysInSchedules.sort() : DEFAULT_DAYS.slice(0, 5));
+  const daysInSchedules = Array.from(
+    new Set(activeItems.map((s) => s.hari.trim().toUpperCase()))
+  ).filter(Boolean);
+
+  const activeDays = DEFAULT_DAYS.filter(
+    (d) => daysInSchedules.length === 0 || daysInSchedules.includes(d) || daysInSchedules.length <= 4
+  );
 
   // Build grid map: [time][day] = ScheduleItem
   const gridMap: Record<string, Record<string, ScheduleItem>> = {};
   for (const time of sortedTimes) {
     gridMap[time] = {};
-    for (const item of filtered) {
+    for (const item of activeItems) {
       if (item.jam.trim() === time) {
-        gridMap[time][item.hari.trim()] = item;
+        gridMap[time][item.hari.trim().toUpperCase()] = item;
       }
     }
   }
 
-  // Handle Export to PNG
+  // Handle Export to PNG at crisp 2x resolution
   const handleDownloadImage = async () => {
     if (!posterRef.current) return;
     setIsExporting(true);
     try {
-      // Small pause to ensure layout paint
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 200));
       const dataUrl = await toPng(posterRef.current, {
         quality: 0.98,
-        pixelRatio: 2, // Crisp 2x retina export for WhatsApp and printing
+        pixelRatio: 2,
         backgroundColor: '#ffffff',
       });
-      
+
       const link = document.createElement('a');
-      const safeClass = classId.replace(/\s+/g, '_');
-      const safeType = type === 'pelajaran' ? 'Jadwal_Pelajaran' : 'Jadwal_Ujian';
+      const safeClass = (classId || '1A').replace(/\s+/g, '_');
+      const safeType = isExam ? 'Poster_Jadwal_Ujian' : 'Poster_Jadwal_Pelajaran';
       link.download = `${safeType}_${safeClass}.png`;
       link.href = dataUrl;
       link.click();
-      
+
       setExportSuccess(true);
       setTimeout(() => setExportSuccess(false), 3000);
     } catch (err) {
-      console.error('Failed to export schedule image:', err);
-      alert('Gagal mengekspor gambar jadwal. Silakan gunakan tombol cetak browser atau coba kembali.');
+      console.error('Failed to export schedule poster:', err);
+      alert('Gagal mengekspor poster. Silakan gunakan tombol cetak browser atau coba kembali.');
     } finally {
       setIsExporting(false);
     }
   };
 
-  // Handle Print
   const handlePrint = () => {
     window.print();
   };
 
-  const isExam = type === 'ujian';
+  // Determine row number for periods
+  let periodCounter = 0;
 
   return (
     <div className="space-y-4">
       {/* Top Action Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-800 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-800 p-3 sm:p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm print:hidden">
         <div className="flex items-center gap-2">
-          <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-300 flex items-center gap-1.5 border border-amber-200 dark:border-amber-800">
+          <span className="px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-amber-100 to-rose-100 text-amber-900 dark:from-amber-950/70 dark:to-rose-950/70 dark:text-amber-300 flex items-center gap-1.5 border border-amber-300 dark:border-amber-700">
             <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span>Format Poster Bergambar (Infografis Menarik)</span>
+            <span>Poster {isExam ? 'Jadwal Ujian' : 'Jadwal Pelajaran'} (Tema Ilustrasi Ceria)</span>
           </span>
-          <span className="text-xs text-slate-500 dark:text-slate-400 hidden sm:inline">
-            Tampilan visual ceria ramah anak & orang tua
-          </span>
+          {isUsingSample && (
+            <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800 hidden sm:inline">
+              ✨ Format Naskah Standar {classId}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -317,7 +255,7 @@ export default function IllustratedSchedulePoster({
               className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors border border-indigo-200 dark:border-indigo-800"
             >
               <Eye className="w-3.5 h-3.5" />
-              <span>Lihat Foto Poster Asli</span>
+              <span>Foto Desain Asli</span>
             </button>
           )}
 
@@ -345,7 +283,7 @@ export default function IllustratedSchedulePoster({
             ) : (
               <Download className="w-3.5 h-3.5" />
             )}
-            <span>{isExporting ? 'Membuat Gambar...' : exportSuccess ? 'Tersimpan!' : 'Download Gambar (PNG)'}</span>
+            <span>{isExporting ? 'Membuat Poster...' : exportSuccess ? 'Tersimpan!' : 'Download Poster (PNG)'}</span>
           </button>
 
           <button
@@ -359,303 +297,264 @@ export default function IllustratedSchedulePoster({
       </div>
 
       {/* Main Illustrated Poster Container */}
-      <div className="overflow-x-auto pb-4">
+      <div className="overflow-x-auto pb-6">
         <div
           ref={posterRef}
-          className="min-w-[760px] max-w-[1040px] mx-auto bg-[#cbe8fa] rounded-[36px] p-6 sm:p-8 shadow-xl border-4 border-white/80 relative overflow-hidden text-slate-900 select-none print:shadow-none print:border-none"
+          className="min-w-[780px] max-w-[1000px] mx-auto rounded-[36px] sm:rounded-[44px] p-6 sm:p-10 shadow-2xl border-[5px] border-white/95 relative overflow-hidden text-slate-900 select-none print:shadow-none print:border-none print:m-0 print:p-4"
           style={{
-            backgroundImage: `radial-gradient(#93c5fd 1.2px, transparent 1.2px), radial-gradient(#bae6fd 1.2px, #cbe8fa 1.2px)`,
-            backgroundSize: '24px 24px',
-            backgroundPosition: '0 0, 12px 12px',
+            background: 'linear-gradient(135deg, #dbeafe 0%, #fce7f3 30%, #fdf4ff 60%, #fef3c7 100%)',
           }}
         >
-          {/* Nature Background Elements (Trees, Clouds, Floating Books, Butterflies) */}
-          {/* Top Left Cloud */}
-          <div className="absolute top-2 left-6 pointer-events-none opacity-90">
-            <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
-              <path d="M25 45 C15 45 5 38 5 28 C5 18 16 12 26 14 C30 6 42 2 54 6 C64 -1 79 2 85 11 C95 8 108 15 108 26 C116 29 118 40 111 46 C105 47 30 46 25 45 Z" fill="#ffffff" />
-            </svg>
+          {/* Subtle Floating Pastel Confetti Doodles */}
+          <div className="absolute top-12 left-1/4 w-3 h-3 bg-pink-300/60 rounded-full blur-[0.5px] pointer-events-none" />
+          <div className="absolute top-20 right-1/4 w-4 h-4 bg-yellow-300/70 rotate-45 pointer-events-none" />
+          <div className="absolute top-36 left-12 text-sky-400/80 text-xl pointer-events-none">✨</div>
+          <div className="absolute top-44 right-16 text-pink-400/80 text-lg pointer-events-none">⭐</div>
+          <div className="absolute bottom-40 left-20 w-3 h-3 bg-teal-300/60 rounded-full pointer-events-none" />
+          <div className="absolute bottom-32 right-24 text-amber-400/80 text-xl pointer-events-none">✨</div>
+
+          {/* 5 Corner / Border Illustrations Matching User's Image */}
+          {/* Top Left: Stack of colorful textbooks + Rocket Book + Atom */}
+          <div className="absolute top-2 left-2 sm:top-4 sm:left-4 z-20">
+            <TopLeftRocketBooks />
           </div>
 
-          {/* Top Right Cloud */}
-          <div className="absolute top-3 right-8 pointer-events-none opacity-90">
-            <svg width="130" height="65" viewBox="0 0 130 65" fill="none">
-              <path d="M30 50 C18 50 8 42 8 30 C8 19 20 13 32 15 C37 6 50 2 64 6 C75 -1 92 2 100 12 C112 9 125 17 125 29 C133 32 135 44 127 51 C120 52 35 51 30 50 Z" fill="#ffffff" />
-            </svg>
+          {/* Top Right: School Bell on Stand + Cup with Pens */}
+          <div className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20">
+            <TopRightBellAndPens />
           </div>
 
-          {/* Floating Cartoon Books & Butterfly */}
-          <div className="absolute top-4 left-20 pointer-events-none -rotate-12 select-none animate-bounce" style={{ animationDuration: '4s' }}>
-            <span className="text-4xl filter drop-shadow-md">📖</span>
+          {/* Bottom Left: Dinosaur Book + Paint Album + Books Stack */}
+          <div className="absolute bottom-2 left-2 sm:bottom-4 sm:left-4 z-20">
+            <BottomLeftDinoAndPaint />
           </div>
 
-          <div className="absolute top-3 right-28 pointer-events-none rotate-12 select-none animate-bounce" style={{ animationDuration: '4.5s' }}>
-            <span className="text-4xl filter drop-shadow-md">📚</span>
+          {/* Bottom Center: Open Doodle Sketchbook ("IDEAS" Robot & "ART" Sun) */}
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-20 hidden md:block">
+            <BottomCenterSketchbook />
           </div>
 
-          <div className="absolute top-14 right-14 pointer-events-none select-none">
-            <span className="text-2xl filter drop-shadow-sm">🦋</span>
+          {/* Bottom Right: Globe on Stand + Pocket Watch + Tablet + Brushes */}
+          <div className="absolute bottom-2 right-2 sm:bottom-4 sm:right-4 z-20">
+            <BottomRightGlobeAndArt />
           </div>
 
-          <div className="absolute top-14 left-14 pointer-events-none select-none">
-            <span className="text-2xl filter drop-shadow-sm">⭐</span>
-          </div>
+          {/* Poster Center Header */}
+          <div className="relative z-30 text-center mb-6 pt-2 max-w-xl mx-auto px-4">
+            {/* Top Vintage Scroll Flourish Divider */}
+            <FlourishDivider className="mb-2" />
 
-          {/* Trees Framing at Bottom / Corners */}
-          <div className="absolute -bottom-8 -left-8 w-36 h-36 bg-emerald-600/25 rounded-full pointer-events-none blur-sm" />
-          <div className="absolute -bottom-8 -right-8 w-36 h-36 bg-emerald-600/25 rounded-full pointer-events-none blur-sm" />
+            {/* Main Bold Display Title */}
+            <h1
+              className="text-2xl sm:text-4xl lg:text-5xl font-black uppercase tracking-wider text-[#1e293b] leading-tight"
+              style={{
+                fontFamily: `'Outfit', 'Nunito', 'Arial Rounded MT Bold', sans-serif`,
+                letterSpacing: '0.04em',
+              }}
+            >
+              {isExam ? 'JADWAL UJIAN' : 'JADWAL PELAJARAN'}
+            </h1>
 
-          {/* Header Banner - 3D Ribbon Style matching the attached image */}
-          <div className="relative z-10 text-center mb-6 pt-2">
-            <div className="inline-block relative">
-              {/* Ribbon Background Box with folded ends */}
-              <div className="relative bg-gradient-to-b from-[#fffef8] to-[#fef8e7] border-3 border-[#334155] rounded-2xl px-8 sm:px-14 py-3 shadow-[0_8px_0_#1e293b] transform -rotate-0.5">
-                {/* School Name Tag */}
-                <p className="text-[11px] sm:text-xs font-black tracking-widest text-[#0284c7] uppercase mb-0.5">
-                  {schoolName}
-                </p>
+            {/* Class Identifier Title */}
+            <h2
+              className="text-3xl sm:text-5xl lg:text-6xl font-black uppercase tracking-wide text-[#0f172a] mt-0.5 leading-none"
+              style={{
+                fontFamily: `'Outfit', 'Nunito', 'Arial Rounded MT Bold', sans-serif`,
+              }}
+            >
+              {classId.toUpperCase().startsWith('KELAS') ? classId.toUpperCase() : `KELAS ${classId.toUpperCase()}`}
+            </h2>
 
-                {/* Big Display Title with outline & 3D text feel */}
-                <h1
-                  className="text-2xl sm:text-4xl font-black uppercase tracking-tight text-[#0f172a]"
-                  style={{
-                    fontFamily: `'Fredoka', 'Nunito', 'Comic Sans MS', 'Arial Rounded MT Bold', sans-serif`,
-                    textShadow: '2px 2px 0px #cbd5e1',
-                  }}
-                >
-                  {isExam ? 'JADWAL UJIAN / ASESMEN' : 'JADWAL PELAJARAN'}
-                </h1>
+            {/* Bottom Vintage Scroll Flourish Divider */}
+            <FlourishDivider className="mt-2 mb-3" />
 
-                {/* Class Badge */}
-                <div className="mt-0.5 inline-block bg-[#0f172a] text-[#fef08a] px-4 py-0.5 rounded-full font-black text-sm sm:text-base tracking-wider uppercase shadow-inner">
-                  {classId}
-                </div>
-              </div>
-
-              {/* Ribbon Tails Left & Right */}
-              <div className="hidden sm:block absolute -left-6 top-3 -z-10 w-8 h-12 bg-[#cbd5e1] border-2 border-[#334155] rounded-l-lg transform -rotate-12" />
-              <div className="hidden sm:block absolute -right-6 top-3 -z-10 w-8 h-12 bg-[#cbd5e1] border-2 border-[#334155] rounded-r-lg transform rotate-12" />
+            {/* Subtitle Banner text */}
+            <div className="text-xs sm:text-sm font-black uppercase tracking-widest text-slate-700 bg-white/75 backdrop-blur-xs px-5 py-1 rounded-full inline-block border border-slate-300 shadow-2xs">
+              {isExam
+                ? `PENILAIAN TENGAH / AKHIR SEMESTER (${classId.toUpperCase()})`
+                : `JADWAL PELAJARAN ${classId.toUpperCase().startsWith('KELAS') ? classId.toUpperCase() : `KELAS ${classId.toUpperCase()}`}`}
             </div>
           </div>
 
-          {/* Schedule Table Container */}
-          {filtered.length === 0 ? (
-            <div className="relative z-10 bg-white/95 backdrop-blur-md rounded-3xl p-10 text-center border-2 border-dashed border-sky-300 max-w-lg mx-auto my-8 shadow-sm">
-              <div className="w-16 h-16 bg-sky-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Calendar className="w-8 h-8 text-sky-600" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-800 mb-1">
-                Belum Ada {isExam ? 'Jadwal Ujian' : 'Jadwal Pelajaran'} untuk {classId}
-              </h3>
-              <p className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-                Silakan tambah jadwal melalui tombol form di atas atau impor file Excel agar jadwal langsung tertata di poster ini.
-              </p>
-            </div>
-          ) : (
-            <div className="relative z-10 bg-white/90 backdrop-blur-sm rounded-3xl p-3 sm:p-5 shadow-lg border-2 border-sky-200">
-              {/* Grid Layout: Time Column (Fixed Width) + Days Columns (Equal Width) */}
-              <div className="w-full">
-                {/* Header Row: Jam + Days */}
-                <div className="flex items-stretch gap-2 mb-2.5">
-                  {/* Top-Left Corner Clock Header */}
-                  <div className="w-24 sm:w-32 shrink-0 bg-white/80 border-2 border-slate-300 rounded-2xl p-2 flex flex-col items-center justify-center shadow-xs">
-                    <Clock className="w-5 h-5 text-sky-600 mb-0.5" />
-                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-700">WAKTU</span>
-                  </div>
-
-                  {/* Day Header Badges */}
-                  <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+          {/* Main Matrix Schedule Table */}
+          <div className="relative z-30 mb-28 sm:mb-32 md:mb-36">
+            <div className="bg-white/95 rounded-2xl shadow-xl overflow-hidden border-2 border-slate-700">
+              <table className="w-full border-collapse text-left">
+                {/* Header Row */}
+                <thead>
+                  <tr className="border-b-2 border-slate-700">
+                    {/* Empty / No. Column Header */}
+                    <th className="w-8 sm:w-10 p-2 text-center text-xs font-black text-slate-800 bg-[#ccfbf1]/60 border-r-2 border-slate-700">
+                      #
+                    </th>
+                    {/* Waktu Column Header */}
+                    <th className="w-24 sm:w-32 p-2 text-center text-xs sm:text-sm font-black text-slate-800 bg-[#ccfbf1]/60 border-r-2 border-slate-700 uppercase tracking-wide">
+                      WAKTU
+                    </th>
+                    {/* Day Column Headers with pastel colors */}
                     {activeDays.map((day) => {
-                      const style = DAY_STYLES[day] || {
-                        headerBg: 'bg-indigo-200',
-                        headerText: 'text-indigo-950',
-                        cellBg: 'bg-indigo-50/60',
-                        border: 'border-indigo-300',
+                      const colStyle = DAY_HEADER_COLORS[day] || {
+                        bg: 'bg-[#e2e8f0]',
+                        text: 'text-slate-900',
+                        border: 'border-slate-700',
                       };
                       return (
-                        <div
+                        <th
                           key={day}
-                          className={`${style.headerBg} ${style.headerText} border-2 ${style.border} rounded-2xl py-2 px-1 text-center font-black uppercase text-xs sm:text-sm tracking-wide shadow-xs flex items-center justify-center`}
+                          className={`${colStyle.bg} ${colStyle.text} p-2 sm:p-2.5 text-center text-xs sm:text-sm font-black uppercase tracking-wider border-r-2 border-slate-700 last:border-r-0`}
                         >
                           {day}
-                        </div>
+                        </th>
                       );
                     })}
-                  </div>
-                </div>
+                  </tr>
+                </thead>
 
-                {/* Rows per Time Interval */}
-                <div className="space-y-2">
-                  {sortedTimes.map((time, timeIdx) => {
-                    const clockColor = CLOCK_COLORS[timeIdx % CLOCK_COLORS.length];
-
-                    // Check if all days in this time slot share the same special event (e.g. "Dzikir Pagi" or "Istirahat")
+                {/* Body Rows */}
+                <tbody className="divide-y-2 divide-slate-700 text-xs sm:text-[13px] font-bold">
+                  {sortedTimes.map((time) => {
                     const itemsAtTime = activeDays.map((d) => gridMap[time]?.[d]).filter(Boolean);
                     const firstItem = itemsAtTime[0];
+
+                    // Detect special spanning rows (Dzikir Pagi, Istirahat, Walas/Refleksi)
                     const isAllSame =
                       itemsAtTime.length > 1 &&
                       itemsAtTime.every(
                         (it) => it.mataPelajaran.trim().toLowerCase() === firstItem?.mataPelajaran?.trim().toLowerCase()
                       );
-                    const firstVisuals = firstItem ? getSubjectVisuals(firstItem.mataPelajaran, firstItem.keterangan, isExam) : null;
-                    const isFullSpan = isAllSame && (firstVisuals?.isFullRow || firstVisuals?.isBreak);
+
+                    const mapelLower = (firstItem?.mataPelajaran || '').toLowerCase();
+                    const isDzikirPagi = mapelLower.includes('dzikir') || mapelLower.includes('doa');
+                    const isIstirahat = mapelLower.includes('istirahat') || mapelLower.includes('snack') || mapelLower.includes('makan');
+                    const isWalas =
+                      mapelLower.includes('walas') ||
+                      mapelLower.includes('piket') ||
+                      mapelLower.includes('refleksi') ||
+                      mapelLower.includes('taudi') ||
+                      mapelLower.includes('penutup');
+
+                    const isSpanningRow = isAllSame && (isDzikirPagi || isIstirahat || isWalas);
+
+                    // If not special, increment period counter
+                    let currentPeriodNumber: number | null = null;
+                    if (!isSpanningRow) {
+                      periodCounter += 1;
+                      currentPeriodNumber = periodCounter;
+                    }
 
                     return (
-                      <div key={time} className="flex items-stretch gap-2">
-                        {/* Left Time Badge (Clock Icon + Time Interval) */}
-                        <div className="w-24 sm:w-32 shrink-0 bg-white border-2 border-slate-200 rounded-2xl p-2 flex flex-col items-center justify-center shadow-xs">
-                          {/* Colorful Analog Clock Icon Badge */}
-                          <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center mb-1 text-white shadow-2xs font-bold text-xs"
-                            style={{ backgroundColor: clockColor }}
-                          >
-                            <Clock className="w-4 h-4 stroke-[2.5]" />
-                          </div>
-                          <span className="text-[11px] sm:text-xs font-black text-slate-800 tracking-tight text-center leading-tight">
-                            {time}
-                          </span>
-                        </div>
+                      <tr key={time} className="hover:bg-slate-50/50 transition-colors">
+                        {/* Period Number Column */}
+                        <td className="p-1.5 sm:p-2 text-center font-black text-slate-800 border-r-2 border-slate-700 bg-white">
+                          {currentPeriodNumber !== null ? currentPeriodNumber : ''}
+                        </td>
 
-                        {/* Content: Either Full Span (Break/Dzikir/Walas) OR Grid of Days */}
-                        {isFullSpan && firstItem ? (
-                          <div
-                            className={`flex-1 rounded-2xl p-3 border-2 flex flex-col sm:flex-row items-center justify-center gap-2 text-center shadow-xs transition-transform hover:scale-[1.005] ${
-                              firstVisuals?.isBreak
-                                ? 'bg-[#fef08a] border-amber-300 text-amber-950 font-black'
-                                : 'bg-[#e0e7ff] border-indigo-200 text-indigo-950 font-bold'
+                        {/* Time Column (e.g. 07:00 - 07:30) */}
+                        <td
+                          className={`p-1.5 sm:p-2 text-center font-black tracking-tight whitespace-nowrap border-r-2 border-slate-700 ${
+                            isDzikirPagi
+                              ? 'bg-[#d9f99d] text-emerald-950'
+                              : isIstirahat
+                              ? 'bg-[#fef08a] text-amber-950'
+                              : isWalas
+                              ? 'bg-[#fed7aa] text-orange-950'
+                              : 'bg-[#f8fafc] text-slate-800'
+                          }`}
+                        >
+                          {time}
+                        </td>
+
+                        {/* Cell Content: Spanning Row vs Individual Day Cells */}
+                        {isSpanningRow && firstItem ? (
+                          <td
+                            colSpan={activeDays.length}
+                            className={`p-2 text-center uppercase tracking-wider font-black text-xs sm:text-sm ${
+                              isDzikirPagi
+                                ? 'bg-[#d9f99d] text-emerald-950'
+                                : isIstirahat
+                                ? 'bg-[#fef08a] text-amber-950'
+                                : 'bg-[#fed7aa] text-orange-950'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              {firstVisuals?.stickers?.map((stk, sIdx) => (
-                                <span key={sIdx} className="text-xl sm:text-2xl filter drop-shadow-2xs">
-                                  {stk}
-                                </span>
-                              ))}
+                            <div className="flex items-center justify-center gap-2">
+                              {isDzikirPagi && <span>🤲</span>}
+                              {isIstirahat && <span>🍱</span>}
+                              {isWalas && <span>👩‍🏫</span>}
+                              <span>{firstItem.mataPelajaran}</span>
+                              {isDzikirPagi && <span>🕌</span>}
+                              {isIstirahat && <span>🍎</span>}
+                              {isWalas && <span>🧹</span>}
                             </div>
-                            <span className="text-xs sm:text-sm font-black uppercase tracking-wider">
-                              {firstItem.mataPelajaran}
-                            </span>
-                            {firstItem.keterangan && (
-                              <span className="text-[11px] font-semibold text-slate-600 bg-white/70 px-2 py-0.5 rounded-full border border-slate-200">
-                                ({firstItem.keterangan})
-                              </span>
-                            )}
-                            <div className="flex items-center gap-2">
-                              {firstVisuals?.stickers?.map((stk, sIdx) => (
-                                <span key={`tail-${sIdx}`} className="text-xl sm:text-2xl filter drop-shadow-2xs">
-                                  {stk}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                          </td>
                         ) : (
-                          /* Standard Grid per Day */
-                          <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                            {activeDays.map((day) => {
-                              const item = gridMap[time]?.[day];
-                              const dayStyle = DAY_STYLES[day] || {
-                                headerBg: 'bg-slate-200',
-                                cellBg: 'bg-slate-50',
-                                border: 'border-slate-200',
-                              };
+                          activeDays.map((day) => {
+                            const item = gridMap[time]?.[day];
 
-                              if (!item) {
-                                return (
-                                  <div
-                                    key={day}
-                                    className={`${dayStyle.cellBg} rounded-2xl border ${dayStyle.border} p-2 flex items-center justify-center opacity-40 min-h-[76px]`}
-                                  >
-                                    <span className="text-xs text-slate-400 font-bold">-</span>
-                                  </div>
-                                );
-                              }
-
-                              const visuals = getSubjectVisuals(item.mataPelajaran, item.keterangan, isExam);
-
+                            if (!item) {
                               return (
-                                <div
+                                <td
                                   key={day}
-                                  onClick={() => !readOnly && onEditItem && onEditItem(item)}
-                                  className={`${dayStyle.cellBg} rounded-2xl border-2 ${dayStyle.border} p-2.5 flex flex-col justify-between items-center text-center shadow-xs transition-all hover:shadow-md hover:scale-[1.02] cursor-pointer min-h-[88px] relative group overflow-hidden`}
+                                  className="p-2 text-center text-slate-300 font-normal border-r-2 border-slate-700 last:border-r-0 bg-white"
                                 >
+                                  -
+                                </td>
+                              );
+                            }
+
+                            return (
+                              <td
+                                key={day}
+                                onClick={() => !readOnly && onEditItem && onEditItem(item)}
+                                className={`p-2 sm:p-2.5 text-center align-middle border-r-2 border-slate-700 last:border-r-0 bg-white transition-colors ${
+                                  !readOnly && onEditItem ? 'cursor-pointer hover:bg-amber-50/80' : ''
+                                }`}
+                              >
+                                <div className="flex flex-col items-center justify-center">
                                   {/* Subject Title */}
-                                  <div className="w-full">
-                                    <h4
-                                      className={`text-xs sm:text-[13px] font-black leading-tight line-clamp-2 ${visuals.accentColor}`}
-                                      style={{
-                                        fontFamily: `'Nunito', 'Segoe UI', sans-serif`,
-                                      }}
-                                    >
-                                      {item.mataPelajaran}
-                                    </h4>
+                                  <span className="font-black text-slate-900 leading-tight text-xs sm:text-[13px]">
+                                    {item.mataPelajaran}
+                                  </span>
 
-                                    {/* If exam: show room or supervisor badge */}
-                                    {isExam && (
-                                      <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
-                                        {item.ruangan && (
-                                          <span className="text-[9px] font-bold bg-white/90 text-purple-800 px-1.5 py-0.2 rounded-md border border-purple-200">
-                                            {item.ruangan}
-                                          </span>
-                                        )}
-                                        {item.pengajar && (
-                                          <span className="text-[9px] font-medium text-slate-600 truncate max-w-full">
-                                            {item.pengajar}
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
+                                  {/* Exam room/supervisor badge */}
+                                  {isExam && (item.ruangan || item.pengajar) && (
+                                    <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
+                                      {item.ruangan && (
+                                        <span className="text-[9px] font-bold bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded border border-purple-200">
+                                          {item.ruangan}
+                                        </span>
+                                      )}
+                                      {item.pengajar && (
+                                        <span className="text-[9px] font-medium text-slate-500">
+                                          {item.pengajar}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
 
-                                  {/* Cute Thematic Stickers */}
-                                  <div className="flex items-center justify-center gap-1 mt-1.5 flex-wrap">
-                                    {visuals.mathBadge && (
-                                      <span className="text-[11px] font-black text-rose-600 bg-white px-1 rounded shadow-2xs">
-                                        {visuals.mathBadge}
-                                      </span>
-                                    )}
-                                    {visuals.subtextBadge && (
-                                      <span className="text-[10px] font-bold text-amber-900 bg-amber-100 px-1 rounded">
-                                        {visuals.subtextBadge}
-                                      </span>
-                                    )}
-                                    {visuals.stickers.map((stk, sIdx) => (
-                                      <span
-                                        key={sIdx}
-                                        className="text-lg sm:text-xl filter drop-shadow-2xs transform transition-transform group-hover:scale-110"
-                                      >
-                                        {stk}
-                                      </span>
-                                    ))}
-                                  </div>
-
-                                  {/* Teacher Name (Small footer) */}
-                                  {!isExam && item.pengajar && (
-                                    <span className="text-[9px] text-slate-500 font-medium truncate w-full mt-1 opacity-80">
+                                  {/* Teacher / Subtext on regular lessons if available */}
+                                  {!isExam && item.pengajar && item.pengajar !== '-' && (
+                                    <span className="text-[10px] font-medium text-slate-500 mt-0.5 leading-none">
                                       {item.pengajar}
                                     </span>
                                   )}
                                 </div>
-                              );
-                            })}
-                          </div>
+                              </td>
+                            );
+                          })
                         )}
-                      </div>
+                      </tr>
                     );
                   })}
-                </div>
-              </div>
-
-              {/* Poster Footer Note / Motivational Quote */}
-              <div className="mt-4 pt-3 border-t border-sky-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 font-medium px-2 gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span>✨ Semangat Belajar & Meraih Prestasi Terbaik!</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-400">
-                  <span>Diterbitkan resmi oleh {schoolName}</span>
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
-          )}
+
+            {/* Poster Footer Note */}
+            <div className="mt-3 px-2 flex items-center justify-between text-[11px] font-bold text-slate-600">
+              <span>📌 Sekolah Dasar Terpadu • Pendidikan Karakter & Bernalar Kritis</span>
+              <span>Diterbitkan Resmi untuk Orang Tua Siswa</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -674,7 +573,7 @@ export default function IllustratedSchedulePoster({
                 onClick={() => setShowFullCustomImage(false)}
                 className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
-                <X className="w-5 h-5" />
+                ✕
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-50 dark:bg-slate-950">
@@ -683,18 +582,6 @@ export default function IllustratedSchedulePoster({
                 alt={`Poster Jadwal ${classId}`}
                 className="max-w-full h-auto rounded-2xl shadow-md object-contain max-h-[75vh]"
               />
-            </div>
-            <div className="p-4 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
-              <a
-                href={customImageUrl}
-                target="_blank"
-                rel="noreferrer"
-                download={`Poster_Jadwal_${classId}.png`}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
-              >
-                <Download className="w-4 h-4" />
-                <span>Buka / Unduh Gambar Penuh</span>
-              </a>
             </div>
           </div>
         </div>

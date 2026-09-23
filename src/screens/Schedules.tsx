@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs, writeBatch, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
@@ -23,6 +24,7 @@ const DAYS_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
 
 export default function SchedulesScreen() {
+  const navigate = useNavigate();
   const { userData } = useAuth();
   const isAdmin = userData?.role === 'Admin';
   
@@ -564,6 +566,14 @@ export default function SchedulesScreen() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => navigate(isAdmin ? '/admin/calendar' : '/guru/calendar')}
+              className="flex items-center space-x-2 bg-white text-indigo-700 hover:bg-indigo-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-sm transition-all"
+            >
+              <Calendar className="w-4 h-4 text-indigo-600" />
+              <span>Kalender Pendidikan</span>
+            </button>
+
             <button
               onClick={handleDownloadTemplate}
               className="flex items-center space-x-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold backdrop-blur-md border border-white/20 transition-all"

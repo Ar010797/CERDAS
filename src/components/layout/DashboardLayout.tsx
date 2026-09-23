@@ -4,10 +4,15 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import ScheduleReminderBell from '../ScheduleReminderBell';
+import ScheduleReminderBanner from '../ScheduleReminderBanner';
+import AnnouncementNotificationBell from '../AnnouncementNotificationBell';
+import { useScheduleReminder } from '../../hooks/useScheduleReminder';
 import {
   LayoutDashboard,
   Users,
   CalendarDays,
+  Calendar,
   Settings,
   LogOut,
   Menu,
@@ -30,6 +35,14 @@ export const DashboardLayout = () => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Automatic Schedule Reminder Hook (15 minutes before class)
+  const {
+    upcomingAlerts,
+    dismissAlert,
+    soundEnabled,
+    toggleSound
+  } = useScheduleReminder();
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -42,6 +55,7 @@ export const DashboardLayout = () => {
     { to: '/admin/attendance', icon: ClipboardList, label: 'Absensi Siswa' },
     { to: '/admin/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
     { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
+    { to: '/admin/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
     { to: '/admin/lesson-plans', icon: BookOpen, label: 'E-RPP Guru' },
     { to: '/admin/question-bank', icon: BookOpen, label: 'Bank Soal' },
     { to: '/admin/finance', icon: Wallet, label: 'Keuangan Kelas' },
@@ -55,14 +69,18 @@ export const DashboardLayout = () => {
     { to: '/guru/attendance', icon: ClipboardList, label: 'Absensi' },
     { to: '/guru/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
     { to: '/guru/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
+    { to: '/guru/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
     { to: '/guru/lesson-plans', icon: BookOpen, label: 'E-RPP' },
     { to: '/guru/question-bank', icon: BookOpen, label: 'Bank Soal' },
     { to: '/guru/finance', icon: Wallet, label: 'Keuangan Kelas' },
+    { to: '/guru/announcements', icon: Bell, label: 'Pengumuman' },
     { to: '/guru/settings', icon: Settings, label: 'Pengaturan Kelas' },
   ];
 
   const waliMuridLinks = [
     { to: '/walimurid/dashboard', icon: UserCircle, label: 'Profil Anak & Rapor' },
+    { to: '/walimurid/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
+    { to: '/walimurid/announcements', icon: Bell, label: 'Pengumuman' },
   ];
 
   const links = userData?.role === 'Admin' ? adminLinks : 
@@ -154,6 +172,12 @@ export const DashboardLayout = () => {
         </div>
 
         <div className="flex items-center space-x-1.5">
+          {/* Announcements & Notifications Bell */}
+          <AnnouncementNotificationBell />
+
+          {/* Schedule Reminder Bell */}
+          <ScheduleReminderBell />
+
           {/* Mobile Theme Toggle */}
           <button
             onClick={toggleTheme}
@@ -270,6 +294,12 @@ export const DashboardLayout = () => {
           </div>
 
           <div className="flex items-center space-x-3">
+            {/* Announcements & Notifications Bell */}
+            <AnnouncementNotificationBell />
+
+            {/* Automatic Schedule Reminder Bell Notification */}
+            <ScheduleReminderBell />
+
             {/* Theme Toggle Button */}
             <button
               onClick={toggleTheme}
@@ -303,6 +333,14 @@ export const DashboardLayout = () => {
               transition={{ duration: 0.2, ease: "easeInOut" }}
               className="p-5 md:p-8 max-w-7xl mx-auto min-h-full"
             >
+              {/* 15-Minute Upcoming Class Reminder Alert Banner */}
+              <ScheduleReminderBanner
+                alerts={upcomingAlerts}
+                onDismiss={dismissAlert}
+                soundEnabled={soundEnabled}
+                onToggleSound={toggleSound}
+              />
+
               <Outlet />
             </motion.div>
           </AnimatePresence>

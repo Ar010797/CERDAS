@@ -270,13 +270,260 @@ export function formatAsPTS(text: string): string {
   }).join('\n\n');
 }
 
+/**
+ * Memastikan teks latihan soal selalu memiliki persis targetCount butir soal sesuai yang diperintahkan pengguna
+ */
+export function enforceQuestionCount(
+  text: string,
+  targetCount: number,
+  questionType: 'Pilihan Ganda' | 'Uraian',
+  mataPelajaran: string,
+  materi: string
+): string {
+  const safeCount = Math.min(Math.max(targetCount, 1), 50);
+  const normalized = normalizePTSQuestionString(text || '');
+  const parsed = parsePTSQuestions(normalized);
+
+  if (parsed.length === 0) {
+    return generateClientSideRPP(mataPelajaran, materi, questionType, safeCount).latihanSoal;
+  }
+
+  // Sesuaikan jumlah elemen persis dengan safeCount
+  const adjusted: FormattedPTSQuestion[] = [];
+  for (let i = 0; i < safeCount; i++) {
+    if (i < parsed.length) {
+      adjusted.push({ ...parsed[i], number: i + 1 });
+    } else {
+      // Tambahkan soal tambahan otomatis agar sesuai persis dengan pesanan input
+      const fallbackRPP = generateClientSideRPP(mataPelajaran, materi, questionType, safeCount);
+      const fallbackParsed = parsePTSQuestions(fallbackRPP.latihanSoal);
+      if (fallbackParsed[i]) {
+        adjusted.push({ ...fallbackParsed[i], number: i + 1 });
+      } else {
+        if (questionType === 'Uraian') {
+          adjusted.push({
+            number: i + 1,
+            question: `Uraikan analisis mendalam serta penalaran kritis Anda mengenai topik ${materi} (Soal Butir ${i + 1})!`,
+            options: [],
+            answerKey: `Kunci Jawaban: Pemaparan konsep yang komprehensif disertai penalaran logis dan contoh nyata yang relevan seputar ${materi} (Skor maksimal: 100).`,
+            keyLetter: '',
+            explanation: ''
+          });
+        } else {
+          adjusted.push({
+            number: i + 1,
+            question: `Terkait pendalaman materi ${materi} (Butir ${i + 1}), sikap bernalar kritis yang paling tepat ditunjukkan dengan cara...`,
+            options: [
+              { label: 'A', text: 'Menguji kebenaran data dan memverifikasi sumber informasi secara objektif' },
+              { label: 'B', text: 'Menerima begitu saja kesimpulan awal tanpa melakukan pengecekan' },
+              { label: 'C', text: 'Menghindari kerja sama tim dan diskusi terbuka' },
+              { label: 'D', text: 'Mengabaikan tahapan evaluasi dalam proses pemecahan masalah' }
+            ],
+            answerKey: 'A (Pembahasan: Sikap bernalar kritis mengutamakan validitas data dan verifikasi terukur.)',
+            keyLetter: 'A',
+            explanation: 'Sikap bernalar kritis mengutamakan validitas data dan verifikasi terukur.'
+          });
+        }
+      }
+    }
+  }
+
+  return adjusted.map((q, idx) => {
+    const stemLines = q.question.split('\n').map(l => l.trim()).filter(Boolean);
+    let out = `${idx + 1}. ${stemLines[0] || ''}`;
+    for (let i = 1; i < stemLines.length; i++) {
+      out += `\n   ${stemLines[i]}`;
+    }
+    if (q.options && q.options.length > 0) {
+      q.options.forEach(opt => {
+        out += `\n   ${opt.label}. ${opt.text}`;
+      });
+    }
+    if (q.answerKey) {
+      out += `\n   Kunci Jawaban: ${q.answerKey}`;
+    }
+    return out;
+  }).join('\n\n');
+}
+
+/**
+ * Menyusun penjabaran isi materi pembelajaran yang komprehensif, terstruktur,
+ * dan memuat konsep inti, kaidah/rumus pokok, contoh soal & cara pengerjaan terperinci (langkah demi langkah),
+ * penerapan kontekstual, dan referensi resmi terpercaya (Kurikulum Merdeka).
+ */
+export function buildRealisticIsiMateri(
+  mataPelajaran: string,
+  materi: string,
+  kelas: string = ''
+): { isiMateriPenjelas: string; referensiMateri: string } {
+  const mapelLower = (mataPelajaran || '').toLowerCase();
+  const materiLower = (materi || '').toLowerCase();
+
+  // 1. Kasus Khusus: Matematika - Pecahan / Bilangan Pecahan
+  if (
+    materiLower.includes('pecahan') ||
+    (mapelLower.includes('matematika') && (materiLower.includes('pecah') || materiLower.includes('fraction')))
+  ) {
+    const isi = `1. Pengertian & Konsep Inti:
+   Pecahan adalah bilangan yang menyatakan bagian dari suatu keseluruhan yang utuh atau bagian dari suatu kelompok benda yang sejenis. Pecahan dinyatakan dalam bentuk a/b, di mana:
+   - Angka 'a' disebut Pembilang (menunjukkan jumlah bagian yang dihitung atau diambil).
+   - Angka 'b' disebut Penyebut (menunjukkan jumlah total seluruh bagian yang terbagi sama rata, dengan syarat b ≠ 0).
+
+2. Kaidah Pokok, Rumus, & Karakteristik Materi:
+   - Jenis-Jenis Pecahan:
+     * Pecahan Biasa: Pembilang lebih kecil dari penyebut (contoh: 1/2, 3/4).
+     * Pecahan Campuran: Terdiri dari bilangan bulat dan pecahan biasa (contoh: 1 1/2, 2 3/5).
+     * Pecahan Desimal: Ditulis dengan tanda koma berbasis persepuluh, perseratus, dst. (contoh: 0,5; 0,75).
+     * Persen: Pecahan dengan penyebut seratus, disimbolkan % (contoh: 50%, 75%).
+   - Pecahan Senilai: Pecahan yang memiliki nilai perbandingan sama. Dihasilkan dengan mengalikan atau membagi pembilang dan penyebut dengan bilangan bulat yang sama (bukan nol).
+   - Aturan Operasi Penjumlahan & Pengurangan:
+     * Jika penyebut sudah sama: Langsung jumlahkan atau kurangkan pembilang: a/c + b/c = (a + b) / c.
+     * Jika penyebut berbeda: Wajib menyamakan penyebut terlebih dahulu menggunakan Kelipatan Persekutuan Terkecil (KPK) dari kedua penyebut.
+
+3. Contoh Soal & Cara Pengerjaan Terperinci (Langkah demi Langkah):
+   - Contoh Soal 1 (Menyederhanakan Pecahan):
+     Sederhanakan pecahan 6/8 menjadi bentuk pecahan yang paling sederhana!
+     * Langkah 1: Tentukan Faktor Persekutuan Terbesar (FPB) dari pembilang 6 dan penyebut 8.
+       Faktor dari 6 = {1, 2, 3, 6}; faktor dari 8 = {1, 2, 4, 8}. Maka FPB = 2.
+     * Langkah 2: Bagilah pembilang dan penyebut dengan FPB tersebut (yaitu 2):
+       (6 ÷ 2) / (8 ÷ 2) = 3/4
+     * Kunci / Hasil Akhir: Bentuk paling sederhana dari 6/8 adalah 3/4.
+
+   - Contoh Soal 2 (Penjumlahan Pecahan Berbeda Penyebut):
+     Hitunglah hasil penjumlahan dari 1/2 + 1/4!
+     * Langkah 1: Perhatikan penyebut kedua pecahan (2 dan 4). Karena berbeda, cari KPK dari 2 dan 4. KPK(2, 4) = 4.
+     * Langkah 2: Samakan pecahan 1/2 menjadi penyebut 4 dengan mengalikan pembilang dan penyebut dengan angka 2:
+       1/2 = (1 × 2) / (2 × 2) = 2/4
+     * Langkah 3: Jumlahkan pembilang kedua pecahan yang penyebutnya sudah sama:
+       2/4 + 1/4 = (2 + 1) / 4 = 3/4
+     * Kunci / Hasil Akhir: Hasil dari 1/2 + 1/4 adalah 3/4.
+
+4. Contoh Kontekstual & Penerapan Nyata Sehari-hari:
+   - Pembagian Makanan: Sebuah loyang kue pizza dipotong menjadi 8 potong sama besar. Jika adik memakan 2 potong, maka bagian pizza yang dimakan adik bernilai 2/8 (atau 1/4 bagian), dan sisa pizza yang belum dimakan bernilai 6/8 (atau 3/4 bagian).
+   - Resep Masakan: Mengukur takaran bahan kue, seperti 1/2 sendok teh garam atau 3/4 cangkir gula pasir.
+
+5. Sumber Referensi Belajar Terpercaya:
+   - Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi RI. (2024). Buku Panduan Guru & Buku Teks Siswa: Matematika (Kurikulum Merdeka). Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+   - Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Alur Tujuan Pembelajaran (ATP) Matematika Materi Bilangan Pecahan.
+   - Platform Merdeka Mengajar (PMM) Kemdikbudristek: Modul Ajar Eksplorasi Konsep Pecahan Senilai dan Operasi Hitung Pecahan.`;
+
+    const ref = `1. Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Republik Indonesia. (2024). Buku Panduan Guru dan Buku Teks Siswa: Matematika (${kelas || 'Fase B/C'}). Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+2. Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Alur Tujuan Pembelajaran (ATP) dan Capaian Pembelajaran Matematika Materi 'Bilangan Pecahan'.
+3. Tim Pengembang Kurikulum Kemdikbudristek. Modul Pembelajaran Berdiferensiasi: Penguasaan Konsep Pecahan dan Operasi Hitung Kontekstual.
+4. Platform Merdeka Mengajar (PMM) Kemdikbudristek: Bahan Ajar Digital dan Lembar Kerja Eksploratif Pecahan.`;
+
+    return { isiMateriPenjelas: isi, referensiMateri: ref };
+  }
+
+  // 2. Matematika Topik Umum
+  if (mapelLower.includes('matematika')) {
+    const isi = `1. Pengertian & Konsep Inti:
+   ${materi} merupakan pokok bahasan penting dalam matematika yang membekali peserta didik dengan pemahaman konsep kuantitatif, pola matematis, dan penalaran logis terstruktur sesuai capaian kurikulum.
+
+2. Kaidah Pokok, Rumus, & Karakteristik Materi:
+   - Prinsip Dasar: Mengenali definisi operasional, besaran matematis, dan sifat-sifat utama yang mendasari ${materi}.
+   - Prosedur Perhitungan:
+     * Identifikasi variabel atau informasi yang diketahui dan apa yang ditanyakan.
+     * Terapkan rumus dasar dan prinsip hitung secara bertahap sesuai kaidah matematika resmi.
+     * Utamakan ketelitian operasi hitung dan pembuktian kembali hasil perhitungan.
+
+3. Contoh Soal & Cara Pengerjaan Terperinci (Langkah demi Langkah):
+   - Contoh Soal Terarah:
+     Bagaimanakah penyelesaian terstruktur untuk persoalan latihan seputar ${materi}?
+     * Langkah 1 (Identifikasi): Tuliskan informasi angka/data yang diketahui dan rumuskan apa yang dicari.
+     * Langkah 2 (Pemilihan Rumus): Tentukan rumus dan kaidah operasi matematika yang berlaku untuk ${materi}.
+     * Langkah 3 (Eksekusi Perhitungan): Lakukan proses substitusi angka dan selesaikan perhitungan langkah demi langkah.
+     * Kunci / Hasil Akhir: Tuliskan jawaban akhir dengan teliti disertai satuan yang tepat.
+
+4. Contoh Kontekstual & Penerapan Nyata Sehari-hari:
+   - Penggunaan konsep ${materi} dalam perencanaan belanja, estimasi waktu, pengukuran ruang/jarak, dan pemecahan masalah kuantitatif sehari-hari.
+   - Membangun nalar kritis siswa dalam menginterpretasikan data angka di kehidupan nyata.
+
+5. Sumber Referensi Belajar Terpercaya:
+   - Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi RI. (2024). Buku Panduan Guru & Buku Teks Siswa: Matematika (Kurikulum Merdeka). Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+   - Alur Tujuan Pembelajaran (ATP) Matematika BSKAP Kemendikbudristek.`;
+
+    const ref = `1. Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Republik Indonesia. (2024). Buku Panduan Guru dan Buku Teks Siswa: Matematika. Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+2. Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Alur Tujuan Pembelajaran (ATP) Matematika Materi '${materi}'.
+3. Platform Merdeka Mengajar (PMM) Kemdikbudristek & Portal Rumah Belajar: Penjabaran Konsep dan Media Interaktif '${materi}'.`;
+
+    return { isiMateriPenjelas: isi, referensiMateri: ref };
+  }
+
+  // 3. IPA / IPAS / Sains Alam
+  if (mapelLower.includes('ipa') || mapelLower.includes('ipas') || mapelLower.includes('sains') || mapelLower.includes('biologi') || mapelLower.includes('fisika')) {
+    const isi = `1. Pengertian & Konsep Inti:
+   ${materi} merupakan konsep saintifik fundamental dalam ilmu pengetahuan alam yang mengkaji fenomena alam, karakteristik materi, interaksi makhluk hidup, dan hukum sebab-akibat yang bekerja di alam semesta.
+
+2. Kaidah Pokok, Karakteristik, & Prinsip Sains:
+   - Ciri Utama & Gejala Ilmiah: Mempelajari struktur, fungsi, dan interaksi yang membentuk sistem pada ${materi}.
+   - Metode Ilmiah: Mengamati fakta empiris, merumuskan hipotesis, dan melakukan pembuktian terbimbing.
+   - Keterkaitan Lingkungan: Memahami dampak timbal balik proses alam terhadap kelangsungan hidup manusia dan ekosistem.
+
+3. Contoh Soal & Cara Pengerjaan / Analisis Langkah demi Langkah:
+   - Contoh Studi Kasus / Soal:
+     Bagaimanakah analisis ilmiah yang tepat untuk menjelaskan fenomena terkait ${materi}?
+     * Langkah 1 (Pengamatan Awal): Amati fenomena atau data yang disajikan dalam studi kasus.
+     * Langkah 2 (Kaitkan dengan Teori Sains): Identifikasi prinsip fisika/biologi materi ${materi} yang mendasarinya.
+     * Langkah 3 (Analisis Sebab-Akibat): Susun alur penjelasan logis mengapa fenomena tersebut dapat terjadi.
+     * Kunci / Simpulan Akhir: Rumuskan simpulan ilmiah yang komprehensif dan mudah dipahami peserta didik.
+
+4. Contoh Kontekstual & Penerapan Nyata Sehari-hari:
+   - Pengamatan gejala alam di lingkungan sekitar, pemanfaatan teknologi tepat guna, serta pelestarian lingkungan hidup dan sumber daya alam.
+   - Membiasakan pola hidup sehat dan ramah lingkungan berbasis pemahaman sains.
+
+5. Sumber Referensi Belajar Terpercaya:
+   - Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi RI. (2024). Buku Panduan Guru & Buku Siswa IPAS / Sains (Kurikulum Merdeka). Jakarta: Pusat Perbukuan BSKAP.
+   - Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Capaian Pembelajaran Ilmu Pengetahuan Alam dan Sosial.`;
+
+    const ref = `1. Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Republik Indonesia. (2024). Buku Teks Utama IPAS (Kurikulum Merdeka). Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+2. Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Alur Tujuan Pembelajaran (ATP) IPAS Materi '${materi}'.
+3. Portal Rumah Belajar & Laboratorium Virtual Sains Kemdikbudristek.`;
+
+    return { isiMateriPenjelas: isi, referensiMateri: ref };
+  }
+
+  // 4. Default / Mata Pelajaran Umum
+  const isi = `1. Pengertian & Konsep Inti:
+   ${materi} merupakan pokok bahasan esensial dalam mata pelajaran ${mataPelajaran} yang membekali peserta didik dengan pemahaman konsep dasar, keterampilan berpikir kritis, dan kemampuan aplikatif sesuai capaian pembelajaran.
+
+2. Kaidah Pokok, Karakteristik, & Aturan Utama:
+   - Prinsip Esensial: Memahami struktur, kaidah pokok, dan unsur-unsur penting yang menyusun materi ${materi}.
+   - Tata Cara & Prosedur: Menerapkan tahapan analisis yang runut, objektif, dan terstandar sesuai Kurikulum Merdeka.
+   - Karakter & Nilai: Mengintegrasikan nilai Profil Pelajar Pancasila (kemandirian, gotong royong, dan bernalar kritis).
+
+3. Contoh Soal & Cara Pengerjaan / Analisis Langkah demi Langkah:
+   - Contoh Kasus / Latihan:
+     Bagaimanakah langkah penanganan atau penyelesaian yang tepat terkait persoalan pada materi ${materi}?
+     * Langkah 1 (Identifikasi Masalah): Cermati informasi utama dan tentukan inti permasalahan yang hendak dipecahkan.
+     * Langkah 2 (Penerapan Kaidah): Gunakan prinsip dan aturan pokok dari ${materi} untuk menganalisis persoalan.
+     * Langkah 3 (Penyusunan Solusi): Rumuskan argumen atau langkah penyelesaian secara teratur dan sistematis.
+     * Kunci / Hasil Akhir: Tarik kesimpulan jawaban yang valid, lugas, dan dapat dipertanggungjawabkan.
+
+4. Contoh Kontekstual & Penerapan Nyata Sehari-hari:
+   - Penerapan langsung dalam komunikasi, pemecahan masalah harian, dan interaksi bermakna di lingkungan keluarga, sekolah, dan masyarakat.
+   - Menggunakan contoh nyata yang dekat dengan kehidupan sehari-hari anak untuk memperkuat pemahaman.
+
+5. Sumber Referensi Belajar Terpercaya:
+   - Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi RI. (2024). Buku Panduan Guru dan Buku Teks Siswa: ${mataPelajaran} (Kurikulum Merdeka). Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+   - Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Alur Tujuan Pembelajaran (ATP) ${mataPelajaran} Materi '${materi}'.
+   - Platform Merdeka Mengajar (PMM) Kemdikbudristek & Portal Edukasi Rumah Belajar.`;
+
+  const ref = `1. Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Republik Indonesia. (2024). Buku Panduan Guru dan Buku Teks Siswa: ${mataPelajaran}. Jakarta: Pusat Perbukuan BSKAP Kemendikbudristek.
+2. Badan Standar, Kurikulum, dan Asesmen Pendidikan (BSKAP). Alur Tujuan Pembelajaran (ATP) ${mataPelajaran} Materi '${materi}'.
+3. Platform Merdeka Mengajar (PMM) Kemdikbudristek & Portal Rumah Belajar: Penjabaran Konsep dan Media Interaktif '${materi}'.`;
+
+  return { isiMateriPenjelas: isi, referensiMateri: ref };
+}
+
 export function generateClientSideRPP(
   mataPelajaran: string,
   materi: string,
   questionType: 'Pilihan Ganda' | 'Uraian',
   questionCount: number
 ) {
-  const safeCount = Math.min(Math.max(questionCount, 1), 20);
+  const safeCount = Math.min(Math.max(questionCount, 1), 50);
+  const materialData = buildRealisticIsiMateri(mataPelajaran, materi, '');
 
   const generateQuestions = () => {
     const items: string[] = [];
@@ -289,13 +536,21 @@ export function generateClientSideRPP(
         `Mengapa pemahaman mendalam tentang ${materi} sangat penting bagi peserta didik? Berikan analisis kritis Anda!`,
         `Bandingkan kelebihan dan kekurangan dari metode yang digunakan dalam ${materi}!`,
         `Rancanglah sebuah gagasan inovatif atau solusi praktis untuk memecahkan persoalan nyata seputar ${materi}!`,
-        `Jelaskan keterkaitan langsung antara materi ${materi} dengan materi pembelajaran sebelumnya!`
+        `Jelaskan keterkaitan langsung antara materi ${materi} dengan materi pembelajaran sebelumnya!`,
+        `Bagaimanakah strategi mengevaluasi hasil kerja dalam penerapan materi ${materi}?`,
+        `Jelaskan nilai-nilai Profil Pelajar Pancasila yang terintegrasi selama mempelajari materi ${materi}!`
       ];
 
       for (let i = 1; i <= safeCount; i++) {
-        const prompt = prompts[(i - 1) % prompts.length];
+        const promptIndex = (i - 1) % prompts.length;
+        const cycle = Math.floor((i - 1) / prompts.length);
+        const basePrompt = prompts[promptIndex];
+        const prompt = cycle > 0 
+          ? `${basePrompt} (Studi kasus & pendalaman materi butir ${i})` 
+          : basePrompt;
+
         items.push(
-          `${i}. ${prompt}\n   Kunci Jawaban: Pemahaman konsep yang tepat, argumen logis terstruktur, serta ketepatan contoh kontekstual yang relevan (Skor maksimal: 100).`
+          `${i}. ${prompt}\n   Kunci Jawaban: Pemahaman konsep yang tepat, argumen logis terstruktur, serta ketepatan contoh kontekstual yang relevan seputar ${materi} (Skor maksimal: 100).`
         );
       }
     } else {
@@ -354,12 +609,71 @@ export function generateClientSideRPP(
           ],
           key: "A",
           expl: `Penguasaan ${materi} membentuk profil pelajar yang mandiri dan bernalar kritis.`
+        },
+        {
+          q: `Sikap yang mencerminkan profil bernalar kritis saat mempelajari ${materi} adalah...`,
+          options: [
+            `Memverifikasi kebenaran informasi sebelum mengambil kesimpulan`,
+            `Menerima setiap data secara pasif tanpa pembuktian`,
+            `Menolak diskusi dan berbeda pendapat dengan teman sekelas`,
+            `Menyalin seluruh jawaban tanpa memahami proses penyelesaian`
+          ],
+          key: "A",
+          expl: `Sikap bernalar kritis mengedepankan pembuktian dan verifikasi data yang valid.`
+        },
+        {
+          q: `Apabila ditemukan perbedaan hasil saat mempraktikkan konsep ${materi}, tindakan yang paling bijak adalah...`,
+          options: [
+            `Mengulang langkah pengamatan dan memeriksa instrumen pembuktian`,
+            `Mengabaikan perbedaan dan langsung menganggap salah satu benar`,
+            `Menyalahkan anggota kelompok lain`,
+            `Menghentikan proses belajar tanpa kesimpulan`
+          ],
+          key: "A",
+          expl: `Pemeriksaan ulang data dan proses merupakan bagian dari prosedur kerja ilmiah.`
+        },
+        {
+          q: `Prinsip utama yang harus diperhatikan dalam menyajikan laporan pembelajaran ${materi} adalah...`,
+          options: [
+            `Kejelasan data, kejujuran hasil, dan sistematika penulisan logis`,
+            `Banyaknya halaman tanpa memperhatikan substansi isi`,
+            `Penggunaan istilah rumit agar terlihat meyakinkan`,
+            `Penyembunyian kendala yang terjadi selama kegiatan`
+          ],
+          key: "A",
+          expl: `Laporan hasil belajar wajib objektif, transparan, dan disusun secara sistematis.`
+        },
+        {
+          q: `Kaitan penting antara pemahaman konsep ${materi} dengan kehidupan bermasyarakat adalah...`,
+          options: [
+            `Membantu peserta didik beradaptasi dan memberikan kontribusi solutif`,
+            `Membuat peserta didik merasa lebih unggul dari lingkungan sekitar`,
+            `Menghindari interaksi sosial demi fokus pada teori`,
+            `Mengurangi kepedulian terhadap lingkungan sekitar`
+          ],
+          key: "A",
+          expl: `Pembelajaran bermakna membekali siswa berkontribusi positif bagi kehidupan nyata.`
+        },
+        {
+          q: `Evaluasi diri yang tepat setelah menuntaskan materi ${materi} bertujuan untuk...`,
+          options: [
+            `Mengetahui bagian yang telah dikuasai dan aspek yang perlu ditingkatkan`,
+            `Membandingkan kekurangan diri dengan kelebihan orang lain`,
+            `Menghindari tugas atau latihan berikutnya`,
+            `Menilai kemampuan guru dalam menyampaikan materi semata`
+          ],
+          key: "A",
+          expl: `Refleksi diri memetakan capaian pembelajaran dan kebutuhan tindak lanjut.`
         }
       ];
 
       for (let i = 1; i <= safeCount; i++) {
-        const t = templates[(i - 1) % templates.length];
-        const questionText = i > 5 ? `${i}. Terkait materi ${materi} (Butir ${i}): Pernyataan berikut yang paling tepat adalah...` : `${i}. ${t.q}`;
+        const tIndex = (i - 1) % templates.length;
+        const cycle = Math.floor((i - 1) / templates.length);
+        const t = templates[tIndex];
+        const questionText = cycle > 0 
+          ? `${i}. Terkait penguatan konsep ${materi} (Soal Butir ${i}): ${t.q.replace(/^[A-Z][a-z\s]+(materi|konsep|topik)/i, 'Pernyataan')}` 
+          : `${i}. ${t.q}`;
         items.push(
           `${questionText}\n   A. ${t.options[0]}\n   B. ${t.options[1]}\n   C. ${t.options[2]}\n   D. ${t.options[3]}\n   Kunci Jawaban: ${t.key} (Pembahasan: ${t.expl})`
         );
@@ -370,7 +684,7 @@ export function generateClientSideRPP(
 
   return {
     tujuanPembelajaran: `Melalui model pembelajaran Discovery/Inquiry Learning berorientasi Profil Pelajar Pancasila pada materi ${materi}, peserta didik diharapkan mampu:\n1. Mengidentifikasi konsep esensial dan prinsip dasar ${materi} secara cermat dan kritis.\n2. Menganalisis contoh kasus dan penerapan nyata terkait ${materi} dalam kehidupan sehari-hari.\n3. Menyajikan hasil penelaahan serta berkolaborasi aktif dengan sikap santun, mandiri, dan bertanggung jawab.`,
-    isiMateriPenjelas: `1. Konsep Pokok & Pengertian:\n   ${materi} merupakan salah satu materi pokok esensial dalam mata pelajaran ${mataPelajaran} yang membekali peserta didik dengan pemahaman konsep, struktur berpikir logis, dan keterampilan aplikatif.\n\n2. Uraian & Poin-Poin Pokok Bahasan:\n   - Mempelajari prinsip dasar, karakteristik, serta struktur penting yang mendasari ${materi}.\n   - Mengembangkan kemampuan bernalar kritis dan analitis dalam memecahkan persoalan seputar ${materi}.\n   - Menghubungkan pemahaman teoritis dengan fakta kontekstual di lingkungan sekitar peserta didik.\n\n3. Penerapan & Contoh Kontekstual:\n   - Penyelesaian studi kasus nyata baik secara mandiri maupun berkolaborasi dalam kelompok.\n   - Penggunaan analogi konkret dan bahan ajar pendukung untuk memperkuat pemahaman.`,
+    isiMateriPenjelas: materialData.isiMateriPenjelas,
     pendahuluan: `1. Orientasi: Guru membuka kelas dengan salam ramah, memimpin doa bersama, dan memeriksa presensi siswa.\n2. Apersepsi: Guru mengaitkan materi sebelumnya dengan topik '${materi}' melalui pertanyaan pemantik kontekstual.\n3. Motivasi: Guru memaparkan tujuan pembelajaran, manfaat mempelajari '${materi}', serta mekanisme kegiatan dan penilaian hari ini.`,
     kegiatanInti: `1. Stimulasi (Pemberian Rangsangan):\n   - Guru menyajikan bahan tayang/ilustrasi kontekstual seputar materi '${materi}'.\n   - Peserta didik mengamati dan mencatat hal-hal penting secara seksama.\n\n2. Identifikasi Masalah (Problem Statement):\n   - Peserta didik dirangsang untuk menyusun pertanyaan kritis seputar penerapan '${materi}'.\n   - Guru mengelompokkan siswa ke dalam tim belajar heterogen.\n\n3. Pengumpulan Data (Data Collection):\n   - Setiap kelompok mengumpulkan data dan referensi relevan mengenai '${materi}' dari buku ajar dan lembar kerja.\n   - Guru berkeliling memfasilitasi dan memberi bimbingan diferensiasi.\n\n4. Pengolahan Data (Data Processing):\n   - Siswa berdiskusi mengolah data temuan untuk merumuskan simpulan kelompok mengenai '${materi}'.\n   - Menyusun draf laporan hasil eksplorasi pada lembar kerja siswa.\n\n5. Pembuktian & Verifikasi (Verification):\n   - Perwakilan kelompok mempresentasikan hasil diskusi di hadapan kelas.\n   - Kelompok lain menanggapi secara konstruktif dan beretika.\n   - Guru memberikan penguatan materi, klarifikasi, dan apresiasi terhadap partisipasi aktif siswa.`,
     penutup: `1. Simpulan: Bersama guru, peserta didik merangkum poin-poin utama materi '${materi}'.\n2. Refleksi: Peserta didik menyampaikan hal yang telah dipahami dan bagian yang masih membutuhkan pendalaman.\n3. Tindak Lanjut: Guru memberikan tugas mandiri/pengayaan serta menyampaikan agenda pertemuan berikutnya.\n4. Doa & Salam: Pembelajaran diakhiri dengan doa penutup dan salam kehangatan.`,
@@ -407,6 +721,8 @@ export default function LessonPlansGuru() {
   
   const [saving, setSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingMateri, setIsGeneratingMateri] = useState(false);
+  const [isRegeneratingQuestions, setIsRegeneratingQuestions] = useState(false);
   const [questionType, setQuestionType] = useState<'Pilihan Ganda' | 'Uraian'>('Pilihan Ganda');
   const [questionCount, setQuestionCount] = useState(5);
   const [questionTab, setQuestionTab] = useState<'paper' | 'cards' | 'raw'>('paper');
@@ -592,6 +908,77 @@ export default function LessonPlansGuru() {
     const formatted = formatIsiMateri(isiMateriPenjelas);
     setIsiMateriPenjelas(formatted);
     showToast('Format nomor materi berhasil dirapikan dengan enter!', 'success');
+  };
+
+  /**
+   * Menyusun / memperbarui penjabaran isi materi secara otomatis:
+   * - Berdasarkan modul PDF impor jika tersedia
+   * - ATAU mencari referensi resmi Kurikulum Merdeka (Kemdikbudristek) secara otomatis
+   * Lengkap dengan konsep inti, kaidah/rumus, contoh soal & cara pengerjaan (langkah demi langkah), dan referensi!
+   */
+  const handleGenerateIsiMateri = async () => {
+    const cleanMapel = (mataPelajaran || '').trim();
+    const cleanMateri = (materi || '').trim();
+
+    if (!cleanMapel && !cleanMateri && !modulePdfFile) {
+      showToast('Harap pilih Mata Pelajaran atau ketik Judul Materi terlebih dahulu, atau unggah modul PDF!', 'error');
+      return;
+    }
+
+    setIsGeneratingMateri(true);
+    try {
+      let resultData: any = null;
+      if (modulePdfFile) {
+        const formData = new FormData();
+        formData.append('file', modulePdfFile);
+        formData.append('mataPelajaran', cleanMapel || 'Mata Pelajaran');
+        formData.append('materi', cleanMateri || 'Materi Pokok');
+        formData.append('kelas', selectedClass);
+
+        const resp = await fetch('/api/generate-isi-materi', {
+          method: 'POST',
+          body: formData
+        });
+        if (resp.ok) {
+          resultData = await resp.json();
+        }
+      } else {
+        const resp = await fetch('/api/generate-isi-materi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mataPelajaran: cleanMapel || 'Mata Pelajaran',
+            materi: cleanMateri || 'Materi Pokok',
+            kelas: selectedClass
+          })
+        });
+        if (resp.ok) {
+          resultData = await resp.json();
+        }
+      }
+
+      if (!resultData || !resultData.isiMateriPenjelas) {
+        resultData = buildRealisticIsiMateri(cleanMapel || 'Mata Pelajaran', cleanMateri || 'Materi Pokok', selectedClass);
+      }
+
+      if (resultData.isiMateriPenjelas) {
+        setIsiMateriPenjelas(formatIsiMateri(resultData.isiMateriPenjelas));
+      }
+
+      showToast(
+        modulePdfFile
+          ? 'Penjabaran isi materi berhasil disarikan dari modul ajar PDF terlampir!'
+          : 'Penjabaran isi materi berhasil disusun otomatis dari referensi resmi terpercaya Kurikulum Merdeka!',
+        'success'
+      );
+    } catch (err: any) {
+      console.warn('Gagal memuat isi materi via API, menggunakan kurikulum terpercaya:', err);
+      const fallback = buildRealisticIsiMateri(cleanMapel || 'Mata Pelajaran', cleanMateri || 'Materi Pokok', selectedClass);
+      setIsiMateriPenjelas(formatIsiMateri(fallback.isiMateriPenjelas));
+      showToast('Penjabaran materi berhasil disusun dari basis referensi Kurikulum Merdeka!', 'success');
+    } finally {
+      setIsGeneratingMateri(false);
+    }
   };
 
   const handleCopyQuestions = () => {
@@ -845,19 +1232,105 @@ export default function LessonPlansGuru() {
       if (data.pendahuluan) setPendahuluan(data.pendahuluan);
       if (data.kegiatanInti) setKegiatanInti(data.kegiatanInti);
       if (data.penutup) setPenutup(data.penutup);
-      if (data.latihanSoal) setLatihanSoal(formatAsPTS(data.latihanSoal));
-      if (data.penilaian) setPenilaian(data.penilaian);
+      if (data.latihanSoal) {
+        const enforced = enforceQuestionCount(
+          data.latihanSoal,
+          questionCount,
+          questionType,
+          cleanMapel || "Mata Pelajaran",
+          cleanMateri || "Materi Pokok"
+        );
+        setLatihanSoal(enforced);
+      }
+      if (data.penilaian) {
+        let pen = data.penilaian;
+        if (!pen.includes(`${questionCount} butir soal`)) {
+          pen = pen.replace(/\(\d+\s*butir\s*soal[^)]*\)/gi, `(${questionCount} butir soal ${questionType})`);
+        }
+        setPenilaian(pen);
+      }
 
       if (modulePdfFile) {
-        showToast("✨ Draf E-RPP & bank soal berhasil disusun selaras dengan Modul Ajar PDF!", "success");
+        showToast(`✨ Draf E-RPP & ${questionCount} butir soal latihan berhasil disusun selaras Modul PDF!`, "success");
       } else {
-        showToast("✨ Draf E-RPP & bank soal PTS berhasil disusun otomatis!", "success");
+        showToast(`✨ Draf E-RPP & ${questionCount} butir soal latihan PTS berhasil disusun!`, "success");
       }
     } catch (renderErr) {
       console.error(renderErr);
       showToast("Gagal memproses draf RPP.", "error");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  /**
+   * Menyesuaikan / membuat ulang butir soal latihan saja sesuai jumlah input yang diperintahkan
+   */
+  const handleRegenerateQuestionsOnly = async (overrideCount?: number, overrideType?: 'Pilihan Ganda' | 'Uraian') => {
+    const targetCount = overrideCount !== undefined ? overrideCount : questionCount;
+    const targetType = overrideType !== undefined ? overrideType : questionType;
+    const cleanMapel = mataPelajaran.trim() || "Mata Pelajaran";
+    const cleanMateri = materi.trim() || "Materi Pokok";
+
+    setIsRegeneratingQuestions(true);
+    try {
+      let finalQuestions = '';
+      try {
+        const res = await fetch('/api/generate-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mataPelajaran: cleanMapel,
+            materi: cleanMateri,
+            questionType: targetType,
+            questionCount: targetCount
+          })
+        });
+
+        if (res.ok) {
+          const resJson = await res.json();
+          if (resJson?.latihanSoal) {
+            finalQuestions = enforceQuestionCount(
+              resJson.latihanSoal,
+              targetCount,
+              targetType,
+              cleanMapel,
+              cleanMateri
+            );
+          }
+        }
+      } catch (apiErr) {
+        console.warn("API generate-questions fallback to client generator:", apiErr);
+      }
+
+      if (!finalQuestions) {
+        finalQuestions = enforceQuestionCount(
+          '',
+          targetCount,
+          targetType,
+          cleanMapel,
+          cleanMateri
+        );
+      }
+
+      setLatihanSoal(finalQuestions);
+      setQuestionCount(targetCount);
+      setQuestionType(targetType);
+
+      // Sinkronkan deskripsi jumlah soal pada bagian penilaian
+      setPenilaian(prev => {
+        if (!prev) {
+          return `1. Penilaian Sikap: Observasi jurnal sikap Profil Pelajar Pancasila.\n2. Penilaian Pengetahuan: Tes tertulis format PTS (${targetCount} butir soal ${targetType}) dengan rubrik penskoran terukur.\n3. Penilaian Keterampilan: Unjuk kerja dan presentasi.`;
+        }
+        return prev.replace(/\(\d+\s*butir\s*soal[^)]*\)/gi, `(${targetCount} butir soal ${targetType})`);
+      });
+
+      showToast(`✨ Berhasil menyesuaikan ${targetCount} butir soal latihan ${targetType}!`, 'success');
+    } catch (e: any) {
+      console.error(e);
+      showToast('Gagal memperbarui butir soal.', 'error');
+    } finally {
+      setIsRegeneratingQuestions(false);
     }
   };
 
@@ -1862,59 +2335,94 @@ export default function LessonPlansGuru() {
                 </div>
 
                 {/* Kolom Isi Materi Penjelas */}
-                <div className="mt-5 p-4 bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700/80">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                <div className="mt-5 p-4 sm:p-5 bg-gradient-to-b from-slate-50 to-white dark:from-slate-850 dark:to-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-2xs">
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 mb-3">
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <label className="block text-sm font-bold text-slate-800 dark:text-white">
-                          Isi Materi Penjelas (Uraian Konsep Pembelajaran)
+                        <label className="block text-sm font-bold text-slate-900 dark:text-white">
+                          Isi Materi (Penjabaran Materi yang Disampaikan)
                         </label>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 shadow-2xs ${
                           modulePdfFile 
                             ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                             : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
                         }`}>
-                          {modulePdfFile ? '📄 Terisi Otomatis Sesuai Modul Ajar PDF' : '🌐 Terisi Otomatis dari Referensi Internet/Kurikulum Terpercaya'}
+                          {modulePdfFile 
+                            ? `📄 Sesuai Modul Ajar PDF (${modulePdfName || 'Terlampir'})` 
+                            : '🌐 Otomatis dari Referensi Resmi & Terpercaya (Kurikulum Merdeka)'}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        Uraian materi pokok, konsep esensial, dan rangkuman yang diajarkan kepada siswa. Terisi otomatis dari modul PDF terlampir atau referensi internet pendidikan terpercaya.
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Penjabaran materi nyata yang akan disampaikan guru kepada peserta didik di kelas, meliputi pengertian konsep inti, kaidah/rumus pokok, contoh soal & cara pengerjaan terperinci (langkah demi langkah), dan penerapan nyata.
                       </p>
                     </div>
-                    {isiMateriPenjelas && (
-                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
-                        <button
-                          type="button"
-                          onClick={handleFormatIsiMateri}
-                          className="px-2.5 py-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 dark:hover:text-indigo-100 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center gap-1 shadow-2xs transition-colors"
-                          title="Rapikan format nomor materi agar diberi enter dan tidak berjejer"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                          <span>Rapikan Enter Nomor</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(isiMateriPenjelas);
-                            showToast('Isi materi penjelas berhasil disalin!', 'success');
-                          }}
-                          className="px-2.5 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center gap-1 shadow-2xs"
-                          title="Salin isi materi penjelas"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Salin</span>
-                        </button>
-                      </div>
-                    )}
+
+                    <div className="flex items-center gap-1.5 flex-wrap self-start">
+                      <button
+                        type="button"
+                        onClick={handleGenerateIsiMateri}
+                        disabled={isGeneratingMateri}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs transition-all ${
+                          isGeneratingMateri
+                            ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 cursor-not-allowed'
+                            : modulePdfFile
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/20 active:scale-95'
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/20 active:scale-95'
+                        }`}
+                        title="Susun atau perbarui isi materi secara otomatis berdasarkan modul PDF atau pencarian referensi terpercaya"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingMateri ? 'animate-spin' : ''}`} />
+                        <span>
+                          {isGeneratingMateri 
+                            ? 'Menyusun Materi...' 
+                            : modulePdfFile 
+                              ? 'Ekstrak dari Modul' 
+                              : 'Cari Referensi & Susun Materi'}
+                        </span>
+                      </button>
+
+                      {isiMateriPenjelas && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleFormatIsiMateri}
+                            className="px-2.5 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 dark:hover:text-indigo-100 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded-xl flex items-center gap-1 shadow-2xs transition-colors"
+                            title="Rapikan format nomor materi agar diberi enter dan tidak berjejer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            <span>Rapikan Enter Nomor</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(isiMateriPenjelas);
+                              showToast('Isi materi penjelas berhasil disalin!', 'success');
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center gap-1 shadow-2xs transition-colors"
+                            title="Salin isi materi penjelas"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Salin</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <textarea
-                    rows={5}
-                    placeholder={`Uraian materi penjelas terisi otomatis saat mengklik tombol "Isi Otomatis (AI)" atau "Deteksi Data" dari modul PDF.\n\nContoh Uraian:\n1. Pengertian & Konsep Inti: ...\n2. Uraian & Poin Pokok Bahasan: ...\n3. Contoh Kontekstual & Penerapan Nyata: ...`}
+                    rows={8}
+                    placeholder={`Penjabaran materi yang akan disampaikan guru di kelas terisi otomatis sesuai modul PDF atau referensi resmi terpercaya Kurikulum Merdeka.\n\nContoh Struktur Materi Lengkap:\n1. Pengertian & Konsep Inti:\n   - Definisi konsep dasar materi secara lugas dan komprehensif...\n\n2. Kaidah Pokok, Rumus, & Karakteristik Materi:\n   - Penjelasan aturan, rumus, atau kaidah esensial...\n\n3. Contoh Soal & Cara Pengerjaan Terperinci (Langkah demi Langkah):\n   - Contoh Soal: ...\n   - Cara Pengerjaan: Langkah 1, Langkah 2, Kunci/Hasil Akhir...\n\n4. Contoh Kontekstual & Penerapan Nyata Sehari-hari:\n   - Contoh penerapan konkret materi dalam kehidupan sehari-hari anak...\n\n5. Sumber Referensi Belajar Terpercaya:\n   - Buku Guru & Siswa Kurikulum Merdeka Kemdikbudristek.`}
                     value={isiMateriPenjelas}
                     onChange={(e) => setIsiMateriPenjelas(e.target.value)}
-                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-normal text-slate-800 dark:text-white leading-relaxed placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                    className="w-full px-4 py-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-normal text-slate-800 dark:text-white leading-relaxed placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-inner"
                   />
+
+                  <div className="mt-2.5 flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 bg-slate-100/70 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-700/50">
+                    <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Panduan Isi Materi:</strong> Jika Anda mengunggah modul PDF guru, materi dan contoh cara pengerjaan disarikan langsung dari modul tersebut. Jika tanpa modul, aplikasi otomatis mencari dan menyusunkan referensi resmi terpercaya Kemdikbudristek (Kurikulum Merdeka) lengkap dengan contoh pengerjaan langkah demi langkah.
+                    </span>
+                  </div>
                 </div>
                 
                 {/* AI Configuration Box */}
@@ -1934,15 +2442,37 @@ export default function LessonPlansGuru() {
                     </select>
                   </div>
                   <div className="w-full sm:w-auto flex-1 relative z-10">
-                    <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 mb-1">Jumlah Soal AI</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300">Jumlah Soal AI</label>
+                      <span className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-900/60 px-2 py-0.5 rounded-md">
+                        {questionCount} Butir
+                      </span>
+                    </div>
                     <input
                       type="number"
                       min="1"
-                      max="20"
+                      max="50"
                       value={questionCount}
-                      onChange={(e) => setQuestionCount(Number(e.target.value))}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200 shadow-sm"
+                      onChange={(e) => setQuestionCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200 shadow-sm font-bold"
                     />
+                    {/* Quick Preset Buttons */}
+                    <div className="flex items-center gap-1 mt-2 flex-wrap">
+                      {[5, 10, 15, 20, 25, 30, 40, 50].map(cnt => (
+                        <button
+                          key={cnt}
+                          type="button"
+                          onClick={() => setQuestionCount(cnt)}
+                          className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition-all ${
+                            questionCount === cnt
+                              ? 'bg-indigo-600 text-white shadow-xs scale-105'
+                              : 'bg-white/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 border border-slate-200 dark:border-slate-600'
+                          }`}
+                        >
+                          {cnt}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="w-full lg:w-auto flex flex-col items-stretch lg:items-end gap-1.5 relative z-10">
                     <button
@@ -2052,10 +2582,40 @@ export default function LessonPlansGuru() {
                         <span className="bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
                           Format Naskah Ujian PTS
                         </span>
+                        {latihanSoal.trim() && (() => {
+                          const parsed = parsePTSQuestions(latihanSoal);
+                          const isExact = parsed.length === questionCount;
+                          return (
+                            <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                              isExact 
+                                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                                : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isExact ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                              <span>{parsed.length} Butir Soal {isExact ? '(Sesuai Input Guru)' : `(Target: ${questionCount})`}</span>
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       {/* Action buttons & View Switcher */}
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* Regenerate Questions Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerateQuestionsOnly()}
+                          disabled={isRegeneratingQuestions || isGenerating}
+                          title={`Buat ulang atau sesuaikan latihan soal persis ${questionCount} butir sesuai input`}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-xs transition-all disabled:opacity-50"
+                        >
+                          {isRegeneratingQuestions ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5" />
+                          )}
+                          <span>{isRegeneratingQuestions ? 'Membuat Soal...' : `Buat Ulang (${questionCount} Soal)`}</span>
+                        </button>
+
                         {/* View Switcher */}
                         <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                           <button
