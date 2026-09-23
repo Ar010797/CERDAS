@@ -35,6 +35,7 @@ import PushNotificationManager from '../../components/PushNotificationManager';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { useAnnouncementsNotification, AnnouncementItem } from '../../hooks/useAnnouncementsNotification';
+import { getCategoryBadgeStyle } from '../admin/Announcements';
 
 export default function WaliMuridDashboard() {
   const { userData } = useAuth();
@@ -71,7 +72,7 @@ export default function WaliMuridDashboard() {
   } = useAnnouncementsNotification(studentData?.classId);
 
   // Announcement tab filters
-  const [announcementFilter, setAnnouncementFilter] = useState<'semua' | 'unread' | 'penting' | 'guru' | 'admin'>('semua');
+  const [announcementFilter, setAnnouncementFilter] = useState<'semua' | 'unread' | 'penting' | 'umum' | 'guru' | 'admin'>('semua');
   const [announcementSearch, setAnnouncementSearch] = useState('');
   const [selectedAnnouncementModal, setSelectedAnnouncementModal] = useState<AnnouncementItem | null>(null);
 
@@ -773,6 +774,18 @@ export default function WaliMuridDashboard() {
                 </button>
 
                 <button
+                  onClick={() => setAnnouncementFilter('umum')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                    announcementFilter === 'umum'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>📢</span>
+                  <span>Pengumuman Umum</span>
+                </button>
+
+                <button
                   onClick={() => setAnnouncementFilter('guru')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     announcementFilter === 'guru'
@@ -816,6 +829,18 @@ export default function WaliMuridDashboard() {
                 // Filter type
                 if (announcementFilter === 'unread') return isUnread(a.id);
                 if (announcementFilter === 'penting') return a.priority === 'Penting' || a.priority === 'Tinggi (Penting)';
+                if (announcementFilter === 'umum') {
+                  const cat = (a.category || '').toLowerCase();
+                  return (
+                    !a.category ||
+                    cat.includes('umum') ||
+                    cat.includes('himbauan') ||
+                    cat.includes('pulang') ||
+                    cat.includes('libur') ||
+                    cat.includes('imunisasi') ||
+                    cat.includes('skrining')
+                  );
+                }
                 if (announcementFilter === 'guru') return a.authorRole === 'Guru';
                 if (announcementFilter === 'admin') return a.authorRole !== 'Guru';
                 return true;
@@ -895,11 +920,15 @@ export default function WaliMuridDashboard() {
                             )}
 
                             {/* Category */}
-                            {item.category && (
-                              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-100 dark:border-purple-900/40">
-                                {item.category}
-                              </span>
-                            )}
+                            {item.category && (() => {
+                              const badgeStyle = getCategoryBadgeStyle(item.category);
+                              return (
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border inline-flex items-center gap-1 ${badgeStyle.bg}`}>
+                                  <span>{badgeStyle.icon}</span>
+                                  <span>{item.category}</span>
+                                </span>
+                              );
+                            })()}
 
                             {/* Unread Pill */}
                             {unread && (
@@ -919,9 +948,9 @@ export default function WaliMuridDashboard() {
                             <span className="flex items-center gap-1">
                               <Calendar className="w-3.5 h-3.5" />
                               {item.date?.toDate
-                                ? format(item.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', {
+                                ? format(item.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm', {
                                     locale: id
-                                  })
+                                  }) + ' WIB'
                                 : 'Baru saja'}
                             </span>
                           </div>
@@ -1015,9 +1044,9 @@ export default function WaliMuridDashboard() {
                   <span className="flex items-center gap-1">
                     <Calendar className="w-3.5 h-3.5" />
                     {selectedAnnouncementModal.date?.toDate
-                      ? format(selectedAnnouncementModal.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', {
+                      ? format(selectedAnnouncementModal.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm', {
                           locale: id
-                        })
+                        }) + ' WIB'
                       : 'Baru saja'}
                   </span>
                   {selectedAnnouncementModal.category && (

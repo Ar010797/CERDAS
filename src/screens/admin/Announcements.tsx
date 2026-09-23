@@ -16,7 +16,11 @@ import {
   Calendar,
   Filter,
   Send,
-  AlertCircle
+  AlertCircle,
+  HeartPulse,
+  Clock,
+  ShieldAlert,
+  Stethoscope
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
@@ -36,14 +40,74 @@ interface Announcement {
   date: any;
 }
 
-const CATEGORIES = [
+export const CATEGORIES = [
   'Pengumuman Umum',
+  'Pulang Mendadak / Lebih Awal',
+  'Libur Mendadak / Insidental',
+  'Himbauan Imunisasi & Skrining',
+  'Himbauan & Ketertiban Umum',
   'Akademik & Ujian',
   'Kegiatan Sekolah',
   'Informasi Wali Murid',
   'Administrasi & Keuangan',
   'Libur Sekolah'
 ];
+
+export function getCategoryBadgeStyle(cat?: string) {
+  if (!cat) {
+    return {
+      bg: 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800/40',
+      icon: '📌'
+    };
+  }
+  const lower = cat.toLowerCase();
+  if (lower.includes('pulang')) {
+    return {
+      bg: 'bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-200 border-amber-300 dark:border-amber-800',
+      icon: '🚨'
+    };
+  }
+  if (lower.includes('libur mendadak') || lower.includes('insidental')) {
+    return {
+      bg: 'bg-rose-100 text-rose-900 dark:bg-rose-950/80 dark:text-rose-200 border-rose-300 dark:border-rose-800',
+      icon: '🛑'
+    };
+  }
+  if (lower.includes('imunisasi') || lower.includes('skrining') || lower.includes('kesehatan')) {
+    return {
+      bg: 'bg-teal-100 text-teal-900 dark:bg-teal-950/80 dark:text-teal-200 border-teal-300 dark:border-teal-800',
+      icon: '🩺'
+    };
+  }
+  if (lower.includes('himbauan') || lower.includes('ketertiban')) {
+    return {
+      bg: 'bg-sky-100 text-sky-900 dark:bg-sky-950/80 dark:text-sky-200 border-sky-300 dark:border-sky-800',
+      icon: '📢'
+    };
+  }
+  if (lower.includes('ujian') || lower.includes('akademik') || lower.includes('pts')) {
+    return {
+      bg: 'bg-indigo-100 text-indigo-900 dark:bg-indigo-950/80 dark:text-indigo-200 border-indigo-300 dark:border-indigo-800',
+      icon: '📝'
+    };
+  }
+  if (lower.includes('wali') || lower.includes('paguyuban')) {
+    return {
+      bg: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
+      icon: '🤝'
+    };
+  }
+  if (lower.includes('libur')) {
+    return {
+      bg: 'bg-orange-100 text-orange-900 dark:bg-orange-950/80 dark:text-orange-200 border-orange-300 dark:border-orange-800',
+      icon: '🏖️'
+    };
+  }
+  return {
+    bg: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700',
+    icon: '📢'
+  };
+}
 
 const CLASSES = ['Semua Kelas', 'Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
 
@@ -69,6 +133,7 @@ export default function Announcements() {
 
   // Filter state
   const [selectedFilterClass, setSelectedFilterClass] = useState<string>('Semua');
+  const [selectedFilterCategory, setSelectedFilterCategory] = useState<string>('Semua');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -102,9 +167,46 @@ export default function Announcements() {
     setIsModalOpen(true);
   };
 
-  const applyTemplate = (type: 'pts' | 'libur' | 'paguyuban' | 'tugas') => {
-    const defaultClass = isGuru && userData?.assigned_class ? userData.assigned_class : 'Kelas';
-    if (type === 'pts') {
+  const applyTemplate = (type: 'pulang_mendadak' | 'libur_mendadak' | 'imunisasi_skrining' | 'himbauan_umum' | 'pts' | 'libur' | 'paguyuban' | 'tugas') => {
+    const defaultClass = isGuru && userData?.assigned_class ? userData.assigned_class : 'Semua Kelas';
+
+    if (type === 'pulang_mendadak') {
+      setTitle('Pemberitahuan: Peserta Didik Dipulangkan Lebih Awal Hari Ini');
+      setContent(
+        `Yth. Bapak/Ibu Wali Murid,\n\nDengan ini kami menginformasikan bahwa pada hari ini kegiatan pembelajaran selesai lebih awal dikarenakan [alasan: rapat dewan guru / cuaca ekstrem / kegiatan kedinasan].\n\nPeserta didik akan dipulangkan pada pukul: [contoh: 10.30 WIB].\n\nBagi Bapak/Ibu yang biasa menjemput ananda, dimohon hadir tepat waktu demi keamanan dan keselamatan bersama. Bagi siswa yang mandiri/berjalan kaki, bapak/ibu guru telah mengimbau untuk langsung pulang ke rumah masing-masing.\n\nDemikian pemberitahuan mendadak ini disampaikan, terima kasih atas pengertian dan kerja samanya.`
+      );
+      setCategory('Pulang Mendadak / Lebih Awal');
+      setPriority('Penting');
+      setTargetRole('Wali Murid');
+      showToast('Templat Pulang Lebih Awal diterapkan. Silakan sesuaikan waktu & alasan sebelum menerbitkan.', 'success');
+    } else if (type === 'libur_mendadak') {
+      setTitle('Pemberitahuan: Libur Mendadak / Pembelajaran Daring di Rumah');
+      setContent(
+        `Yth. Bapak/Ibu Guru dan Wali Murid,\n\nSehubungan dengan adanya [alasan: kondisi cuaca ekstrem / perbaikan mendesak fasilitas sekolah / agenda kedinasan], kami menginformasikan bahwa kegiatan pembelajaran tatap muka di sekolah pada hari [Hari, Tanggal] DITIADAKAN / dialihkan menjadi pembelajaran mandiri di rumah.\n\nSeluruh peserta didik diharapkan tetap berada di rumah, mempelajari materi yang ditugaskan guru, dan menjaga kesehatan.\n\nKegiatan pembelajaran tatap muka akan aktif kembali seperti biasa pada hari [Hari berikutnya].\n\nDemikian pemberitahuan ini disampaikan. Terima kasih atas pengertian dan kerja samanya.`
+      );
+      setCategory('Libur Mendadak / Insidental');
+      setPriority('Penting');
+      setTargetRole('Semua');
+      showToast('Templat Libur Mendadak diterapkan. Silakan sesuaikan tanggal & alasan sebelum menerbitkan.', 'success');
+    } else if (type === 'imunisasi_skrining') {
+      setTitle('Himbauan & Pemberitahuan: Pelaksanaan Skrining Kesehatan & Imunisasi Berkala Siswa');
+      setContent(
+        `Yth. Bapak/Ibu Wali Murid,\n\nBekerja sama dengan UPTD Puskesmas setempat, pihak sekolah akan menyelenggarakan kegiatan Skrining Kesehatan Berkala dan Imunisasi (BIAS) untuk peserta didik yang dijadwalkan pada:\n\n• Hari/Tanggal: [Hari, Tanggal]\n• Waktu: Pukul 08.00 WIB s.d. selesai\n• Tempat: Ruang UKS / Kelas Masing-masing\n• Rincian Kegiatan: Pemeriksaan kesehatan gigi & mulut, mata, telinga, pengukuran tumbuh kembang (TB/BB), serta pemberian imunisasi.\n\nHimbauan penting bagi Orang Tua:\n1. Pastikan ananda sudah sarapan bergizi dari rumah sebelum berangkat ke sekolah.\n2. Pastikan ananda dalam kondisi sehat dan cukup tidur.\n3. Apabila ananda memiliki riwayat alergi khusus atau sedang dalam pengobatan, mohon menginformasikannya terlebih dahulu kepada wali kelas.\n\nMari bersama mendukung kesehatan dan tumbuh kembang anak-anak kita. Terima kasih atas dukungan Bapak/Ibu.`
+      );
+      setCategory('Himbauan Imunisasi & Skrining');
+      setPriority('Normal');
+      setTargetRole('Wali Murid');
+      showToast('Templat Himbauan Imunisasi & Skrining diterapkan.', 'success');
+    } else if (type === 'himbauan_umum') {
+      setTitle('Himbauan Umum: Ketertiban Lingkungan Sekolah & Kewaspadaan Cuaca');
+      setContent(
+        `Yth. Seluruh Warga Sekolah & Bapak/Ibu Wali Murid,\n\nDalam rangka menciptakan suasana sekolah yang tertib, sehat, dan kondusif, kami menyampaikan beberapa himbauan umum sebagai berikut:\n\n1. Kewaspadaan Cuaca: Mengingat kondisi cuaca yang sering hujan, mohon membekali ananda dengan payung/jas hujan saat berangkat ke sekolah.\n2. Ketertiban Antar-Jemput: Demi kelancaran lalu lintas bersama, dimohon penjemput tidak memarkir kendaraan di badan jalan depan gerbang sekolah.\n3. Kebersihan & Jajanan Sehat: Mengingatkan ananda untuk selalu mencuci tangan dan membiasakan membawa bekal/botol minum higienis dari rumah.\n\nTerima kasih atas kepedulian dan kerja sama seluruh keluarga besar sekolah.`
+      );
+      setCategory('Himbauan & Ketertiban Umum');
+      setPriority('Normal');
+      setTargetRole('Semua');
+      showToast('Templat Himbauan Umum & Ketertiban diterapkan.', 'success');
+    } else if (type === 'pts') {
       setTitle(`Pemberitahuan Pelaksanaan Penilaian Tengah Semester (PTS) ${defaultClass}`);
       setContent(
         `Yth. Bapak/Ibu Wali Murid,\n\nDengan ini kami menginformasikan bahwa Penilaian Tengah Semester (PTS) untuk ${defaultClass} akan dilaksanakan mulai pekan depan. Mohon bimbingan dan pendampingan di rumah agar peserta didik dapat belajar dengan optimal serta menjaga kesehatan.\n\nJadwal mata pelajaran dan kisi-kisi telah diunggah di sistem CERDAS.\n\nTerima kasih atas kerja samanya.`
@@ -212,8 +314,9 @@ export default function Announcements() {
 
   // Filter announcements
   const filteredAnnouncements = announcements.filter((ann) => {
-    if (selectedFilterClass === 'Semua') return true;
-    return ann.targetClass === selectedFilterClass || ann.targetClass === 'Semua Kelas';
+    const matchClass = selectedFilterClass === 'Semua' || ann.targetClass === selectedFilterClass || ann.targetClass === 'Semua Kelas';
+    const matchCategory = selectedFilterCategory === 'Semua' || ann.category === selectedFilterCategory;
+    return matchClass && matchCategory;
   });
 
   return (
@@ -228,7 +331,7 @@ export default function Announcements() {
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight">Manajemen Pengumuman</h1>
           <p className="text-xs sm:text-sm text-indigo-100 max-w-xl mt-1 leading-relaxed">
             Terbitkan informasi dan pemberitahuan resmi dari Admin atau Guru secara langsung ke
-            dashboard Wali Murid dengan notifikasi otomatis.
+            dashboard Wali Murid dengan notifikasi otomatis ke perangkat HP.
           </p>
         </div>
 
@@ -244,22 +347,40 @@ export default function Announcements() {
       </div>
 
       {/* Filter and stats */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-        <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
-          <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          <span>Filter Sasaran Kelas:</span>
-          <select
-            value={selectedFilterClass}
-            onChange={(e) => setSelectedFilterClass(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="Semua">Semua Sasaran</option>
-            {CLASSES.map((cls) => (
-              <option key={cls} value={cls}>
-                {cls}
-              </option>
-            ))}
-          </select>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+            <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Sasaran Kelas:</span>
+            <select
+              value={selectedFilterClass}
+              onChange={(e) => setSelectedFilterClass(e.target.value)}
+              className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="Semua">Semua Sasaran</option>
+              {CLASSES.map((cls) => (
+                <option key={cls} value={cls}>
+                  {cls}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+            <span>Kategori:</span>
+            <select
+              value={selectedFilterCategory}
+              onChange={(e) => setSelectedFilterCategory(e.target.value)}
+              className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="Semua">Semua Kategori</option>
+              {CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
@@ -288,6 +409,7 @@ export default function Announcements() {
           filteredAnnouncements.map((ann) => {
             const isUrgent = ann.priority === 'Penting' || ann.priority === 'Tinggi (Penting)';
             const isGuruAuthor = ann.authorRole === 'Guru';
+            const catBadge = getCategoryBadgeStyle(ann.category);
 
             return (
               <div
@@ -307,7 +429,15 @@ export default function Announcements() {
                           : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
                       }`}
                     >
-                      <Bell className="w-5 h-5" />
+                      {ann.category?.toLowerCase().includes('pulang') ? (
+                        <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                      ) : ann.category?.toLowerCase().includes('libur mendadak') || ann.category?.toLowerCase().includes('insidental') ? (
+                        <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                      ) : ann.category?.toLowerCase().includes('imunisasi') || ann.category?.toLowerCase().includes('skrining') ? (
+                        <HeartPulse className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                      ) : (
+                        <Bell className="w-5 h-5" />
+                      )}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -339,8 +469,9 @@ export default function Announcements() {
 
                         {/* Category */}
                         {ann.category && (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-100 dark:border-purple-900/40">
-                            {ann.category}
+                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 ${catBadge.bg}`}>
+                            <span>{catBadge.icon}</span>
+                            <span>{ann.category}</span>
                           </span>
                         )}
                       </div>
@@ -354,9 +485,9 @@ export default function Announcements() {
                       <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mb-3 mt-1 flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5" />
                         {ann.date?.toDate
-                          ? format(ann.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm WIB', {
+                          ? format(ann.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm', {
                               locale: id
-                            })
+                            }) + ' WIB'
                           : 'Baru saja'}
                       </p>
 
@@ -411,39 +542,89 @@ export default function Announcements() {
 
             {/* Quick Templates */}
             <div className="p-5 bg-indigo-50/50 dark:bg-indigo-950/20 border-b border-indigo-100/60 dark:border-indigo-900/40">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 dark:text-indigo-300 mb-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 dark:text-indigo-300 mb-2.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>Pilih Templat Cepat:</span>
+                <span>Pilih Templat Cepat (Otomatis Isi Judul, Format, & Prioritas):</span>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => applyTemplate('pts')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
-                >
-                  📝 Pengumuman Ujian / PTS
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyTemplate('paguyuban')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
-                >
-                  🤝 Pertemuan Wali Murid
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyTemplate('libur')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
-                >
-                  🏖️ Libur Sekolah
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyTemplate('tugas')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/60 transition-colors"
-                >
-                  📌 Pengingat Tugas Proyek
-                </button>
+              
+              {/* Grup 1: Pengumuman Bersifat Umum & Insidental */}
+              <div className="mb-2.5">
+                <div className="text-[10px] font-bold text-indigo-900/70 dark:text-indigo-300/70 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                  <span>📢</span>
+                  <span>Pengumuman Umum, Mendadak & Himbauan:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('pulang_mendadak')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/80 transition-all flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <span>🚨</span>
+                    <span>Pulang Lebih Awal / Mendadak</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('libur_mendadak')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-rose-50 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-900/80 transition-all flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <span>🛑</span>
+                    <span>Libur Mendadak / Insidental</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('imunisasi_skrining')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-teal-50 dark:bg-teal-950/70 border border-teal-300 dark:border-teal-800 text-teal-900 dark:text-teal-200 hover:bg-teal-100 dark:hover:bg-teal-900/80 transition-all flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <span>🩺</span>
+                    <span>Himbauan Imunisasi & Skrining (BIAS)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('himbauan_umum')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-sky-50 dark:bg-sky-950/70 border border-sky-300 dark:border-sky-800 text-sky-900 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/80 transition-all flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <span>📣</span>
+                    <span>Himbauan Umum & Ketertiban</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Grup 2: Pengumuman Akademik & Sekolah */}
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                  <span>📚</span>
+                  <span>Agenda Rutin & Akademik:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('pts')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-colors"
+                  >
+                    📝 Ujian / PTS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('paguyuban')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-colors"
+                  >
+                    🤝 Pertemuan Wali Murid
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('libur')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-colors"
+                  >
+                    🏖️ Libur Sekolah
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate('tugas')}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-colors"
+                  >
+                    📌 Pengingat Tugas Proyek
+                  </button>
+                </div>
               </div>
             </div>
 
