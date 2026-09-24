@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { FileDown, Save, Edit2, X, Plus, Trash2, Filter } from 'lucide-react';
+import { FileDown, Save, Edit2, X, Plus, Trash2, Filter, Settings, Check } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
@@ -35,9 +35,22 @@ export default function GradesGuru() {
   const [students, setStudents] = useState<Student[]>([]);
   const [grades, setGrades] = useState<Record<string, Record<string, GradeSubject>>>({});
   const [subjects, setSubjects] = useState<string[]>([]);
+  const [kkmMap, setKkmMap] = useState<Record<string, number>>({});
+  const [isKkmModalOpen, setIsKkmModalOpen] = useState(false);
+  const [savingKkm, setSavingKkm] = useState(false);
   const [schoolSettings, setSchoolSettings] = useState<any>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', kkmGlobal: '75' });
   
   const [loading, setLoading] = useState(true);
+
+  const getSubjectKKM = (subj: string): number => {
+    if (kkmMap && kkmMap[subj] !== undefined && Number(kkmMap[subj]) > 0) {
+      return Number(kkmMap[subj]);
+    }
+    if (schoolSettings?.kkmMap?.[subj] !== undefined && Number(schoolSettings.kkmMap[subj]) > 0) {
+      return Number(schoolSettings.kkmMap[subj]);
+    }
+    return Number(schoolSettings?.kkmGlobal) || 75;
+  };
   
   // Modal Edit Grade State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,9 +99,12 @@ export default function GradesGuru() {
     // Listen to Subjects
     const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', selectedClass), (docSnap) => {
       if (docSnap.exists()) {
-        setSubjects(docSnap.data().subjects || []);
+        const data = docSnap.data();
+        setSubjects(data.subjects || []);
+        setKkmMap(data.kkmMap || {});
       } else {
         setSubjects([]);
+        setKkmMap({});
       }
     });
 
@@ -315,6 +331,7 @@ export default function GradesGuru() {
       const g = studentGrades[subj] || { tugas: [], ulanganHarian: [], pts: '', pas: '' };
       const avg = calculateAverage(g);
       totalScore += avg;
+      const subjKKM = getSubjectKKM(subj);
       
       const tugasScores = (g.tugas || []).map(t => parseFloat(t)).filter(t => !isNaN(t));
       const tugasAvg = tugasScores.length > 0 ? (tugasScores.reduce((a,b)=>a+b,0)/tugasScores.length).toFixed(1) : '-';
@@ -325,7 +342,7 @@ export default function GradesGuru() {
       return [
         (idx + 1).toString(),
         subj,
-        kkm.toString(),
+        subjKKM.toString(),
         tugasAvg,
         uhAvg,
         g.pts || '-',
@@ -384,6 +401,24 @@ export default function GradesGuru() {
     pdf.setFont("helvetica", "normal");
     pdf.text('Mengetahui,', 40, signatureY, { align: 'center' });
     pdf.text('Kepala Sekolah', 40, signatureY + 6, { align: 'center' });
+
+    // Bubuhkan Tanda Tangan Digital Kepala Sekolah
+    if (schoolSettings.tandaTanganKepalaSekolah) {
+      try {
+        pdf.addImage(schoolSettings.tandaTanganKepalaSekolah, 'PNG', 26, signatureY + 7, 28, 16);
+      } catch (err) {
+        console.warn('Gagal menambahkan tanda tangan digital ke PDF:', err);
+      }
+    }
+
+    // Bubuhkan Stempel Resmi Sekolah
+    if (schoolSettings.stempelSekolah) {
+      try {
+        pdf.addImage(schoolSettings.stempelSekolah, 'PNG', 19, signatureY + 6, 22, 22);
+      } catch (err) {
+        console.warn('Gagal menambahkan stempel resmi ke PDF:', err);
+      }
+    }
     
     pdf.setFont("helvetica", "bold");
     pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 40, signatureY + 25, { align: 'center' });
@@ -440,15 +475,24 @@ export default function GradesGuru() {
                </>
              )}
           </div>
-          <button
-            onClick={() => {
-              students.forEach(s => exportPDF(s));
-            }}
-            className="flex items-center space-x-2 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-4 py-2 rounded-xl transition-colors font-medium text-sm"
-          >
-            <FileDown className="w-4 h-4" />
-            <span>Cetak Semua Rapor</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsKkmModalOpen(true)}
+              className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl transition-colors font-medium text-xs cursor-pointer shadow-2xs"
+            >
+              <Settings className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Atur KKM Mapel</span>
+            </button>
+            <button
+              onClick={() => {
+                students.forEach(s => exportPDF(s));
+              }}
+              className="flex items-center space-x-2 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-4 py-2 rounded-xl transition-colors font-medium text-sm cursor-pointer"
+            >
+              <FileDown className="w-4 h-4" />
+              <span>Cetak Semua Rapor</span>
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -685,6 +729,100 @@ export default function GradesGuru() {
               >
                 <Save className="w-4 h-4" />
                 <span>{saving ? 'Menyimpan...' : 'Simpan Nilai'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Pengaturan KKM per Mata Pelajaran */}
+      {isKkmModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 dark:text-white">
+                  Target KKM {selectedClass}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Setiap mata pelajaran dapat memiliki target KKM berbeda-beda.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsKkmModalOpen(false)}
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+              {subjects.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">
+                  Belum ada mata pelajaran untuk {selectedClass}. Silakan tambahkan pada menu Pengaturan Kelas.
+                </p>
+              ) : (
+                subjects.map((subj) => {
+                  const val = kkmMap[subj] !== undefined ? kkmMap[subj] : (schoolSettings?.kkmGlobal || 75);
+                  return (
+                    <div
+                      key={subj}
+                      className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800"
+                    >
+                      <div>
+                        <p className="text-xs font-bold text-slate-800 dark:text-white">{subj}</p>
+                        <p className="text-[11px] text-slate-400">Target kelulusan / ketuntasan</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl">
+                        <span className="text-[11px] font-bold text-slate-400">KKM:</span>
+                        <input
+                          type="number"
+                          min={50}
+                          max={100}
+                          value={val}
+                          onChange={(e) => {
+                            const num = Number(e.target.value);
+                            setKkmMap((prev) => ({ ...prev, [subj]: num }));
+                          }}
+                          className="w-12 text-center text-xs font-bold text-indigo-600 dark:text-indigo-400 outline-none bg-transparent"
+                        />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsKkmModalOpen(false)}
+                className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                disabled={savingKkm}
+                onClick={async () => {
+                  setSavingKkm(true);
+                  try {
+                    await setDoc(
+                      doc(db, 'mata_pelajaran', selectedClass),
+                      { kkmMap },
+                      { merge: true }
+                    );
+                    setIsKkmModalOpen(false);
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setSavingKkm(false);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{savingKkm ? 'Menyimpan...' : 'Simpan KKM'}</span>
               </button>
             </div>
           </div>

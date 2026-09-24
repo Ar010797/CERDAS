@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, writeBatch, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { BookOpen, Building, AlertTriangle, Plus, Trash2, Save, Users, CheckCircle } from 'lucide-react';
+import { BookOpen, Building, AlertTriangle, Plus, Trash2, Save, Users, CheckCircle, PenTool } from 'lucide-react';
+import DigitalSignatureUpload from '../../components/DigitalSignatureUpload';
 
 export default function SettingsGuru() {
   const { userData, login } = useAuth();
@@ -27,13 +28,17 @@ export default function SettingsGuru() {
   const [schoolSettings, setSchoolSettings] = useState({
     namaSekolah: '',
     namaKepalaSekolah: '',
-    nipKepalaSekolah: ''
+    nipKepalaSekolah: '',
+    tandaTanganKepalaSekolah: '',
+    stempelSekolah: ''
   });
   const [savingKop, setSavingKop] = useState(false);
 
-  // --- Mata Pelajaran State ---
+  // --- Mata Pelajaran & KKM per Mapel State ---
   const [subjects, setSubjects] = useState<string[]>([]);
+  const [kkmMap, setKkmMap] = useState<Record<string, number>>({});
   const [newSubject, setNewSubject] = useState('');
+  const [newSubjectKkm, setNewSubjectKkm] = useState(75);
   const [savingSubjects, setSavingSubjects] = useState(false);
 
   useEffect(() => {
@@ -44,17 +49,22 @@ export default function SettingsGuru() {
         setSchoolSettings({
           namaSekolah: data.namaSekolah || data.schoolName || '',
           namaKepalaSekolah: data.namaKepalaSekolah || data.kepalaSekolah || '',
-          nipKepalaSekolah: data.nipKepalaSekolah || ''
+          nipKepalaSekolah: data.nipKepalaSekolah || '',
+          tandaTanganKepalaSekolah: data.tandaTanganKepalaSekolah || '',
+          stempelSekolah: data.stempelSekolah || ''
         });
       }
     });
 
-    // Realtime listener for Subjects
+    // Realtime listener for Subjects & KKM
     const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', assignedClass), (docSnap) => {
       if (docSnap.exists()) {
-        setSubjects(docSnap.data().subjects || []);
+        const data = docSnap.data();
+        setSubjects(data.subjects || []);
+        setKkmMap(data.kkmMap || {});
       } else {
         setSubjects([]);
+        setKkmMap({});
       }
     });
 
@@ -97,14 +107,40 @@ export default function SettingsGuru() {
         schoolName: schoolSettings.namaSekolah,
         namaSekolah: schoolSettings.namaSekolah,
         kepalaSekolah: schoolSettings.namaKepalaSekolah,
-        nipKepalaSekolah: schoolSettings.nipKepalaSekolah
+        nipKepalaSekolah: schoolSettings.nipKepalaSekolah,
+        tandaTanganKepalaSekolah: schoolSettings.tandaTanganKepalaSekolah,
+        stempelSekolah: schoolSettings.stempelSekolah
       }, { merge: true });
-      alert('Kop Surat dan Satuan Pendidikan berhasil disimpan!');
+      showToast('Kop Surat dan Satuan Pendidikan berhasil disimpan!', 'success');
     } catch (error) {
       console.error(error);
-      alert('Gagal menyimpan Kop Surat.');
+      showToast('Gagal menyimpan Kop Surat.', 'error');
     } finally {
       setSavingKop(false);
+    }
+  };
+
+  const handleSaveSignature = async (sigBase64: string | null) => {
+    try {
+      setSchoolSettings(prev => ({ ...prev, tandaTanganKepalaSekolah: sigBase64 || '' }));
+      await setDoc(doc(db, 'pengaturan_sekolah', 'utama'), { tandaTanganKepalaSekolah: sigBase64 || '' }, { merge: true });
+      await setDoc(doc(db, 'settings', 'school'), { tandaTanganKepalaSekolah: sigBase64 || '' }, { merge: true });
+      showToast(sigBase64 ? 'Tanda tangan digital berhasil disimpan!' : 'Tanda tangan dihapus.', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memperbarui tanda tangan digital.', 'error');
+    }
+  };
+
+  const handleSaveStamp = async (stampBase64: string | null) => {
+    try {
+      setSchoolSettings(prev => ({ ...prev, stempelSekolah: stampBase64 || '' }));
+      await setDoc(doc(db, 'pengaturan_sekolah', 'utama'), { stempelSekolah: stampBase64 || '' }, { merge: true });
+      await setDoc(doc(db, 'settings', 'school'), { stempelSekolah: stampBase64 || '' }, { merge: true });
+      showToast(stampBase64 ? 'Stempel resmi berhasil disimpan!' : 'Stempel dihapus.', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memperbarui stempel resmi.', 'error');
     }
   };
 
@@ -112,32 +148,66 @@ export default function SettingsGuru() {
     e.preventDefault();
     if (!newSubject.trim()) return;
     if (subjects.includes(newSubject.trim())) {
-      alert('Mata pelajaran sudah ada.');
+      showToast('Mata pelajaran sudah ada.', 'error');
       return;
     }
     
     setSavingSubjects(true);
     try {
       const updated = [...subjects, newSubject.trim()];
-      await setDoc(doc(db, 'mata_pelajaran', assignedClass), { subjects: updated }, { merge: true });
+      const updatedKkm = { ...kkmMap, [newSubject.trim()]: Number(newSubjectKkm) || 75 };
+      await setDoc(doc(db, 'mata_pelajaran', assignedClass), { 
+        subjects: updated,
+        kkmMap: updatedKkm
+      }, { merge: true });
       setNewSubject('');
+      setNewSubjectKkm(75);
+      showToast(`Mata pelajaran ${newSubject} dengan KKM ${newSubjectKkm} berhasil ditambahkan!`, 'success');
     } catch (error) {
       console.error(error);
-      alert('Gagal menambah mata pelajaran.');
+      showToast('Gagal menambah mata pelajaran.', 'error');
+    } finally {
+      setSavingSubjects(false);
+    }
+  };
+
+  const handleUpdateSubjectKkm = (subj: string, val: number) => {
+    setKkmMap(prev => ({
+      ...prev,
+      [subj]: val
+    }));
+  };
+
+  const handleSaveAllKkm = async () => {
+    setSavingSubjects(true);
+    try {
+      await setDoc(doc(db, 'mata_pelajaran', assignedClass), {
+        subjects,
+        kkmMap
+      }, { merge: true });
+      showToast('Daftar KKM per mata pelajaran berhasil diperbarui!', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal menyimpan KKM mata pelajaran.', 'error');
     } finally {
       setSavingSubjects(false);
     }
   };
 
   const handleRemoveSubject = async (subj: string) => {
-    
     setSavingSubjects(true);
     try {
       const updated = subjects.filter(s => s !== subj);
-      await setDoc(doc(db, 'mata_pelajaran', assignedClass), { subjects: updated }, { merge: true });
+      const updatedKkm = { ...kkmMap };
+      delete updatedKkm[subj];
+      await setDoc(doc(db, 'mata_pelajaran', assignedClass), { 
+        subjects: updated,
+        kkmMap: updatedKkm
+      }, { merge: true });
+      showToast(`Mata pelajaran ${subj} dihapus.`, 'success');
     } catch (error) {
       console.error(error);
-      alert('Gagal menghapus mata pelajaran.');
+      showToast('Gagal menghapus mata pelajaran.', 'error');
     } finally {
       setSavingSubjects(false);
     }
@@ -335,53 +405,121 @@ export default function SettingsGuru() {
               </button>
             </div>
           </div>
+
+          {/* Tanda Tangan Digital & Stempel Resmi */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+            <h3 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
+              <PenTool className="w-5 h-5 text-indigo-500" />
+              <span>Tanda Tangan Digital & Stempel Resmi</span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              Tanda tangan digital ini akan otomatis tercetak di lembar Rapor Siswa, Rekap Presensi, Modul Ajar (RPP), dan Dokumen Pengumuman.
+            </p>
+            <DigitalSignatureUpload
+              signatureUrl={schoolSettings.tandaTanganKepalaSekolah}
+              stampUrl={schoolSettings.stempelSekolah}
+              principalName={schoolSettings.namaKepalaSekolah || 'Kepala Sekolah'}
+              principalNip={schoolSettings.nipKepalaSekolah || '-'}
+              schoolName={schoolSettings.namaSekolah || 'Satuan Pendidikan'}
+              onSaveSignature={handleSaveSignature}
+              onSaveStamp={handleSaveStamp}
+            />
+          </div>
         </div>
 
         {/* Kolom 2 */}
         <div className="space-y-8">
-          {/* Pengaturan Mata Pelajaran */}
+          {/* Pengaturan Mata Pelajaran & KKM per Mapel */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-              <BookOpen className="w-5 h-5 text-indigo-500" />
-              <span>Daftar Mata Pelajaran Dinamis</span>
-            </h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
+                <BookOpen className="w-5 h-5 text-indigo-500" />
+                <span>Mata Pelajaran & KKM {assignedClass}</span>
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Atur daftar mata pelajaran beserta nilai KKM (Kriteria Ketuntasan Minimal) masing-masing mapel.
+            </p>
             
             <form onSubmit={handleAddSubject} className="flex gap-2 mb-4">
               <input
                 type="text"
-                placeholder="Tambah mata pelajaran baru..."
+                placeholder="Mata pelajaran baru..."
                 value={newSubject}
                 onChange={e => setNewSubject(e.target.value)}
-                className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
+                className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs"
               />
+              <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 border border-slate-200 rounded-xl">
+                <span className="text-[11px] text-slate-400 font-bold">KKM:</span>
+                <input
+                  type="number"
+                  min={50}
+                  max={100}
+                  value={newSubjectKkm}
+                  onChange={e => setNewSubjectKkm(Number(e.target.value))}
+                  className="w-10 text-center text-xs font-bold bg-transparent outline-none text-slate-800"
+                />
+              </div>
               <button 
                 type="submit"
                 disabled={savingSubjects || !newSubject.trim()}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl transition-colors disabled:opacity-50"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl transition-colors disabled:opacity-50 text-xs font-bold flex items-center gap-1"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4" />
+                <span>Tambah</span>
               </button>
             </form>
 
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               {subjects.length === 0 ? (
                 <p className="text-sm text-slate-500 text-center py-4 border-2 border-dashed border-slate-200 rounded-xl">
                   Belum ada mata pelajaran. Silakan tambahkan.
                 </p>
               ) : (
-                subjects.map((subj) => (
-                  <div key={subj} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="text-sm font-medium text-slate-700">{subj}</span>
-                    <button 
-                      onClick={() => handleRemoveSubject(subj)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))
+                subjects.map((subj) => {
+                  const currentKkm = kkmMap[subj] !== undefined ? kkmMap[subj] : 75;
+                  return (
+                    <div key={subj} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100 gap-2">
+                      <span className="text-xs font-semibold text-slate-700 flex-1 truncate">{subj}</span>
+                      
+                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shrink-0">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">KKM</span>
+                        <input
+                          type="number"
+                          min={50}
+                          max={100}
+                          value={currentKkm}
+                          onChange={(e) => handleUpdateSubjectKkm(subj, Number(e.target.value))}
+                          className="w-9 text-center text-xs font-bold text-indigo-600 outline-none bg-transparent"
+                        />
+                      </div>
+
+                      <button 
+                        onClick={() => handleRemoveSubject(subj)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                        title="Hapus Mapel"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
+
+            {subjects.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSaveAllKkm}
+                  disabled={savingSubjects}
+                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Simpan Perubahan KKM</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Danger Zone */}

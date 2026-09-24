@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { Link } from 'react-router-dom';
+import { collection, getDocs, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { CalendarDays, Bell } from 'lucide-react';
+import { CalendarDays, Bell, FileCheck, ArrowRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import ScheduleWidget from '../../components/ScheduleWidget';
@@ -45,6 +46,31 @@ export default function GuruDashboard() {
               <CalendarDays className="w-5 h-5" />
               <span className="font-medium">{format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })}</span>
             </div>
+          </div>
+
+          {/* Quick Action: Tugas Online */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <FileCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800 dark:text-white">
+                  Modul Pengumpulan Tugas Online ({assignedClass})
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-md">
+                  Kelola tugas, pantau lembar jawaban yang telah diunggah siswa, dan berikan evaluasi nilai serta catatan feedback.
+                </p>
+              </div>
+            </div>
+
+            <Link
+              to="/guru/assignments"
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 shrink-0"
+            >
+              <span>Kelola Tugas</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
 
           {/* Schedule Widget */}

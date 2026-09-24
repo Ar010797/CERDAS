@@ -7,7 +7,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import ScheduleReminderBell from '../ScheduleReminderBell';
 import ScheduleReminderBanner from '../ScheduleReminderBanner';
 import AnnouncementNotificationBell from '../AnnouncementNotificationBell';
+import AssignmentDeadlineBell from '../AssignmentDeadlineBell';
+import AssignmentDeadlineBanner from '../AssignmentDeadlineBanner';
 import { useScheduleReminder } from '../../hooks/useScheduleReminder';
+import { useAssignmentDeadlineReminder } from '../../hooks/useAssignmentDeadlineReminder';
+import { OfflineIndicator } from '../OfflineIndicator';
+import { PWAInstallButton } from '../PWAInstallButton';
 import {
   LayoutDashboard,
   Users,
@@ -20,6 +25,7 @@ import {
   BookOpen,
   GraduationCap,
   ClipboardList,
+  FileCheck,
   Bell,
   UserCircle,
   Image as ImageIcon,
@@ -43,6 +49,17 @@ export const DashboardLayout = () => {
     toggleSound
   } = useScheduleReminder();
 
+  // Automatic Assignment Deadline Reminder Hook (due within 24 hours, browser notification + sound)
+  const {
+    activeAlerts: deadlineAlerts,
+    dismissAlert: dismissDeadlineAlert,
+    soundEnabled: deadlineSoundEnabled,
+    toggleSound: toggleDeadlineSound,
+    notificationPermission: deadlineNotifPermission,
+    requestPermission: requestDeadlineNotifPermission,
+    triggerSimulation: triggerDeadlineSimulation
+  } = useAssignmentDeadlineReminder();
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -54,6 +71,7 @@ export const DashboardLayout = () => {
     { to: '/admin/students', icon: GraduationCap, label: 'Data Siswa' },
     { to: '/admin/attendance', icon: ClipboardList, label: 'Absensi Siswa' },
     { to: '/admin/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
+    { to: '/admin/assignments', icon: FileCheck, label: 'Tugas Online' },
     { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/admin/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
     { to: '/admin/lesson-plans', icon: BookOpen, label: 'E-RPP Guru' },
@@ -68,6 +86,7 @@ export const DashboardLayout = () => {
     { to: '/guru/students', icon: GraduationCap, label: 'Siswa Kelas' },
     { to: '/guru/attendance', icon: ClipboardList, label: 'Absensi' },
     { to: '/guru/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
+    { to: '/guru/assignments', icon: FileCheck, label: 'Tugas Online' },
     { to: '/guru/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/guru/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
     { to: '/guru/lesson-plans', icon: BookOpen, label: 'E-RPP' },
@@ -79,6 +98,7 @@ export const DashboardLayout = () => {
 
   const waliMuridLinks = [
     { to: '/walimurid/dashboard', icon: UserCircle, label: 'Profil Anak & Rapor' },
+    { to: '/walimurid/assignments', icon: FileCheck, label: 'Tugas & PR Online' },
     { to: '/walimurid/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
     { to: '/walimurid/announcements', icon: Bell, label: 'Pengumuman' },
   ];
@@ -172,6 +192,12 @@ export const DashboardLayout = () => {
         </div>
 
         <div className="flex items-center space-x-1.5">
+          {/* PWA Install Button */}
+          <PWAInstallButton />
+
+          {/* Assignment Deadline Reminder Bell */}
+          <AssignmentDeadlineBell />
+
           {/* Announcements & Notifications Bell */}
           <AnnouncementNotificationBell />
 
@@ -294,6 +320,12 @@ export const DashboardLayout = () => {
           </div>
 
           <div className="flex items-center space-x-3">
+            {/* PWA Install Button */}
+            <PWAInstallButton />
+
+            {/* Assignment Deadline Reminder Bell */}
+            <AssignmentDeadlineBell />
+
             {/* Announcements & Notifications Bell */}
             <AnnouncementNotificationBell />
 
@@ -341,11 +373,25 @@ export const DashboardLayout = () => {
                 onToggleSound={toggleSound}
               />
 
+              {/* Assignment Deadline Reminder Alert Banner (Due within 24 hours) */}
+              <AssignmentDeadlineBanner
+                alerts={deadlineAlerts}
+                onDismiss={dismissDeadlineAlert}
+                soundEnabled={deadlineSoundEnabled}
+                onToggleSound={toggleDeadlineSound}
+                notificationPermission={deadlineNotifPermission}
+                onRequestPermission={requestDeadlineNotifPermission}
+                onTestReminder={triggerDeadlineSimulation}
+              />
+
               <Outlet />
             </motion.div>
           </AnimatePresence>
         </main>
       </div>
+
+      {/* Floating Offline Indicator when user loses network */}
+      <OfflineIndicator />
     </div>
   );
 };

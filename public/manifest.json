@@ -1,13 +1,27 @@
 {
+  "id": "/",
   "name": "CERDAS - Administrasi Sekolah",
   "short_name": "CERDAS",
-  "description": "Catatan Edukasi, Rapor, & Data Administrasi Sekolah dengan Notifikasi Pengumuman Real-Time",
+  "description": "Catatan Edukasi, Rapor, & Data Administrasi Sekolah dengan Akses Offline & Notifikasi Real-Time",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4338ca",
   "orientation": "portrait",
   "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/icon.svg",
       "sizes": "192x192 512x512",

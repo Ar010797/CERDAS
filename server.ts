@@ -1343,8 +1343,8 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
 
       console.log(`[Push Notification] Broadcasting announcement: "${title}" for target "${targetClass}" (${targetRole})`);
 
-      const oneSignalAppId = process.env.ONESIGNAL_APP_ID;
-      const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY;
+      const oneSignalAppId = process.env.ONESIGNAL_APP_ID || req.body?.oneSignalAppId;
+      const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY || req.body?.oneSignalRestKey;
       let oneSignalSuccess = false;
       let oneSignalError: string | null = null;
 
@@ -1364,11 +1364,13 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
             app_id: oneSignalAppId,
             headings: { en: `📢 ${title}`, id: `📢 ${title}` },
             contents: {
-              en: `${authorName}: ${content.slice(0, 140)}`,
-              id: `${authorName}: ${content.slice(0, 140)}`
+              en: `${authorName}: ${content.slice(0, 160)}`,
+              id: `${authorName}: ${content.slice(0, 160)}`
             },
             url: "/?tab=pengumuman",
-            priority: priority === "Penting" ? 10 : 5,
+            priority: 10, // High priority 10 triggers floating heads-up notification banner
+            android_visibility: 1,
+            android_sound: "notification",
             android_channel_id: "cerdas_announcements",
             small_icon: "ic_stat_onesignal_default"
           };

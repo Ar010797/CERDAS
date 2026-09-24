@@ -3,6 +3,12 @@ import { collection, query, orderBy, onSnapshot, addDoc, deleteDoc, doc, serverT
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
+  saveOfflineAnnouncements,
+  getOfflineAnnouncements,
+  removeOfflineAnnouncement
+} from '../../lib/offlineStorage';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import {
   Bell,
   Plus,
   Trash2,
@@ -20,10 +26,14 @@ import {
   HeartPulse,
   Clock,
   ShieldAlert,
-  Stethoscope
+  Stethoscope,
+  Download,
+  WifiOff,
+  Database
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
+import { generateAnnouncementPDF } from '../../lib/announcementPdf';
 
 interface Announcement {
   id: string;
@@ -160,17 +170,51 @@ export default function Announcements() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  const [schoolProfile, setSchoolProfile] = useState<any>({});
+
+  const isOnline = useOnlineStatus();
+  const [isUsingOfflineData, setIsUsingOfflineData] = useState(false);
+
   useEffect(() => {
+    const unsubSchool = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (snap) => {
+      if (snap.exists()) {
+        setSchoolProfile(snap.data());
+      }
+    });
+    return () => unsubSchool();
+  }, []);
+
+  useEffect(() => {
+    // Initial fast load from IndexedDB
+    getOfflineAnnouncements().then((cached) => {
+      if (cached && cached.length > 0) {
+        setAnnouncements(cached as Announcement[]);
+        setIsUsingOfflineData(true);
+        setLoading(false);
+      }
+    });
+
     const q = query(collection(db, 'announcements'), orderBy('date', 'desc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
-        setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Announcement)));
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Announcement));
+        setAnnouncements(list);
+        setIsUsingOfflineData(false);
         setLoading(false);
+
+        // Cache to IndexedDB for offline access
+        saveOfflineAnnouncements(list).catch((err) => console.warn('Cache announcements error:', err));
       },
       (err) => {
-        console.warn('Announcements snapshot error:', err);
-        setLoading(false);
+        console.warn('Announcements snapshot error (falling back to IndexedDB):', err);
+        getOfflineAnnouncements().then((cached) => {
+          if (cached && cached.length > 0) {
+            setAnnouncements(cached as Announcement[]);
+          }
+          setIsUsingOfflineData(true);
+          setLoading(false);
+        });
       }
     );
     return () => unsub();
@@ -335,7 +379,9 @@ export default function Announcements() {
             targetRole,
             authorName,
             category,
-            priority
+            priority,
+            oneSignalAppId: schoolProfile?.oneSignalAppId,
+            oneSignalRestKey: schoolProfile?.oneSignalRestKey
           })
         });
       } catch (pushErr) {
@@ -359,6 +405,7 @@ export default function Announcements() {
     setIsDeleting(true);
     try {
       await deleteDoc(doc(db, 'announcements', announcementToDelete.id));
+      await removeOfflineAnnouncement(announcementToDelete.id);
       showToast('Pengumuman berhasil dihapus dari sistem.', 'success');
       setAnnouncementToDelete(null);
     } catch (error: any) {
@@ -384,6 +431,12 @@ export default function Announcements() {
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-semibold text-indigo-200 mb-2">
             <Megaphone className="w-3.5 h-3.5 text-amber-300" />
             <span>Pusat Siaran & Notifikasi</span>
+            {(!isOnline || isUsingOfflineData) && (
+              <span className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold">
+                <Database className="w-3 h-3" />
+                Mode Offline (IndexedDB)
+              </span>
+            )}
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight">Manajemen Pengumuman</h1>
           <p className="text-xs sm:text-sm text-indigo-100 max-w-xl mt-1 leading-relaxed">
@@ -575,6 +628,15 @@ export default function Announcements() {
 
                   {/* Actions */}
                   <div className="shrink-0 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => generateAnnouncementPDF(ann, schoolProfile)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer hover:shadow-2xs active:scale-95"
+                      title="Download Surat / Lembar Pengumuman Resmi PDF"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Unduh PDF</span>
+                    </button>
                     {(isAdmin || isGuru || userData?.role !== 'Wali Murid') && (
                       <button
                         type="button"

@@ -25,7 +25,9 @@ import {
   Search,
   Filter,
   Calendar,
-  Sparkles
+  Sparkles,
+  Download,
+  FileCheck
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -35,19 +37,35 @@ import PushNotificationManager from '../../components/PushNotificationManager';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { useAnnouncementsNotification, AnnouncementItem } from '../../hooks/useAnnouncementsNotification';
+import { useAssignmentDeadlineReminder } from '../../hooks/useAssignmentDeadlineReminder';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { getCategoryBadgeStyle, formatClassBadge } from '../admin/Announcements';
+import { generateAnnouncementPDF } from '../../lib/announcementPdf';
+import AssignmentsScreen from '../Assignments';
+import { Database, WifiOff } from 'lucide-react';
 
 export default function WaliMuridDashboard() {
   const { userData } = useAuth();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<'profil' | 'akademik' | 'galeri' | 'keuangan' | 'pengumuman'>('profil');
+  const isOnline = useOnlineStatus();
+  const [activeTab, setActiveTab] = useState<'profil' | 'akademik' | 'galeri' | 'keuangan' | 'pengumuman' | 'tugas'>('profil');
   
   // Real-time data
   const [studentData, setStudentData] = useState<any>(null);
   const [grades, setGrades] = useState<Record<string, { tugas: string, pts: string, pas: string }>>({});
   const [attendance, setAttendance] = useState({ hadir: 0, izin: 0, sakit: 0, alpa: 0 });
   const [subjects, setSubjects] = useState<string[]>([]);
-  const [schoolSettings, setSchoolSettings] = useState<{ namaSekolah: string; namaKepalaSekolah: string; nipKepalaSekolah: string; tahunAjaran?: string }>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', tahunAjaran: '2026/2027' });
+  const [kkmMap, setKkmMap] = useState<Record<string, number>>({});
+  const [schoolSettings, setSchoolSettings] = useState<{ 
+    namaSekolah: string; 
+    namaKepalaSekolah: string; 
+    nipKepalaSekolah: string; 
+    tahunAjaran?: string;
+    tandaTanganKepalaSekolah?: string;
+    stempelSekolah?: string;
+    kkmGlobal?: number | string;
+    kkmMap?: Record<string, number>;
+  }>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', tahunAjaran: '2026/2027' });
   const [loading, setLoading] = useState(true);
 
   // Extra Data
@@ -71,6 +89,11 @@ export default function WaliMuridDashboard() {
     isUnread
   } = useAnnouncementsNotification(studentData?.classId);
 
+  // Assignment Deadline Reminder Hook for Wali Murid
+  const {
+    activeAlerts: walimuridDeadlineAlerts
+  } = useAssignmentDeadlineReminder(studentData?.classId);
+
   // Announcement tab filters
   const [announcementFilter, setAnnouncementFilter] = useState<'semua' | 'unread' | 'penting' | 'umum' | 'guru' | 'admin'>('semua');
   const [announcementSearch, setAnnouncementSearch] = useState('');
@@ -80,6 +103,8 @@ export default function WaliMuridDashboard() {
   useEffect(() => {
     if (location.state?.tab === 'pengumuman') {
       setActiveTab('pengumuman');
+    } else if (location.state?.tab === 'tugas') {
+      setActiveTab('tugas');
     }
   }, [location.state]);
 
@@ -144,7 +169,14 @@ export default function WaliMuridDashboard() {
     
     // Subjects
     const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', studentData.classId), (docSnap) => {
-      if (docSnap.exists()) setSubjects(docSnap.data().subjects || []);
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        setSubjects(d.subjects || []);
+        setKkmMap(d.kkmMap || {});
+      } else {
+        setSubjects([]);
+        setKkmMap({});
+      }
     }, (err) => console.warn("unsubSubjects error:", err));
 
     // Gallery (avoid composite index requirement)
@@ -213,19 +245,38 @@ export default function WaliMuridDashboard() {
     // For now we'll leave it as a general format.
     pdf.text(`Tahun Ajaran`, 130, 52); pdf.text(`: ${schoolSettings.tahunAjaran || '2026/2027'}`, 160, 52);
 
-    const tableBody = subjects.map(subj => {
+    const getSubjectKKM = (subj: string): number => {
+      if (kkmMap && kkmMap[subj] !== undefined && Number(kkmMap[subj]) > 0) {
+        return Number(kkmMap[subj]);
+      }
+      if (schoolSettings?.kkmMap?.[subj] !== undefined && Number(schoolSettings.kkmMap[subj]) > 0) {
+        return Number(schoolSettings.kkmMap[subj]);
+      }
+      return Number(schoolSettings?.kkmGlobal) || 75;
+    };
+
+    const tableBody = subjects.map((subj, idx) => {
       const g = grades[subj] || { tugas: '-', pts: '-', pas: '-' };
-      return [subj, g.tugas || '-', g.pts || '-', g.pas || '-'];
+      const subjKkm = getSubjectKKM(subj);
+      return [(idx + 1).toString(), subj, subjKkm.toString(), g.tugas || '-', g.pts || '-', g.pas || '-'];
     });
 
-    if (tableBody.length === 0) tableBody.push(['Belum ada mata pelajaran', '-', '-', '-']);
+    if (tableBody.length === 0) tableBody.push(['-', 'Belum ada mata pelajaran', '-', '-', '-', '-']);
 
     autoTable(pdf, {
       startY: 65,
-      head: [['Mata Pelajaran', 'Nilai Tugas', 'Nilai PTS', 'Nilai PAS']],
+      head: [['No', 'Mata Pelajaran', 'KKM', 'Nilai Tugas', 'Nilai PTS', 'Nilai PAS']],
       body: tableBody,
       theme: 'grid',
       headStyles: { fillColor: [79, 70, 229] },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 55 },
+        2: { halign: 'center' },
+        3: { halign: 'center' },
+        4: { halign: 'center' },
+        5: { halign: 'center' },
+      }
     });
 
     const finalY = (pdf as any).lastAutoTable.finalY || 100;
@@ -234,29 +285,47 @@ export default function WaliMuridDashboard() {
     if (finalY > 230) {
       pdf.addPage();
     }
-    const signatureY = finalY > 230 ? 20 : finalY;
+    const signatureY = finalY > 230 ? 20 : finalY + 15;
 
     pdf.setFont("helvetica", "normal");
-    pdf.text('Mengetahui,', 40, signatureY + 30, { align: 'center' });
-    pdf.text('Kepala Sekolah', 40, signatureY + 38, { align: 'center' });
+    pdf.text('Mengetahui,', 40, signatureY, { align: 'center' });
+    pdf.text('Kepala Sekolah', 40, signatureY + 6, { align: 'center' });
+
+    // Bubuhkan Tanda Tangan Digital Kepala Sekolah
+    if (schoolSettings.tandaTanganKepalaSekolah) {
+      try {
+        pdf.addImage(schoolSettings.tandaTanganKepalaSekolah, 'PNG', 26, signatureY + 7, 28, 16);
+      } catch (err) {
+        console.warn('Gagal menambahkan tanda tangan digital ke PDF:', err);
+      }
+    }
+
+    // Bubuhkan Stempel Resmi Sekolah
+    if (schoolSettings.stempelSekolah) {
+      try {
+        pdf.addImage(schoolSettings.stempelSekolah, 'PNG', 19, signatureY + 6, 22, 22);
+      } catch (err) {
+        console.warn('Gagal menambahkan stempel resmi ke PDF:', err);
+      }
+    }
     
     pdf.setFont("helvetica", "bold");
-    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 40, signatureY + 60, { align: 'center' });
+    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 40, signatureY + 25, { align: 'center' });
     pdf.setFont("helvetica", "normal");
     
     if(schoolSettings.nipKepalaSekolah) {
-      pdf.text(`NIP. ${schoolSettings.nipKepalaSekolah}`, 40, signatureY + 65, { align: 'center' });
+      pdf.text(`NIP. ${schoolSettings.nipKepalaSekolah}`, 40, signatureY + 30, { align: 'center' });
     } else {
-      pdf.text(`NIP. __________________`, 40, signatureY + 65, { align: 'center' });
+      pdf.text(`NIP. __________________`, 40, signatureY + 30, { align: 'center' });
     }
 
-    pdf.text(`${schoolSettings.namaSekolah || 'Sekolah'}, ${new Date().toLocaleDateString('id-ID')}`, 160, signatureY + 30, { align: 'center' });
-    pdf.text('Wali Kelas', 160, signatureY + 38, { align: 'center' });
+    pdf.text(`${schoolSettings.namaSekolah || 'Sekolah'}, ${new Date().toLocaleDateString('id-ID')}`, 160, signatureY, { align: 'center' });
+    pdf.text('Wali Kelas', 160, signatureY + 6, { align: 'center' });
     
     pdf.setFont("helvetica", "bold");
-    pdf.text(`(________________________)`, 160, signatureY + 60, { align: 'center' });
+    pdf.text(`(________________________)`, 160, signatureY + 25, { align: 'center' });
     pdf.setFont("helvetica", "normal");
-    pdf.text(`NIP. __________________`, 160, signatureY + 65, { align: 'center' });
+    pdf.text(`NIP. __________________`, 160, signatureY + 30, { align: 'center' });
 
     pdf.save(`Rapor_${(studentData?.name || '').replace(/\s+/g, '_')}.pdf`);
   };
@@ -404,6 +473,53 @@ export default function WaliMuridDashboard() {
         </div>
       </div>
 
+      {/* Quick Card: Tugas & PR Online */}
+      <div className={`rounded-3xl p-6 border shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${
+        walimuridDeadlineAlerts.length > 0
+          ? 'bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-orange-500/15 border-rose-300/80 dark:border-rose-800/80'
+          : 'bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-indigo-500/10 border-indigo-200/80 dark:border-indigo-800/60'
+      }`}>
+        <div className="flex items-center space-x-4">
+          <div className={`w-12 h-12 text-white rounded-2xl flex items-center justify-center shrink-0 shadow-md ${
+            walimuridDeadlineAlerts.length > 0 ? 'bg-rose-600 animate-pulse' : 'bg-indigo-600'
+          }`}>
+            {walimuridDeadlineAlerts.length > 0 ? <Clock className="w-6 h-6 animate-bounce" /> : <FileCheck className="w-6 h-6" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                walimuridDeadlineAlerts.length > 0
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                  : 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300'
+              }`}>
+                {walimuridDeadlineAlerts.length > 0 ? `⚠️ Peringatan: ${walimuridDeadlineAlerts.length} Tugas Mendekati Batas Waktu!` : 'Modul Siswa'}
+              </span>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Pengumpulan Tugas & PR Online ({studentData?.classId || 'Kelas 1'})
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-xl">
+              {walimuridDeadlineAlerts.length > 0
+                ? `Perhatian: Tugas "${walimuridDeadlineAlerts[0]?.title}" memiliki batas waktu pengumpulan ${walimuridDeadlineAlerts[0]?.timeFormatted}. Segera bimbing ananda untuk menyelesaikan dan mengirim tugas.`
+                : 'Cek daftar tugas dari guru, kirim lembar jawaban atau foto hasil pengerjaan ananda, dan pantau evaluasi & feedback nilai langsung dari bapak/ibu guru.'}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('tugas')}
+          className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 shrink-0 cursor-pointer text-white ${
+            walimuridDeadlineAlerts.length > 0
+              ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/30'
+              : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
+          }`}
+        >
+          <span>{walimuridDeadlineAlerts.length > 0 ? 'Kumpulkan Tugas Sekarang' : 'Buka Modul Tugas'}</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
       {/* Jadwal Pelajaran & Ujian Widget */}
       <ScheduleWidget classId={studentData?.classId || 'Kelas 1'} title={`Jadwal Pelajaran & Ujian Ananda (${studentData?.classId || 'Kelas 1'})`} />
 
@@ -434,6 +550,22 @@ export default function WaliMuridDashboard() {
           }`}
         >
           Akademik & Nilai
+        </button>
+        <button
+          onClick={() => setActiveTab('tugas')}
+          className={`flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${
+            activeTab === 'tugas'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+        >
+          <FileCheck className="w-3.5 h-3.5" />
+          <span>Tugas & PR</span>
+          {walimuridDeadlineAlerts.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-2xs animate-pulse">
+              {walimuridDeadlineAlerts.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setActiveTab('pengumuman')}
@@ -563,6 +695,8 @@ export default function WaliMuridDashboard() {
             </div>
           </div>
         </div>
+      ) : activeTab === 'tugas' ? (
+        <AssignmentsScreen />
       ) : activeTab === 'galeri' ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -708,6 +842,12 @@ export default function WaliMuridDashboard() {
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold mb-1.5">
                   <Megaphone className="w-3.5 h-3.5 text-amber-500" />
                   <span>Pusat Informasi & Notifikasi Wali Murid</span>
+                  {!isOnline && (
+                    <span className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold">
+                      <Database className="w-3 h-3" />
+                      Offline (IndexedDB)
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">
                   Pengumuman Resmi Sekolah & Guru
@@ -965,11 +1105,20 @@ export default function WaliMuridDashboard() {
                       {/* Right action buttons */}
                       <div className="flex sm:flex-col items-center gap-2 shrink-0 self-end sm:self-start w-full sm:w-auto justify-end pt-2 sm:pt-0">
                         <button
+                          onClick={() => generateAnnouncementPDF(item, schoolSettings)}
+                          className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition-all border border-indigo-200 dark:border-indigo-800/60 flex items-center gap-1.5 cursor-pointer"
+                          title="Download Surat / Dokumen PDF Resmi Pengumuman ini"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Unduh PDF</span>
+                        </button>
+
+                        <button
                           onClick={() => {
                             markAsRead(item.id);
                             setSelectedAnnouncementModal(item);
                           }}
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
                         >
                           <span>Rincian</span>
                           <ArrowRight className="w-3.5 h-3.5" />
@@ -1061,10 +1210,18 @@ export default function WaliMuridDashboard() {
                   {selectedAnnouncementModal.content}
                 </div>
 
-                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => generateAnnouncementPDF(selectedAnnouncementModal, schoolSettings)}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition-colors border border-indigo-200 dark:border-indigo-800/60 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Unduh Dokumen PDF</span>
+                  </button>
                   <button
                     onClick={() => setSelectedAnnouncementModal(null)}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer"
                   >
                     Tutup Pengumuman
                   </button>

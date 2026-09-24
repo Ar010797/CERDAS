@@ -33,6 +33,51 @@
         "keterangan": { "type": "string", "description": "Catatan tambahan materi" }
       },
       "required": ["classId", "type", "hari", "jam", "mataPelajaran"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Tugas atau pekerjaan rumah online yang diberikan guru untuk siswa/wali murid.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Judul tugas atau materi" },
+        "subject": { "type": "string", "description": "Mata pelajaran terkait" },
+        "classId": { "type": "string", "description": "Target kelas siswa" },
+        "description": { "type": "string", "description": "Instruksi dan petunjuk pengerjaan tugas" },
+        "dueDate": { "type": "string", "description": "Batas tanggal pengumpulan format YYYY-MM-DD" },
+        "dueTime": { "type": "string", "description": "Batas jam pengumpulan HH:mm" },
+        "maxScore": { "type": "number", "description": "Skor atau nilai maksimal tugas" },
+        "attachmentUrl": { "type": "string", "description": "Lampiran berkas atau materi panduan tugas" },
+        "attachmentName": { "type": "string", "description": "Nama file lampiran" },
+        "teacherId": { "type": "string", "description": "ID atau username guru" },
+        "teacherName": { "type": "string", "description": "Nama guru pembuat tugas" },
+        "status": { "type": "string", "description": "Status tugas: active atau closed" },
+        "createdAt": { "type": "string", "description": "Waktu pembuatan ISO timestamp" }
+      },
+      "required": ["title", "subject", "classId", "dueDate", "teacherName"]
+    },
+    "AssignmentSubmission": {
+      "title": "AssignmentSubmission",
+      "description": "Pengumpulan tugas online oleh siswa/wali murid beserta status penilaian dan feedback guru.",
+      "type": "object",
+      "properties": {
+        "assignmentId": { "type": "string", "description": "ID tugas yang dikerjakan" },
+        "studentId": { "type": "string", "description": "ID siswa yang mengumpulkan" },
+        "studentName": { "type": "string", "description": "Nama siswa" },
+        "studentAbsen": { "type": "string", "description": "Nomor absen siswa" },
+        "classId": { "type": "string", "description": "Tingkat kelas siswa" },
+        "submissionText": { "type": "string", "description": "Jawaban teks atau keterangan pengerjaan tugas" },
+        "attachmentUrl": { "type": "string", "description": "Foto lembar jawaban atau file tugas yang dikumpulkan" },
+        "attachmentName": { "type": "string", "description": "Nama file lampiran tugas" },
+        "submittedAt": { "type": "string", "description": "Waktu pengumpulan ISO timestamp" },
+        "submittedBy": { "type": "string", "description": "Nama pengirim (wali murid atau siswa)" },
+        "isLate": { "type": "boolean", "description": "Apakah pengumpulan melebihi batas waktu" },
+        "status": { "type": "string", "description": "submitted, graded, atau revision_needed" },
+        "score": { "type": "number", "description": "Nilai yang diberikan guru" },
+        "feedback": { "type": "string", "description": "Umpan balik atau evaluasi catatan dari guru" },
+        "feedbackAt": { "type": "string", "description": "Waktu feedback diberikan" },
+        "feedbackBy": { "type": "string", "description": "Nama guru yang menilai" }
+      },
+      "required": ["assignmentId", "studentId", "studentName", "classId", "submittedAt"]
     }
   },
   "firestore": {
@@ -43,6 +88,14 @@
     "/jadwal_kelas/{scheduleId}": {
       "schema": { "$ref": "#/entities/ClassSchedule" },
       "description": "Koleksi jadwal pelajaran dan jadwal ujian per kelas."
+    },
+    "/tugas/{assignmentId}": {
+      "schema": { "$ref": "#/entities/Assignment" },
+      "description": "Koleksi tugas dan PR online yang dibuat oleh guru."
+    },
+    "/pengumpulan_tugas/{submissionId}": {
+      "schema": { "$ref": "#/entities/AssignmentSubmission" },
+      "description": "Koleksi lembar pengumpulan tugas siswa beserta penilaian dan feedback guru."
     }
   }
 }

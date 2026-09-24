@@ -3,6 +3,11 @@ import { collection, onSnapshot, query, orderBy, Timestamp } from 'firebase/fire
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { showDeviceNotification } from '../lib/pushNotification';
+import {
+  saveOfflineAnnouncements,
+  getOfflineAnnouncements,
+  OfflineAnnouncement
+} from '../lib/offlineStorage';
 
 export interface AnnouncementItem {
   id: string;
@@ -87,16 +92,32 @@ export function useAnnouncementsNotification(studentClassId?: string) {
     }
   }, [storageKey]);
 
-  // Subscribe to announcements collection
+  // Subscribe to announcements collection (with IndexedDB offline cache & fallback)
   useEffect(() => {
+    // 1. Initial fast load from IndexedDB
+    getOfflineAnnouncements({
+      classId: studentClassId,
+      role: userData?.role
+    }).then((cached) => {
+      if (cached && cached.length > 0) {
+        setAnnouncements(cached as AnnouncementItem[]);
+        setLoading(false);
+      }
+    });
+
     const q = query(collection(db, 'announcements'), orderBy('date', 'desc'));
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
+        const rawAll: AnnouncementItem[] = [];
         const items: AnnouncementItem[] = [];
+
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
+          const item = { id: docSnap.id, ...data } as AnnouncementItem;
+          rawAll.push(item);
+
           const targetClass = data.targetClass || 'Semua Kelas';
           const targetRole = data.targetRole || 'Semua';
 
@@ -113,16 +134,19 @@ export function useAnnouncementsNotification(studentClassId?: string) {
               targetClass.toLowerCase() === currentClass.toLowerCase();
 
             if (roleMatch && classMatch) {
-              items.push({ id: docSnap.id, ...data } as AnnouncementItem);
+              items.push(item);
             }
           } else {
             // Admin and Guru see all or their relevant scope
-            items.push({ id: docSnap.id, ...data } as AnnouncementItem);
+            items.push(item);
           }
         });
 
         setAnnouncements(items);
         setLoading(false);
+
+        // Cache all announcements into IndexedDB for offline access
+        saveOfflineAnnouncements(rawAll).catch((err) => console.warn('Cache announcements error:', err));
 
         // Notifikasi visual HP & suara jika ada pengumuman baru setelah load awal
         if (prevCountRef.current !== -1 && items.length > prevCountRef.current) {
@@ -143,8 +167,17 @@ export function useAnnouncementsNotification(studentClassId?: string) {
         prevCountRef.current = items.length;
       },
       (error) => {
-        console.warn('Announcements notification listener error:', error);
-        setLoading(false);
+        console.warn('Announcements notification listener error (offline fallback):', error);
+        // Fallback to IndexedDB offline cache
+        getOfflineAnnouncements({
+          classId: studentClassId,
+          role: userData?.role
+        }).then((cached) => {
+          if (cached && cached.length > 0) {
+            setAnnouncements(cached as AnnouncementItem[]);
+          }
+          setLoading(false);
+        });
       }
     );
 

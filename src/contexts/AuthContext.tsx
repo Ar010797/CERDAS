@@ -16,6 +16,9 @@ export interface UserData {
   absen_number?: string;
   schoolName?: string;
   sekolah?: string;
+  studentId?: string;
+  studentName?: string;
+  studentClass?: string;
 }
 
 interface AuthContextType {

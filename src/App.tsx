@@ -20,6 +20,7 @@ import FinanceGuru from './screens/guru/Finance';
 import WaliMuridDashboard from './screens/walimurid/Dashboard';
 import SchedulesScreen from './screens/Schedules';
 import AcademicCalendar from './screens/AcademicCalendar';
+import AssignmentsScreen from './screens/Assignments';
 
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles: string[] }) => {
   const { userData, loading } = useAuth();
@@ -74,6 +75,7 @@ export default function App() {
                 <Route path="students" element={<StudentsAdmin />} />
                 <Route path="attendance" element={<AttendanceGuru />} />
                 <Route path="grades" element={<GradesGuru />} />
+                <Route path="assignments" element={<AssignmentsScreen />} />
                 <Route path="schedules" element={<SchedulesScreen />} />
                 <Route path="calendar" element={<AcademicCalendar />} />
                 <Route path="lesson-plans" element={<LessonPlansGuru />} />
@@ -93,6 +95,7 @@ export default function App() {
                 <Route path="students" element={<StudentsAdmin />} />
                 <Route path="attendance" element={<AttendanceGuru />} />
                 <Route path="grades" element={<GradesGuru />} />
+                <Route path="assignments" element={<AssignmentsScreen />} />
                 <Route path="schedules" element={<SchedulesScreen />} />
                 <Route path="calendar" element={<AcademicCalendar />} />
                 <Route path="lesson-plans" element={<LessonPlansGuru />} />
@@ -109,6 +112,7 @@ export default function App() {
               }>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<WaliMuridDashboard />} />
+                <Route path="assignments" element={<AssignmentsScreen />} />
                 <Route path="calendar" element={<AcademicCalendar />} />
                 <Route path="announcements" element={<AnnouncementsAdmin />} />
               </Route>
