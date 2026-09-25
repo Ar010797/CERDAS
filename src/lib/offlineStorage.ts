@@ -198,12 +198,47 @@ async function deleteItem(storeName: string, id: string): Promise<void> {
 // Public APIs for Assignments & Submissions
 // ----------------------------------------------------
 
-export async function saveOfflineAssignments(assignments: any[]): Promise<void> {
+export async function saveOfflineAssignments(assignments: any[], classId?: string): Promise<void> {
+  if (classId && classId !== 'Semua' && classId !== 'Semua Kelas') {
+    await syncOfflineAssignments(classId, assignments);
+    return;
+  }
   await putItems(STORES.ASSIGNMENTS, assignments);
   await saveOfflineMeta('last_assignments_sync', {
     timestamp: Date.now(),
     count: assignments.length,
   });
+}
+
+/**
+ * Menyinkronkan daftar tugas untuk kelas tertentu.
+ * Menghapus tugas yang sudah dihapus oleh guru/admin dari IndexedDB sehingga
+ * tidak muncul lagi di dasbor siswa dan wali murid.
+ */
+export async function syncOfflineAssignments(classId: string, currentAssignments: any[]): Promise<void> {
+  try {
+    const currentIds = new Set(currentAssignments.map((a) => a.id));
+    const allInStore = await getAllItems<OfflineAssignment>(STORES.ASSIGNMENTS);
+    const toDelete = allInStore.filter((a) => {
+      const matchClass = !classId || classId === 'Semua' || classId === 'Semua Kelas' || a.classId === classId;
+      return matchClass && !currentIds.has(a.id);
+    });
+
+    for (const item of toDelete) {
+      await deleteItem(STORES.ASSIGNMENTS, item.id);
+    }
+
+    if (currentAssignments.length > 0) {
+      await putItems(STORES.ASSIGNMENTS, currentAssignments);
+    }
+
+    await saveOfflineMeta('last_assignments_sync', {
+      timestamp: Date.now(),
+      count: currentAssignments.length,
+    });
+  } catch (err) {
+    console.warn('syncOfflineAssignments error:', err);
+  }
 }
 
 export async function getOfflineAssignments(classId?: string): Promise<OfflineAssignment[]> {

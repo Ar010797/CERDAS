@@ -51,6 +51,8 @@
         "teacherId": { "type": "string", "description": "ID atau username guru" },
         "teacherName": { "type": "string", "description": "Nama guru pembuat tugas" },
         "status": { "type": "string", "description": "Status tugas: active atau closed" },
+        "mode": { "type": "string", "description": "Mode tugas: 'online_quiz' (dikerjakan & dinilai otomatis) atau 'file_upload' (unggah foto/berkas)" },
+        "questions": { "type": "array", "description": "Daftar soal pilihan ganda & esai berserta kunci jawaban untuk koreksi otomatis" },
         "createdAt": { "type": "string", "description": "Waktu pembuatan ISO timestamp" }
       },
       "required": ["title", "subject", "classId", "dueDate", "teacherName"]
@@ -68,6 +70,8 @@
         "submissionText": { "type": "string", "description": "Jawaban teks atau keterangan pengerjaan tugas" },
         "attachmentUrl": { "type": "string", "description": "Foto lembar jawaban atau file tugas yang dikumpulkan" },
         "attachmentName": { "type": "string", "description": "Nama file lampiran tugas" },
+        "studentAnswers": { "type": "array", "description": "Jawaban online siswa per butir soal (pilihan ganda / esai)" },
+        "autoGraded": { "type": "boolean", "description": "Apakah telah dikoreksi & dinilai otomatis oleh sistem" },
         "submittedAt": { "type": "string", "description": "Waktu pengumpulan ISO timestamp" },
         "submittedBy": { "type": "string", "description": "Nama pengirim (wali murid atau siswa)" },
         "isLate": { "type": "boolean", "description": "Apakah pengumpulan melebihi batas waktu" },

@@ -1,6 +1,7 @@
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { playAnnouncementChime } from '../hooks/useAnnouncementsNotification';
+import { playNotificationSound, unlockAudioContext, SoundType } from './audioNotifier';
 
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported';
 
@@ -200,15 +201,15 @@ export async function showDeviceNotification(options: {
   url?: string;
   tag?: string;
   badge?: string;
+  soundType?: SoundType;
 }) {
   if (typeof window === 'undefined') return;
 
+  unlockAudioContext();
+
   // Bunyikan nada dering notifikasi & getar
   try {
-    playAnnouncementChime();
-    if (navigator.vibrate) {
-      navigator.vibrate([250, 100, 250, 100, 250]);
-    }
+    playNotificationSound(options.soundType || 'announcement');
   } catch {}
 
   // Jika izin tidak granted, cukup bunyikan suara
@@ -222,6 +223,7 @@ export async function showDeviceNotification(options: {
     badge: '/icon.svg',
     tag: options.tag || 'school-announcement',
     renotify: true,
+    vibrate: [250, 100, 250, 100, 250],
     data: {
       url: options.url || '/?tab=pengumuman'
     }

@@ -51,12 +51,14 @@ async function startServer() {
     for (let i = 0; i < modelCandidates.length; i++) {
       const currentModel = modelCandidates[i];
       try {
+        const timeoutLimit = Number(params?.timeoutMs) || 15000;
         const currentParams = { ...params, model: currentModel };
-        // 12-second per-candidate timeout allows deep reasoning/PDF processing while preventing gateway timeouts
+        delete currentParams.timeoutMs;
+        // per-candidate timeout allows deep reasoning/PDF processing while preventing gateway timeouts
         const result = await Promise.race([
           ai.models.generateContent(currentParams),
           new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error(`Timeout on model ${currentModel}`)), 12000)
+            setTimeout(() => reject(new Error(`Timeout on model ${currentModel}`)), timeoutLimit)
           )
         ]);
         return result;
@@ -1221,6 +1223,208 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }
   });
 
+  // API 2b: Import & Extract Online Quiz Questions from PDF document (Multimodal Gemini 3.8 Flash)
+  app.post(["/api/quiz/import-pdf", "/api/extract-questions-from-pdf"], upload.single("file"), async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      let fileBuffer: Buffer | null = null;
+      let mimeType = "application/pdf";
+      let originalName = "dokumen_soal.pdf";
+
+      if (req.file) {
+        fileBuffer = req.file.buffer;
+        originalName = req.file.originalname || "dokumen_soal.pdf";
+        mimeType = req.file.mimetype || "application/pdf";
+        if (!mimeType || mimeType === 'application/octet-stream') {
+          mimeType = originalName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/pdf';
+        }
+      } else if (req.body && req.body.pdfBase64) {
+        fileBuffer = Buffer.from(req.body.pdfBase64, "base64");
+        originalName = req.body.filename || "dokumen_soal.pdf";
+        mimeType = req.body.mimeType || "application/pdf";
+      }
+
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return res.status(400).json({ error: "Tidak ada berkas PDF yang diterima." });
+      }
+
+      const base64Data = fileBuffer.toString("base64");
+      const ai = getAi();
+
+      const response = await callGeminiWithRetry(ai, {
+        model: "gemini-3.8-flash",
+        timeoutMs: 40000,
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType
+              }
+            },
+            {
+              text: `Anda adalah pakar kurikulum dan asisten pembuat soal ujian sekolah (SD/SMP/SMA).
+Tugas Anda adalah membaca dan menganalisis seluruh isi dokumen PDF bank soal / lembar tugas ini secara teliti.
+Ekstrak SEMUA butir soal yang ada di dalam dokumen menjadi format array JSON terstruktur yang siap dipakai untuk ujian online interaktif.
+
+Aturan Ekstraksi Setiap Soal:
+1. 'questionText': Kalimat pertanyaan yang bersih, lengkap, dan jelas tanpa nomor soal di awal (hilangkan '1.', '2.', 'No. 1', dst). Pertahankan rumus, tanda petik, teks kutipan, atau tabel singkat jika ada.
+2. 'type': 
+   - Gunakan 'multiple_choice' jika soal memiliki opsi pilihan (misal: A, B, C, D atau A, B, C, D, E).
+   - Gunakan 'essay' jika soal berupa pertanyaan uraian, isian singkat, pemecahan masalah terbuka, atau tidak memiliki pilihan ganda.
+3. 'options': 
+   - Untuk soal 'multiple_choice': array objek opsi berurutan:
+     [
+       { "id": "A", "text": "teks pilihan A" },
+       { "id": "B", "text": "teks pilihan B" },
+       { "id": "C", "text": "teks pilihan C" },
+       { "id": "D", "text": "teks pilihan D" }
+     ]
+     Bersihkan huruf awalan 'A.', 'B.', dll dari properti 'text'.
+   - Untuk soal 'essay': kosongkan array options ([]).
+4. 'correctAnswer':
+   - Untuk 'multiple_choice': Huruf kapital kunci yang benar (misal: 'A', 'B', 'C', atau 'D'). Jika di dokumen terdapat kunci jawaban (kunci di tebalkan/dilingkari/kunci di halaman belakang/kisi-kisi), gunakan kunci tersebut. Jika tidak tertera eksplisit, tentukan jawaban yang paling tepat secara akademis.
+   - Untuk 'essay': tuliskan kata-kata kunci utama jawaban atau ringkasan jawaban yang benar sebagai acuan penilaian guru.
+5. 'points':
+   - Tentukan bobot poin soal (default 10 untuk PG, 20 untuk Esai) atau sesuaikan agar total proporsional ke 100 poin.
+6. 'explanation':
+   - Pembahasan singkat atau alasan edukatif mengapa jawaban tersebut benar (1-2 kalimat).
+
+Kembalikan format JSON murni berupa array of objects.`
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                questionText: { type: Type.STRING, description: "Kalimat soal tanpa nomor" },
+                type: { type: Type.STRING, description: "Hanya 'multiple_choice' atau 'essay'" },
+                options: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING, description: "Huruf opsi: 'A', 'B', 'C', 'D'" },
+                      text: { type: Type.STRING, description: "Teks opsi jawaban tanpa awalan huruf" }
+                    },
+                    required: ["id", "text"]
+                  },
+                  description: "Array pilihan opsi untuk multiple_choice"
+                },
+                correctAnswer: { type: Type.STRING, description: "Kunci jawaban: huruf 'A'/'B'/'C'/'D' untuk PG, atau kata kunci untuk esai" },
+                points: { type: Type.NUMBER, description: "Bobot nilai (misal 10)" },
+                explanation: { type: Type.STRING, description: "Pembahasan singkat" }
+              },
+              required: ["questionText", "type", "points"]
+            }
+          }
+        }
+      });
+
+      let rawText = response.text || "";
+      rawText = rawText.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+
+      let parsedQuestions: any[] = [];
+      try {
+        parsedQuestions = JSON.parse(rawText);
+      } catch (parseErr) {
+        const match = rawText.match(/\[[\s\S]*\]/);
+        if (match) {
+          parsedQuestions = JSON.parse(match[0]);
+        } else {
+          throw new Error("Gagal mengurai respon AI menjadi format butir soal.");
+        }
+      }
+
+      if (!Array.isArray(parsedQuestions)) {
+        if (typeof parsedQuestions === 'object' && parsedQuestions !== null) {
+          const foundArr = Object.values(parsedQuestions).find(val => Array.isArray(val));
+          parsedQuestions = (foundArr as any[]) || [];
+        } else {
+          parsedQuestions = [];
+        }
+      }
+
+      // Format and sanitize items to match QuizQuestion interface
+      const sanitized = parsedQuestions.map((q, idx) => {
+        const rawType = (q.type || "").toLowerCase();
+        const qType = rawType.includes("essay") || rawType.includes("uraian") || rawType.includes("esai") ? 'essay' : 'multiple_choice';
+        
+        let opts: any[] | undefined = q.options;
+        if (qType === 'multiple_choice') {
+          if (Array.isArray(opts) && opts.length > 0) {
+            opts = opts.map((opt: any, optIdx: number) => {
+              if (typeof opt === 'string') {
+                const letter = String.fromCharCode(65 + optIdx);
+                const cleanTxt = opt.replace(/^[A-Ea-e][\.\)]\s*/, '').trim();
+                return { id: letter, text: cleanTxt || opt };
+              }
+              const letter = (opt.id || String.fromCharCode(65 + optIdx)).toString().trim().toUpperCase();
+              let txt = (opt.text || "").toString().trim();
+              txt = txt.replace(/^[A-Ea-e][\.\)]\s*/, '').trim();
+              return {
+                id: letter,
+                text: txt || `Pilihan ${letter}`
+              };
+            });
+          } else {
+            opts = [
+              { id: 'A', text: 'Pilihan A' },
+              { id: 'B', text: 'Pilihan B' },
+              { id: 'C', text: 'Pilihan C' },
+              { id: 'D', text: 'Pilihan D' }
+            ];
+          }
+        } else {
+          opts = undefined;
+        }
+
+        let key = (q.correctAnswer || "").toString().trim();
+        if (qType === 'multiple_choice') {
+          key = key.slice(0, 1).toUpperCase() || 'A';
+        }
+
+        let cleanText = (q.questionText || q.text || `Soal Nomor ${idx + 1}`).trim();
+        cleanText = cleanText.replace(/^\d+[\.\)]\s*/, '').trim();
+
+        return {
+          id: `q_pdf_${Date.now()}_${idx + 1}`,
+          type: qType,
+          questionText: cleanText,
+          points: Number(q.points) > 0 ? Number(q.points) : (qType === 'essay' ? 20 : 10),
+          options: opts,
+          correctAnswer: key,
+          explanation: (q.explanation || "").trim()
+        };
+      });
+
+      const mcqCount = sanitized.filter(q => q.type === 'multiple_choice').length;
+      const essayCount = sanitized.filter(q => q.type === 'essay').length;
+      const totalPoints = sanitized.reduce((sum, q) => sum + (q.points || 0), 0);
+
+      res.json({
+        success: true,
+        fileName: originalName,
+        totalDetected: sanitized.length,
+        mcqCount,
+        essayCount,
+        totalPoints,
+        questions: sanitized
+      });
+
+    } catch (error: any) {
+      console.error("[Import PDF Questions Error]:", error);
+      res.status(500).json({ 
+        error: error.message || "Gagal mengekstrak butir soal dari berkas PDF. Pastikan file PDF memuat teks soal yang dapat dibaca.",
+        success: false 
+      });
+    }
+  });
+
   // API 3: Extract Schedule from Image or Document
   app.post("/api/extract-schedule", upload.single("file"), async (req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -1328,20 +1532,28 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
   });
 
   // API 4: Push Notification Trigger for Announcements (Median Native & Web Push)
-  app.post("/api/send-push-announcement", async (req, res) => {
+  app.post(["/api/send-push-announcement", "/api/broadcast-announcement", "/api/broadcast-push-alert"], async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
       const {
-        title = "Pengumuman Sekolah",
+        title = "Pemberitahuan Sekolah",
+        body = "",
         content = "",
         targetClass = "Semua Kelas",
         targetRole = "Semua",
         authorName = "Pihak Sekolah",
         category = "Pengumuman",
-        priority = "Normal"
+        priority = "Normal",
+        type = "announcement",
+        url = "/?tab=pengumuman",
+        studentId = "",
+        assignmentId = ""
       } = req.body || {};
 
-      console.log(`[Push Notification] Broadcasting announcement: "${title}" for target "${targetClass}" (${targetRole})`);
+      const alertBody = body || content || "Ada informasi penting dari sekolah.";
+      const soundType = type === "grade_released" ? "grade_released" : type === "new_assignment" ? "announcement" : "announcement";
+
+      console.log(`[Push Notification] Broadcasting [${type}]: "${title}" to target "${targetClass}" (${targetRole})`);
 
       const oneSignalAppId = process.env.ONESIGNAL_APP_ID || req.body?.oneSignalAppId;
       const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY || req.body?.oneSignalRestKey;
@@ -1359,20 +1571,29 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
             if (filters.length > 0) filters.push({ operator: "AND" });
             filters.push({ field: "tag", key: "role", relation: "=", value: targetRole });
           }
+          if (studentId) {
+            if (filters.length > 0) filters.push({ operator: "AND" });
+            filters.push({ field: "tag", key: "userId", relation: "=", value: studentId });
+          }
 
           const notificationPayload: any = {
             app_id: oneSignalAppId,
-            headings: { en: `📢 ${title}`, id: `📢 ${title}` },
+            headings: { en: `🔔 ${title}`, id: `🔔 ${title}` },
             contents: {
-              en: `${authorName}: ${content.slice(0, 160)}`,
-              id: `${authorName}: ${content.slice(0, 160)}`
+              en: `${authorName}: ${alertBody.slice(0, 160)}`,
+              id: `${authorName}: ${alertBody.slice(0, 160)}`
             },
-            url: "/?tab=pengumuman",
+            url: url,
             priority: 10, // High priority 10 triggers floating heads-up notification banner
             android_visibility: 1,
             android_sound: "notification",
             android_channel_id: "cerdas_announcements",
-            small_icon: "ic_stat_onesignal_default"
+            small_icon: "ic_stat_onesignal_default",
+            data: {
+              type,
+              url,
+              soundType
+            }
           };
 
           if (filters.length > 0) {
@@ -1406,13 +1627,15 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
       res.json({
         success: true,
         broadcasted: true,
+        type,
+        soundType,
         medianOneSignalConfigured: !!(oneSignalAppId && oneSignalRestKey),
         oneSignalSuccess,
         oneSignalError,
-        summary: `Notifikasi "${title}" telah disiarkan ke antrean perangkat.`
+        summary: `Notifikasi "${title}" telah disiarkan ke antrean perangkat (FCM & Mobile).`
       });
     } catch (error: any) {
-      console.error("[Send Push Announcement Error]:", error);
+      console.error("[Send Push Alert Error]:", error);
       res.status(500).json({ error: error.message || "Failed to broadcast push notification" });
     }
   });

@@ -620,14 +620,14 @@ export default function Announcements() {
                       </p>
 
                       {/* Content */}
-                      <div className="text-sm text-slate-700 dark:text-slate-200 bg-slate-50/80 dark:bg-slate-800/60 p-4 rounded-xl leading-relaxed whitespace-pre-wrap border border-slate-100 dark:border-slate-800">
+                      <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 bg-slate-50/80 dark:bg-slate-800/60 p-4 rounded-xl leading-relaxed whitespace-pre-wrap break-words border border-slate-100 dark:border-slate-800">
                         {ann.content}
                       </div>
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="shrink-0 flex items-center gap-1.5">
+                  <div className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-1.5 self-end sm:self-start pt-2 sm:pt-0">
                     <button
                       type="button"
                       onClick={() => generateAnnouncementPDF(ann, schoolProfile)}

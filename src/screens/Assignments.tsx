@@ -4,6 +4,7 @@ import {
   doc, 
   setDoc, 
   deleteDoc, 
+  getDocs,
   onSnapshot, 
   query, 
   where, 
@@ -17,7 +18,8 @@ import {
   getOfflineAssignments,
   saveOfflineSubmissions,
   getOfflineSubmissions,
-  removeOfflineAssignment
+  removeOfflineAssignment,
+  syncOfflineAssignments
 } from '../lib/offlineStorage';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { 
@@ -51,7 +53,9 @@ import {
   Bell,
   Volume2,
   VolumeX,
-  Sparkles
+  Sparkles,
+  HelpCircle,
+  CheckSquare
 } from 'lucide-react';
 import { format, isPast, parseISO } from 'date-fns';
 import { id } from 'date-fns/locale';
@@ -61,6 +65,11 @@ import {
   sendBrowserDeadlineNotification,
   useAssignmentDeadlineReminder 
 } from '../hooks/useAssignmentDeadlineReminder';
+import { QuizQuestion, StudentAnswer } from '../types/quiz';
+import OnlineQuizTakerModal from '../components/OnlineQuizTakerModal';
+import QuizQuestionEditor from '../components/QuizQuestionEditor';
+import { playNotificationSound } from '../lib/audioNotifier';
+import { sendPushAlert } from '../lib/fcmPush';
 
 export interface Assignment {
   id: string;
@@ -78,6 +87,9 @@ export interface Assignment {
   status: 'active' | 'closed';
   createdAt: string;
   notifyParents?: boolean;
+  mode?: 'manual' | 'online_quiz';
+  questions?: QuizQuestion[];
+  totalQuestions?: number;
 }
 
 export interface Submission {
@@ -98,6 +110,11 @@ export interface Submission {
   feedback?: string;
   feedbackAt?: string | null;
   feedbackBy?: string | null;
+  studentAnswers?: StudentAnswer[];
+  autoGraded?: boolean;
+  mcqCorrectCount?: number;
+  mcqTotalCount?: number;
+  essayCount?: number;
 }
 
 interface Student {
@@ -141,6 +158,9 @@ export default function AssignmentsScreen() {
   // Modals & form states for Guru/Admin
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
+  const [assignmentMode, setAssignmentMode] = useState<'manual' | 'online_quiz'>('manual');
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [activeQuizAssignment, setActiveQuizAssignment] = useState<Assignment | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     subject: '',
@@ -256,7 +276,8 @@ export default function AssignmentsScreen() {
         setLoading(false);
 
         // Cache freshly retrieved assignments into IndexedDB for offline viewing
-        saveOfflineAssignments(list).catch((err) => console.warn('Cache assignments error:', err));
+        // and purge any assignments deleted by teacher/admin from the local store
+        syncOfflineAssignments(selectedClass, list).catch((err) => console.warn('Cache assignments error:', err));
       },
       (err) => {
         console.warn('Network error fetching assignments from Firestore, falling back to IndexedDB:', err);
@@ -320,8 +341,15 @@ export default function AssignmentsScreen() {
       const found = students.find(s => s.name.toLowerCase() === userData.studentName?.toLowerCase());
       if (found) return found;
     }
-    return students[0] || null;
-  }, [students, isWaliMurid, userData]);
+    if (students.length > 0) return students[0];
+    return {
+      id: userData?.uid || 'siswa',
+      name: userData?.name || 'Siswa',
+      absen_number: '-',
+      nisn: '-',
+      classId: selectedClass
+    };
+  }, [students, isWaliMurid, userData, selectedClass]);
 
   // Submissions map by assignmentId -> submission
   const studentSubmissionsMap = useMemo(() => {
@@ -406,6 +434,11 @@ export default function AssignmentsScreen() {
       return;
     }
 
+    if (assignmentMode === 'online_quiz' && quizQuestions.length === 0) {
+      showToast('Anda memilih mode Soal Online Interaktif. Harap tambahkan minimal 1 butir soal pilihan ganda atau esai.', 'error');
+      return;
+    }
+
     setSavingAssignment(true);
     try {
       const assignmentId = editingAssignment ? editingAssignment.id : `tugas_${Date.now()}`;
@@ -424,7 +457,10 @@ export default function AssignmentsScreen() {
         teacherName: userData?.name || 'Guru Mata Pelajaran',
         status: editingAssignment ? editingAssignment.status : 'active',
         createdAt: editingAssignment ? editingAssignment.createdAt : new Date().toISOString(),
-        notifyParents: formData.notifyParents
+        notifyParents: formData.notifyParents,
+        mode: assignmentMode,
+        questions: assignmentMode === 'online_quiz' ? quizQuestions : [],
+        totalQuestions: assignmentMode === 'online_quiz' ? quizQuestions.length : 0
       };
 
       await setDoc(doc(db, 'tugas', assignmentId), payload, { merge: true });
@@ -434,10 +470,13 @@ export default function AssignmentsScreen() {
         try {
           const annId = `ann_${Date.now()}`;
           const dueFormatted = format(new Date(`${formData.dueDate}T${formData.dueTime}`), 'dd MMMM yyyy HH:mm', { locale: id });
+          const isQuiz = assignmentMode === 'online_quiz';
+          const quizInfo = isQuiz ? `\nFormat: Tugas Online Interaktif (${quizQuestions.length} Butir Soal PG/Esai, dikerjakan & dinilai otomatis di aplikasi).` : '';
+          
           await setDoc(doc(db, 'announcements', annId), {
             id: annId,
             title: `📝 Tugas Baru: ${formData.title.trim()}`,
-            content: `Assalamu'alaikum Warahmatullahi Wabarakatuh.\n\nDiberitahukan kepada seluruh Siswa dan Wali Murid ${selectedClass}, telah diberikan tugas baru mata pelajaran ${formData.subject}.\n\nBatas Pengumpulan: ${dueFormatted}\nPetunjuk: ${formData.description.trim() || 'Silakan cek menu Tugas Online untuk instruksi pengerjaan.'}\n\nMohon bantu membimbing ananda untuk menyelesaikan tepat waktu. Terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.`,
+            content: `Assalamu'alaikum Warahmatullahi Wabarakatuh.\n\nDiberitahukan kepada seluruh Siswa dan Wali Murid ${selectedClass}, telah diberikan tugas baru mata pelajaran ${formData.subject}.${quizInfo}\n\nBatas Pengumpulan: ${dueFormatted}\nPetunjuk: ${formData.description.trim() || 'Silakan buka menu Tugas di aplikasi untuk instruksi atau pengerjaan langsung.'}\n\nMohon bantu membimbing ananda untuk menyelesaikan tepat waktu. Terima kasih.\n\nWassalamu'alaikum Warahmatullahi Wabarakatuh.`,
             authorName: userData?.name || 'Guru Mata Pelajaran',
             authorRole: userData?.role || 'Guru',
             date: new Date().toISOString(),
@@ -447,19 +486,14 @@ export default function AssignmentsScreen() {
             priority: 'Penting'
           });
 
-          // Trigger backend push notification to mobile devices via Median / OneSignal
-          fetch('/api/broadcast-announcement', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: `Tugas Baru: ${formData.title.trim()}`,
-              content: `Tugas ${formData.subject} untuk ${selectedClass}. Batas: ${dueFormatted}`,
-              targetClass: selectedClass,
-              targetRole: 'Wali Murid',
-              authorName: userData?.name || 'Guru',
-              category: 'Akademik',
-              priority: 'Penting'
-            })
+          // Trigger backend push notification to mobile devices
+          sendPushAlert({
+            title: `Tugas Baru: ${formData.title.trim()}`,
+            body: `Tugas ${formData.subject} untuk ${selectedClass}. Batas: ${dueFormatted}`,
+            type: 'new_assignment',
+            targetClass: selectedClass,
+            targetRole: 'Wali Murid',
+            url: '/assignments'
           }).catch(e => console.warn('Push trigger notification error:', e));
         } catch (annErr) {
           console.warn('Gagal membuat pengumuman otomatis tugas:', annErr);
@@ -469,6 +503,8 @@ export default function AssignmentsScreen() {
       showToast(editingAssignment ? 'Tugas berhasil diperbarui!' : 'Tugas baru berhasil diterbitkan!', 'success');
       setIsCreateModalOpen(false);
       setEditingAssignment(null);
+      setAssignmentMode('manual');
+      setQuizQuestions([]);
       setFormData({
         title: '',
         subject: availableSubjects[0] || 'Matematika',
@@ -489,16 +525,32 @@ export default function AssignmentsScreen() {
     }
   };
 
-  // Guru: Delete Assignment
+  // Guru: Delete Assignment (Immediately removed from teacher and walimurid dashboard)
   const handleDeleteAssignment = async (assignment: Assignment) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus tugas "${assignment.title}"? Seluruh pengumpulan tugas siswa terkait juga akan dihapus.`)) {
+    if (!confirm(`Apakah Anda yakin ingin menghapus tugas "${assignment.title}"? Seluruh pengumpulan tugas siswa terkait juga akan dihapus dan tidak lagi tampil di dasbor wali murid.`)) {
       return;
     }
 
     try {
+      // 1. Delete assignment doc from Firestore
       await deleteDoc(doc(db, 'tugas', assignment.id));
+
+      // 2. Delete all related student submissions from Firestore
+      const qSubmissions = query(collection(db, 'pengumpulan_tugas'), where('assignmentId', '==', assignment.id));
+      const snapSubmissions = await getDocs(qSubmissions);
+      for (const d of snapSubmissions.docs) {
+        await deleteDoc(doc(db, 'pengumpulan_tugas', d.id));
+      }
+
+      // 3. Purge from local offline IndexedDB storage
       await removeOfflineAssignment(assignment.id);
-      showToast(`Tugas "${assignment.title}" berhasil dihapus.`, 'success');
+
+      // 4. Update in-memory state immediately so UI updates in real-time
+      const updatedList = assignments.filter(a => a.id !== assignment.id);
+      setAssignments(updatedList);
+      await syncOfflineAssignments(selectedClass, updatedList);
+
+      showToast(`Tugas "${assignment.title}" berhasil dihapus dari sistem & dasbor wali murid.`, 'success');
     } catch (err) {
       console.error(err);
       showToast('Gagal menghapus tugas.', 'error');
@@ -543,6 +595,25 @@ export default function AssignmentsScreen() {
       };
 
       await setDoc(doc(db, 'pengumpulan_tugas', subId), payload, { merge: true });
+
+      // Play fanfare sound for grade release
+      try {
+        playNotificationSound('grade_released');
+      } catch (soundErr) {
+        console.warn('Audio feedback notice:', soundErr);
+      }
+
+      // Send automated push notification alert to student & parent
+      sendPushAlert({
+        title: `Nilai Tugas Diumumkan: ${selectedAssignmentForGrading.title}`,
+        body: `Nilai ananda ${activeSubmissionStudent.student.name}: ${gradeInput} / ${selectedAssignmentForGrading.maxScore}. Catatan guru: "${feedbackInput.trim() || 'Alhamdulillah, tetap semangat!'}"`,
+        type: 'grade_released',
+        targetClass: selectedClass,
+        targetRole: 'Wali Murid',
+        studentId: activeSubmissionStudent.student.id,
+        assignmentId: selectedAssignmentForGrading.id,
+        url: '/assignments'
+      }).catch(e => console.warn('Push alert error:', e));
 
       // Update student's local submission object in current modal
       setActiveSubmissionStudent(prev => prev ? {
@@ -1030,10 +1101,18 @@ export default function AssignmentsScreen() {
 
                   {/* Title & Description */}
                   <div>
-                    <h3 className="text-base font-bold text-slate-800 dark:text-white hover:text-indigo-600 transition-colors">
-                      {assignment.title}
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-3 leading-relaxed">
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                      <h3 className="text-base font-bold text-slate-800 dark:text-white hover:text-indigo-600 transition-colors">
+                        {assignment.title}
+                      </h3>
+                      {(assignment.mode === 'online_quiz' || (assignment.questions && assignment.questions.length > 0)) && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 text-[10px] font-bold">
+                          <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                          <span>Online ({assignment.questions?.length || 0} Soal • Auto-Nilai)</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 line-clamp-3 leading-relaxed">
                       {assignment.description || 'Tidak ada deskripsi tambahan.'}
                     </p>
                   </div>
@@ -1131,51 +1210,84 @@ export default function AssignmentsScreen() {
                       )}
 
                       <div className="flex items-center gap-2">
-                        {studentSub ? (
-                          <>
-                            {studentSub.feedback && (
-                              <button
-                                type="button"
-                                onClick={() => setViewingFeedback({ assignment, submission: studentSub })}
-                                className="flex-1 py-2.5 px-4 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                                <span>Lihat Feedback Guru</span>
-                              </button>
-                            )}
+                        {(() => {
+                          const isOnlineQuiz = assignment.mode === 'online_quiz' || (assignment.questions && assignment.questions.length > 0);
 
-                            {assignment.status === 'active' && (
+                          if (studentSub) {
+                            return (
+                              <>
+                                {isOnlineQuiz && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveQuizAssignment(assignment)}
+                                    className="flex-1 py-2.5 px-3 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-purple-200 dark:border-purple-800 shadow-2xs"
+                                  >
+                                    <CheckSquare className="w-3.5 h-3.5 text-purple-600" />
+                                    <span>Lihat Lembar Jawaban & Pembahasan</span>
+                                  </button>
+                                )}
+
+                                {studentSub.feedback && !isOnlineQuiz && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingFeedback({ assignment, submission: studentSub })}
+                                    className="flex-1 py-2.5 px-4 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <span>Lihat Feedback Guru</span>
+                                  </button>
+                                )}
+
+                                {assignment.status === 'active' && !isOnlineQuiz && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSubmittingAssignment(assignment);
+                                      setSubmitText(studentSub.submissionText || '');
+                                      setSubmitAttachmentUrl(studentSub.attachmentUrl || '');
+                                      setSubmitAttachmentName(studentSub.attachmentName || '');
+                                    }}
+                                    className="py-2.5 px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <span>Ubah / Revisi</span>
+                                  </button>
+                                )}
+                              </>
+                            );
+                          }
+
+                          if (isOnlineQuiz) {
+                            return (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setSubmittingAssignment(assignment);
-                                  setSubmitText(studentSub.submissionText || '');
-                                  setSubmitAttachmentUrl(studentSub.attachmentUrl || '');
-                                  setSubmitAttachmentName(studentSub.attachmentName || '');
-                                }}
-                                className="py-2.5 px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                disabled={assignment.status === 'closed'}
+                                onClick={() => setActiveQuizAssignment(assignment)}
+                                className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                               >
-                                <Edit3 className="w-3.5 h-3.5" />
-                                <span>Ubah / Revisi</span>
+                                <Sparkles className="w-4 h-4 text-amber-300" />
+                                <span>Kerjakan Online Sekarang ({assignment.questions?.length || 0} Soal PG/Esai)</span>
                               </button>
-                            )}
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={assignment.status === 'closed'}
-                            onClick={() => {
-                              setSubmittingAssignment(assignment);
-                              setSubmitText('');
-                              setSubmitAttachmentUrl('');
-                              setSubmitAttachmentName('');
-                            }}
-                            className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
-                          >
-                            <Upload className="w-4 h-4" />
-                            <span>Kumpulkan Tugas Sekarang</span>
-                          </button>
-                        )}
+                            );
+                          }
+
+                          return (
+                            <button
+                              type="button"
+                              disabled={assignment.status === 'closed'}
+                              onClick={() => {
+                                setSubmittingAssignment(assignment);
+                                setSubmitText('');
+                                setSubmitAttachmentUrl('');
+                                setSubmitAttachmentName('');
+                              }}
+                              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                              <Upload className="w-4 h-4" />
+                              <span>Kumpulkan Tugas Sekarang</span>
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   ) : (
@@ -1271,7 +1383,7 @@ export default function AssignmentsScreen() {
       {/* MODAL: Buat / Edit Tugas (Guru/Admin) */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full overflow-hidden shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-slate-800 dark:text-white">
@@ -1283,13 +1395,47 @@ export default function AssignmentsScreen() {
               </div>
               <button
                 onClick={() => setIsCreateModalOpen(false)}
-                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-600 transition-colors"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveAssignment} className="p-6 overflow-y-auto space-y-4 flex-1">
+              {/* Pilihan Model Tugas: Konvensional vs Online Interaktif (Auto-Grading) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Model Pengerjaan Tugas:
+                </label>
+                <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl flex items-center gap-1 border border-slate-200/80 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setAssignmentMode('manual')}
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      assignmentMode === 'manual'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Konvensional (Foto / Berkas Jawaban)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAssignmentMode('online_quiz')}
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      assignmentMode === 'online_quiz'
+                        ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Online Interaktif (PG & Esai Koreksi Otomatis)</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Judul Tugas */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -1371,13 +1517,24 @@ export default function AssignmentsScreen() {
                   Petunjuk & Instruksi Pengerjaan
                 </label>
                 <textarea
-                  rows={4}
-                  placeholder="Tuliskan petunjuk tugas dengan jelas. Contoh: Kerjakan buku paket halaman 45 nomor 1 sampai 10. Tuliskan langkah-langkah di buku tulis kemudian foto dan unggah lembar jawaban."
+                  rows={3}
+                  placeholder="Tuliskan petunjuk tugas dengan jelas. Contoh: Bacalah setiap butir soal dengan teliti dan pilih jawaban yang paling tepat."
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 leading-relaxed"
                 />
               </div>
+
+              {/* Editor Butir Soal Online (PG & Esai) jika mode online_quiz */}
+              {assignmentMode === 'online_quiz' && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <QuizQuestionEditor
+                    questions={quizQuestions}
+                    onChange={setQuizQuestions}
+                    maxScore={formData.maxScore}
+                  />
+                </div>
+              )}
 
               {/* Lampiran Materi Guru (Opsional) */}
               <div>
@@ -1907,6 +2064,22 @@ export default function AssignmentsScreen() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: Pengerjaan Kuis / Soal Online Siswa (PG & Esai Koreksi Otomatis) */}
+      {activeQuizAssignment && currentStudent && (
+        <OnlineQuizTakerModal
+          assignment={activeQuizAssignment}
+          student={currentStudent}
+          currentUserRole={userData?.role}
+          currentUserName={userData?.name}
+          existingSubmission={studentSubmissionsMap[activeQuizAssignment.id]}
+          onClose={() => setActiveQuizAssignment(null)}
+          onSuccess={() => {
+            showToast('Tugas online berhasil dikumpulkan & dinilai otomatis!', 'success');
+            setActiveQuizAssignment(null);
+          }}
+        />
       )}
     </div>
   );
