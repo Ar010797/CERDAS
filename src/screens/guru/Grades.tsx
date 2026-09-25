@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { FileDown, Save, Edit2, X, Plus, Trash2, Filter, Settings, Check } from 'lucide-react';
+import { FileDown, Save, Edit2, X, Plus, Trash2, Filter, Settings, Check, RefreshCw, Sparkles } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
+import { syncAllClassAssignmentGrades } from '../../lib/gradeSync';
 
 interface Student {
   id: string;
@@ -57,6 +58,27 @@ export default function GradesGuru() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [tempGrades, setTempGrades] = useState<Record<string, GradeSubject>>({});
   const [saving, setSaving] = useState(false);
+  const [syncingAssignments, setSyncingAssignments] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+
+  const handleSyncAssignments = async () => {
+    setSyncingAssignments(true);
+    setSyncNotice(null);
+    try {
+      const res = await syncAllClassAssignmentGrades(selectedClass);
+      if (res.success) {
+        setSyncNotice(`Berhasil menyinkronkan ${res.totalSubmissionsSynced} nilai tugas untuk ${res.syncedStudentsCount} siswa ke dalam rapor!`);
+      } else {
+        setSyncNotice(`Pemberitahuan: ${res.error || 'Gagal sinkron'}`);
+      }
+      setTimeout(() => setSyncNotice(null), 5000);
+    } catch (err: any) {
+      setSyncNotice('Gagal menyinkronkan nilai tugas: ' + (err.message || ''));
+      setTimeout(() => setSyncNotice(null), 5000);
+    } finally {
+      setSyncingAssignments(false);
+    }
+  };
   
   // We can track the max number of tugas per subject to render columns
   const [tugasCountPerSubject, setTugasCountPerSubject] = useState<Record<string, number>>({});
@@ -475,7 +497,17 @@ export default function GradesGuru() {
                </>
              )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleSyncAssignments}
+              disabled={syncingAssignments}
+              className="flex items-center space-x-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-3.5 py-2 rounded-xl transition-all font-bold text-xs cursor-pointer shadow-2xs active:scale-95"
+              title="Tarik seluruh nilai tugas dan kuis online siswa yang telah dinilai langsung ke dalam tabel rapor"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingAssignments ? 'animate-spin' : ''}`} />
+              <span>{syncingAssignments ? 'Menyinkronkan...' : 'Sinkronkan Nilai Tugas ke Rapor'}</span>
+            </button>
             <button
               onClick={() => setIsKkmModalOpen(true)}
               className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl transition-colors font-medium text-xs cursor-pointer shadow-2xs"
@@ -494,6 +526,13 @@ export default function GradesGuru() {
             </button>
           </div>
         </div>
+
+        {syncNotice && (
+          <div className="mx-4 my-3 p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-semibold flex items-center justify-between animate-in fade-in duration-200">
+            <span>✨ {syncNotice}</span>
+            <button onClick={() => setSyncNotice(null)} className="text-emerald-600 hover:text-emerald-900 font-bold ml-2">✕</button>
+          </div>
+        )}
 
         {loading ? (
           <div className="p-12 flex justify-center">

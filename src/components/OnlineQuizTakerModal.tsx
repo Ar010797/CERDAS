@@ -30,6 +30,8 @@ import {
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { sendPushAlert } from '../lib/fcmPush';
+import { syncAssignmentGradeToRapot } from '../lib/gradeSync';
+import { triggerFloatingNotification } from './FloatingNotificationCenter';
 
 interface OnlineQuizTakerModalProps {
   assignment: {
@@ -162,6 +164,22 @@ export default function OnlineQuizTakerModal({
       // 2. Save submission to Firestore
       await setDoc(doc(db, 'pengumpulan_tugas', subId), payload, { merge: true });
 
+      // 2b. Sinkronisasi otomatis nilai kuis tugas ke buku rapot bagian tugas (grades/{studentId}.gradesBySubject)
+      try {
+        await syncAssignmentGradeToRapot({
+          studentId: student.id,
+          studentName: student.name,
+          classId: assignment.classId,
+          subject: assignment.subject || 'Umum',
+          score: result.totalScore,
+          maxScore: assignment.maxScore || 100,
+          assignmentId: assignment.id,
+          assignmentTitle: assignment.title
+        });
+      } catch (syncErr) {
+        console.warn('Sync quiz grade to rapot error:', syncErr);
+      }
+
       // 3. Clear draft from localStorage
       clearQuizDraft(assignment.id, student.id);
 
@@ -171,6 +189,15 @@ export default function OnlineQuizTakerModal({
       } catch (err) {
         console.warn('Audio feedback err:', err);
       }
+
+      // Memicu notifikasi mengambang (Floating Heads-Up Banner)
+      triggerFloatingNotification({
+        title: `Hasil Kuis: ${assignment.title}`,
+        body: `Ananda ${student.name} meraih nilai ${result.totalScore} dari ${result.maxScore}! Nilai otomatis tersimpan ke rapor.`,
+        type: 'grade_released',
+        category: assignment.subject,
+        url: '/assignments'
+      });
 
       // 5. Send push notification alert
       sendPushAlert({

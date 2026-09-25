@@ -542,16 +542,16 @@ export default function Announcements() {
             return (
               <div
                 key={ann.id}
-                className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 hover:shadow-md transition-all group relative overflow-hidden"
+                className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xs border border-slate-200/80 dark:border-slate-800 hover:shadow-md transition-all group relative overflow-hidden"
               >
                 {isUrgent && (
-                  <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-rose-500" />
+                  <div className="absolute top-0 left-0 bottom-0 w-1.5 sm:w-2 bg-rose-500" />
                 )}
 
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4 w-full">
+                  <div className="flex items-start gap-3 sm:gap-3.5 w-full flex-1 min-w-0">
                     <div
-                      className={`p-3 rounded-2xl shrink-0 ${
+                      className={`p-2.5 sm:p-3 rounded-2xl shrink-0 ${
                         isUrgent
                           ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
                           : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
@@ -568,9 +568,9 @@ export default function Announcements() {
                       )}
                     </div>
 
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 w-full">
                       {/* Badges */}
-                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
                         {/* Author Badge */}
                         <span
                           className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
@@ -605,7 +605,7 @@ export default function Announcements() {
                       </div>
 
                       {/* Title */}
-                      <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-snug">
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-snug break-words">
                         {ann.title}
                       </h3>
 
@@ -620,18 +620,18 @@ export default function Announcements() {
                       </p>
 
                       {/* Content */}
-                      <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 bg-slate-50/80 dark:bg-slate-800/60 p-4 rounded-xl leading-relaxed whitespace-pre-wrap break-words border border-slate-100 dark:border-slate-800">
+                      <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 bg-slate-50/80 dark:bg-slate-800/60 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl leading-relaxed whitespace-pre-wrap break-words border border-slate-100 dark:border-slate-800 w-full">
                         {ann.content}
                       </div>
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-1.5 self-end sm:self-start pt-2 sm:pt-0">
+                  <div className="w-full sm:w-auto shrink-0 flex items-center justify-between sm:justify-end gap-2 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800 mt-1 sm:mt-0">
                     <button
                       type="button"
                       onClick={() => generateAnnouncementPDF(ann, schoolProfile)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer hover:shadow-2xs active:scale-95"
+                      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer hover:shadow-2xs active:scale-95"
                       title="Download Surat / Lembar Pengumuman Resmi PDF"
                     >
                       <Download className="w-3.5 h-3.5" />
@@ -641,7 +641,7 @@ export default function Announcements() {
                       <button
                         type="button"
                         onClick={() => setAnnouncementToDelete(ann)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800/60 transition-all cursor-pointer hover:shadow-2xs active:scale-95"
+                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800/60 transition-all cursor-pointer hover:shadow-2xs active:scale-95"
                         title="Hapus pengumuman ini (yang salah atau sudah berlalu)"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

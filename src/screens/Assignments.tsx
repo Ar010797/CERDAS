@@ -70,6 +70,8 @@ import OnlineQuizTakerModal from '../components/OnlineQuizTakerModal';
 import QuizQuestionEditor from '../components/QuizQuestionEditor';
 import { playNotificationSound } from '../lib/audioNotifier';
 import { sendPushAlert } from '../lib/fcmPush';
+import { syncAssignmentGradeToRapot } from '../lib/gradeSync';
+import { triggerFloatingNotification } from '../components/FloatingNotificationCenter';
 
 export interface Assignment {
   id: string;
@@ -596,12 +598,37 @@ export default function AssignmentsScreen() {
 
       await setDoc(doc(db, 'pengumpulan_tugas', subId), payload, { merge: true });
 
+      // Sinkronisasi otomatis ke dokumen nilai rapot siswa (grades/{studentId}.gradesBySubject)
+      try {
+        await syncAssignmentGradeToRapot({
+          studentId: activeSubmissionStudent.student.id,
+          studentName: activeSubmissionStudent.student.name,
+          classId: selectedClass,
+          subject: selectedAssignmentForGrading.subject || 'Umum',
+          score: Number(gradeInput),
+          maxScore: selectedAssignmentForGrading.maxScore || 100,
+          assignmentId: selectedAssignmentForGrading.id,
+          assignmentTitle: selectedAssignmentForGrading.title
+        });
+      } catch (syncErr) {
+        console.warn('Gagal sync nilai tugas ke rapot:', syncErr);
+      }
+
       // Play fanfare sound for grade release
       try {
         playNotificationSound('grade_released');
       } catch (soundErr) {
         console.warn('Audio feedback notice:', soundErr);
       }
+
+      // Memicu notifikasi mengambang (Floating Heads-Up Banner)
+      triggerFloatingNotification({
+        title: `Nilai Tugas Diumumkan: ${selectedAssignmentForGrading.title}`,
+        body: `Nilai ananda ${activeSubmissionStudent.student.name}: ${gradeInput} / ${selectedAssignmentForGrading.maxScore}. Catatan guru: "${feedbackInput.trim() || 'Alhamdulillah, tetap semangat!'}"`,
+        type: 'grade_released',
+        category: selectedAssignmentForGrading.subject || 'Tugas',
+        url: '/assignments'
+      });
 
       // Send automated push notification alert to student & parent
       sendPushAlert({

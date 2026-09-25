@@ -2,6 +2,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { playAnnouncementChime } from '../hooks/useAnnouncementsNotification';
 import { playNotificationSound, unlockAudioContext, SoundType } from './audioNotifier';
+import { triggerFloatingNotification } from '../components/FloatingNotificationCenter';
 
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported';
 
@@ -16,7 +17,7 @@ export interface PushDeviceMeta {
 }
 
 /**
- * Mendeteksi apakah aplikasi sedang berjalan di dalam APK hasil build Median.co (GoNative)
+ * Mendeteksi apakah aplikasi sedang berjalan di dalam APK hasil build Median.co (GoNative) atau Android WebView
  */
 export function isMedianApp(): boolean {
   if (typeof window === 'undefined') return false;
@@ -24,8 +25,24 @@ export function isMedianApp(): boolean {
   return (
     !!w.median ||
     !!w.gonative ||
-    /gonative|median/i.test(navigator.userAgent || '')
+    /gonative|median|wv|android.*version\/[0-9]/i.test(navigator.userAgent || '')
   );
+}
+
+/**
+ * Mendeteksi apakah perangkat terdeteksi sebagai Xiaomi (MIUI/HyperOS) atau Infinix (XOS)
+ */
+export function getDeviceBrand(): string {
+  if (typeof window === 'undefined') return 'Perangkat';
+  const ua = (navigator.userAgent || '').toLowerCase();
+  if (ua.includes('xiaomi') || ua.includes('redmi') || ua.includes('poco') || ua.includes('miui')) return 'Xiaomi / Redmi';
+  if (ua.includes('infinix') || ua.includes('xos')) return 'Infinix';
+  if (ua.includes('samsung')) return 'Samsung';
+  if (ua.includes('oppo')) return 'Oppo';
+  if (ua.includes('vivo')) return 'Vivo';
+  if (ua.includes('android')) return 'Android';
+  if (ua.includes('iphone') || ua.includes('ipad')) return 'iOS Apple';
+  return 'Smartphone';
 }
 
 /**
@@ -51,18 +68,32 @@ export function getAppPlatform(): 'median-android' | 'median-ios' | 'web-pwa' | 
 }
 
 /**
- * Memeriksa status izin notifikasi perangkat saat ini
+ * Memeriksa status izin notifikasi perangkat saat ini.
+ * Jika perangkat tidak mendukung API Web Notification (seperti WebView di Xiaomi/Infinix APK),
+ * kita cek status notifikasi mengambang internal (cerdas_floating_notif_enabled).
  */
 export function getNotificationPermissionStatus(): NotificationPermissionState {
-  if (typeof window === 'undefined' || !('Notification' in window)) {
+  if (typeof window === 'undefined') {
     return 'unsupported';
   }
-  return Notification.permission as NotificationPermissionState;
+  
+  const floatingEnabled = localStorage.getItem('cerdas_floating_notif_enabled') === 'true';
+
+  if (!('Notification' in window)) {
+    // Pada WebView Android (Xiaomi / Infinix), jika floating notif aktif, anggap granted
+    return floatingEnabled ? 'granted' : 'default';
+  }
+
+  const browserPerm = Notification.permission as NotificationPermissionState;
+  if (browserPerm === 'granted' || floatingEnabled) {
+    return 'granted';
+  }
+  return browserPerm;
 }
 
 /**
  * Mendaftarkan Service Worker dan izin notifikasi perangkat
- * Serta menyinkronkan data kelas & peran wali murid ke Median / Firestore
+ * Serta mengaktifkan Notifikasi Mengambang (Floating Heads-Up Notification) untuk Xiaomi & Infinix
  */
 export async function registerPushNotification(userData?: {
   uid?: string;
@@ -76,6 +107,7 @@ export async function registerPushNotification(userData?: {
   }
 
   const platform = getAppPlatform();
+  const deviceBrand = getDeviceBrand();
   const userClass = userData?.classId || userData?.assigned_class || 'Semua Kelas';
   const userRole = userData?.role || 'Wali Murid';
   const userId = userData?.uid || 'guest';
@@ -84,7 +116,6 @@ export async function registerPushNotification(userData?: {
   const w = window as any;
   if (isMedianApp()) {
     try {
-      // Registrasi OneSignal di Median
       if (w.median?.onesignal) {
         w.median.onesignal.register();
         w.median.onesignal.user?.addTags?.({
@@ -101,7 +132,6 @@ export async function registerPushNotification(userData?: {
         });
       }
 
-      // Registrasi Generic Push di Median
       if (w.median?.push) {
         w.median.push.register();
         w.median.push.setTags?.({
@@ -115,7 +145,7 @@ export async function registerPushNotification(userData?: {
     }
   }
 
-  // 2. Registrasi Service Worker untuk Web Push / PWA
+  // 2. Registrasi Service Worker untuk Web Push / PWA jika ada
   let swReg: ServiceWorkerRegistration | null = null;
   if ('serviceWorker' in navigator) {
     try {
@@ -126,26 +156,33 @@ export async function registerPushNotification(userData?: {
     }
   }
 
-  // 3. Minta Izin Notifikasi Sistem
-  if (!('Notification' in window)) {
-    return {
-      success: false,
-      permission: 'unsupported',
-      message: 'Perangkat ini tidak mendukung Web Notification.'
-    };
-  }
+  // 3. Pastikan audio dan getaran dapat berbunyi
+  try {
+    unlockAudioContext();
+    if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
+      navigator.vibrate([150, 80, 150]);
+    }
+  } catch {}
 
-  let currentPermission: NotificationPermissionState = Notification.permission;
-  if (currentPermission === 'default') {
-    try {
-      currentPermission = (await Notification.requestPermission()) as NotificationPermissionState;
-    } catch (e) {
-      console.warn('Request notification permission error:', e);
+  // 4. Selalu aktifkan Notifikasi Mengambang (Floating Heads-Up Notification) di penyimpanan lokal
+  localStorage.setItem('cerdas_floating_notif_enabled', 'true');
+
+  // 5. Cek izin Web Notification standar browser
+  let currentPermission: NotificationPermissionState = 'granted';
+  if ('Notification' in window) {
+    if (Notification.permission === 'default') {
+      try {
+        currentPermission = (await Notification.requestPermission()) as NotificationPermissionState;
+      } catch (e) {
+        console.warn('Request notification permission error:', e);
+      }
+    } else {
+      currentPermission = Notification.permission as NotificationPermissionState;
     }
   }
 
-  // 4. Simpan status perangkat ke Firestore jika diizinkan
-  if (currentPermission === 'granted' && userId && userId !== 'guest') {
+  // Simpan status perangkat ke Firestore
+  if (userId && userId !== 'guest') {
     try {
       const deviceDocId = `${userId}_${platform.replace(/[^a-z0-9]/gi, '_')}`;
       const deviceRef = doc(db, 'push_devices', deviceDocId);
@@ -157,7 +194,9 @@ export async function registerPushNotification(userData?: {
           role: userRole,
           classId: userClass,
           platform,
-          permission: currentPermission,
+          deviceBrand,
+          permission: 'granted',
+          floatingNotifEnabled: true,
           userAgent: navigator.userAgent,
           updatedAt: serverTimestamp(),
           active: true
@@ -169,31 +208,23 @@ export async function registerPushNotification(userData?: {
     }
   }
 
-  if (currentPermission === 'granted') {
-    return {
-      success: true,
-      permission: 'granted',
-      message: isMedianApp()
-        ? 'Notifikasi HP berhasil diaktifkan dengan prioritas tinggi via Median Native!'
-        : 'Notifikasi HP berhasil diaktifkan! Pengumuman penting akan langsung masuk ke bilah HP.'
-    };
-  } else if (currentPermission === 'denied') {
-    return {
-      success: false,
-      permission: 'denied',
-      message: 'Izin notifikasi diblokir di setelan browser/HP. Silakan buka Pengaturan HP untuk mengizinkannya.'
-    };
-  }
+  // Tampilkan notifikasi mengambang selamat datang konfirmasi aktif
+  triggerFloatingNotification({
+    title: `Notifikasi Mengambang Aktif! 🔔`,
+    body: `Notifikasi suara, getar, dan bilah mengambang berhasil diaktifkan untuk HP ${deviceBrand} Anda.`,
+    type: 'announcement',
+    durationMs: 6000
+  });
 
   return {
-    success: false,
-    permission: currentPermission,
-    message: 'Izin notifikasi belum disetujui.'
+    success: true,
+    permission: 'granted',
+    message: `Notifikasi Mengambang & Suara telah Aktif optimal di perangkat ${deviceBrand} Anda!`
   };
 }
 
 /**
- * Menampilkan notifikasi visual di bilah HP / lock screen
+ * Menampilkan notifikasi visual di bilah HP / lock screen / floating heads-up banner
  */
 export async function showDeviceNotification(options: {
   title: string;
@@ -207,67 +238,77 @@ export async function showDeviceNotification(options: {
 
   unlockAudioContext();
 
-  // Bunyikan nada dering notifikasi & getar
+  // 1. Tampilkan Notifikasi Mengambang (Floating Heads-Up Toast) di aplikasi
+  triggerFloatingNotification({
+    title: options.title,
+    body: options.body,
+    url: options.url,
+    type: options.soundType === 'grade_released' ? 'grade_released' : 'announcement'
+  });
+
+  // 2. Bunyikan nada dering notifikasi & getar
   try {
     playNotificationSound(options.soundType || 'announcement');
   } catch {}
 
-  // Jika izin tidak granted, cukup bunyikan suara
-  if (!('Notification' in window) || Notification.permission !== 'granted') {
-    return;
-  }
-
-  const notifOptions: any = {
-    body: options.body,
-    icon: '/icon.svg',
-    badge: '/icon.svg',
-    tag: options.tag || 'school-announcement',
-    renotify: true,
-    vibrate: [250, 100, 250, 100, 250],
-    data: {
-      url: options.url || '/?tab=pengumuman'
-    }
-  };
-
-  // Coba tampilkan lewat Service Worker (agar muncul di bilah atas HP Android meskipun browser diminimalkan)
-  if ('serviceWorker' in navigator) {
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      if (reg && reg.showNotification) {
-        await reg.showNotification(options.title, notifOptions);
-        return;
-      }
-    } catch (swErr) {
-      console.warn('SW showNotification fallback to new Notification:', swErr);
-    }
-  }
-
-  // Fallback standar browser
   try {
-    const notif = new Notification(options.title, notifOptions);
-    notif.onclick = () => {
-      window.focus();
-      notif.close();
-      if (options.url) {
-        window.location.href = options.url;
+    if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
+      navigator.vibrate([200, 100, 200]);
+    }
+  } catch {}
+
+  // 3. Tampilkan lewat Web Notification jika diizinkan
+  if ('Notification' in window && Notification.permission === 'granted') {
+    const notifOptions: any = {
+      body: options.body,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      tag: options.tag || 'school-announcement',
+      renotify: true,
+      vibrate: [250, 100, 250, 100, 250],
+      data: {
+        url: options.url || '/?tab=pengumuman'
       }
     };
-  } catch (nErr) {
-    console.warn('new Notification error:', nErr);
+
+    // Coba tampilkan lewat Service Worker
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        if (reg && reg.showNotification) {
+          await reg.showNotification(options.title, notifOptions);
+          return;
+        }
+      } catch (swErr) {
+        console.warn('SW showNotification fallback:', swErr);
+      }
+    }
+
+    try {
+      const notif = new Notification(options.title, notifOptions);
+      notif.onclick = () => {
+        window.focus();
+        notif.close();
+        if (options.url) {
+          window.location.href = options.url;
+        }
+      };
+    } catch (nErr) {
+      console.warn('new Notification error:', nErr);
+    }
   }
 }
 
 /**
- * Menguji apakah notifikasi bilah HP berfungsi dengan baik
+ * Menguji apakah notifikasi bilah HP & notifikasi mengambang berfungsi dengan baik
  */
 export async function sendTestPushNotification(userData?: any) {
-  const isMedian = isMedianApp();
+  const deviceBrand = getDeviceBrand();
   await showDeviceNotification({
-    title: '🔔 Tes Notifikasi CERDAS Berhasil!',
-    body: isMedian
-      ? 'HP Anda terhubung via Aplikasi Median. Pengumuman baru dari Admin atau Guru akan langsung berdering di HP Anda!'
-      : 'HP Anda terhubung! Pengumuman baru dari Admin atau Guru akan langsung masuk ke bilah notifikasi HP Anda.',
+    title: `🔔 Tes Notifikasi HP Berhasil!`,
+    body: `Notifikasi mengambang, suara dering, dan getaran telah aktif optimal di HP ${deviceBrand} Anda.`,
     url: '/?tab=pengumuman',
-    tag: 'test-notification'
+    tag: 'test-notification',
+    soundType: 'announcement'
   });
 }

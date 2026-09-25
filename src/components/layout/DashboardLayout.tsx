@@ -13,6 +13,7 @@ import { useScheduleReminder } from '../../hooks/useScheduleReminder';
 import { useAssignmentDeadlineReminder } from '../../hooks/useAssignmentDeadlineReminder';
 import { OfflineIndicator } from '../OfflineIndicator';
 import { PWAInstallButton } from '../PWAInstallButton';
+import FloatingNotificationCenter from '../FloatingNotificationCenter';
 import {
   LayoutDashboard,
   Users,
@@ -392,6 +393,9 @@ export const DashboardLayout = () => {
 
       {/* Floating Offline Indicator when user loses network */}
       <OfflineIndicator />
+
+      {/* Global Floating Heads-Up Notification Center (Support Xiaomi, Infinix, Android WebView, PWA) */}
+      <FloatingNotificationCenter />
     </div>
   );
 };
