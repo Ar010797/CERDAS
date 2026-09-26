@@ -4,6 +4,7 @@ import { db } from '../../lib/firebase';
 import { Upload, Plus, Trash2, Search, FileSpreadsheet, Filter, Edit2, X, FileDown, AlertTriangle, CheckCircle, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../contexts/AuthContext';
+import { normalizeClassName, CLASS_GROUPS, POPULAR_CLASSES, ALL_AVAILABLE_CLASSES } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -22,7 +23,7 @@ export default function StudentsAdmin() {
   const isAdmin = userData?.role === 'Admin';
   
   const [selectedClass, setSelectedClass] = useState<string>(
-    isAdmin ? 'Semua Kelas' : (userData?.assigned_class || 'Kelas 1')
+    isAdmin ? 'Semua Kelas' : (userData?.assigned_class || 'Kelas 1 A')
   );
   
   const [students, setStudents] = useState<Student[]>([]);
@@ -48,8 +49,8 @@ export default function StudentsAdmin() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const classesList = ['Semua Kelas', 'Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
-  const singleClasses = classesList.slice(1);
+  const classesList = ['Semua Kelas', ...ALL_AVAILABLE_CLASSES];
+  const singleClasses = ALL_AVAILABLE_CLASSES;
 
   useEffect(() => {
     setLoading(true);
@@ -78,38 +79,44 @@ export default function StudentsAdmin() {
   const handleDownloadTemplate = () => {
     const wb = XLSX.utils.book_new();
     
-    const headers = [['Nomor Absen', 'Nama Lengkap', 'NISN', 'Jenis Kelamin (L/P)', 'Tempat Lahir', 'Tanggal Lahir (YYYY-MM-DD)']];
+    const headers = [
+      ['Nomor Absen', 'Nama Lengkap', 'NISN', 'Kelas', 'Jenis Kelamin (L/P)', 'Nomor HP Wali Murid', 'Tempat Lahir', 'Tanggal Lahir (YYYY-MM-DD)']
+    ];
     const data = [
-      ['01', 'Ahmad Budi', '1234567890', 'L', 'Jakarta', '2010-05-14'],
-      ['02', 'Siti Aminah', '0987654321', 'P', 'Bandung', '2010-08-20']
+      ['01', 'Ahmad Budi Santoso', '1234567890', 'Kelas 1 A', 'L', '08123456789', 'Jakarta', '2018-05-14'],
+      ['02', 'Siti Nur Aminah', '0987654321', 'Kelas 1 A', 'P', '08129876543', 'Bandung', '2018-08-20'],
+      ['01', 'Rian Hidayat', '1122334455', 'Kelas 1 B', 'L', '08131122334', 'Semarang', '2018-03-11'],
+      ['02', 'Dewi Anggraini', '5566778899', 'Kelas 1 B', 'P', '08135566778', 'Yogyakarta', '2018-09-04'],
+      ['01', 'Farhan Ramadhan', '2233445566', 'Kelas 2 A', 'L', '08137788990', 'Surabaya', '2017-04-15'],
+      ['02', 'Zahra Aulia', '3344556677', 'Kelas 2 B', 'P', '08138899001', 'Malang', '2017-10-22'],
+      ['01', 'Muhammad Iqbal', '4455667788', 'Kelas 7 MTs A', 'L', '08139900112', 'Kediri', '2012-01-18'],
+      ['02', 'Fatimah Az-Zahra', '5566778800', 'Kelas 7 MTs B', 'P', '08130011223', 'Blitar', '2012-07-29'],
+      ['01', 'Bagas Saputra', '6677889900', 'Kelas 8 MTs A', 'L', '08131122330', 'Jember', '2011-06-12'],
+      ['01', 'Nadia Syahrini', '7788990011', 'Kelas 9 MTs A', 'P', '08132233440', 'Banyuwangi', '2010-02-14'],
+      ['02', 'Dimas Prasetyo', '8899001122', 'Kelas 9 MTs B', 'L', '08133344550', 'Madiun', '2010-08-08']
     ];
     
     const ws = XLSX.utils.aoa_to_sheet([...headers, ...data]);
     
-    // Auto-size columns slightly
-    const wscols = [
-      {wch: 15},
-      {wch: 30},
-      {wch: 15},
-      {wch: 20},
-      {wch: 20},
-      {wch: 25},
+    // Auto-size columns
+    ws['!cols'] = [
+      { wch: 14 },
+      { wch: 28 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 25 },
     ];
-    ws['!cols'] = wscols;
 
-    XLSX.utils.book_append_sheet(wb, ws, 'Template');
-    XLSX.writeFile(wb, 'Template_Data_Siswa.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, 'Data_Siswa');
+    XLSX.writeFile(wb, 'Template_Seluruh_Siswa_Per_Kelas.xlsx');
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    let targetClass = selectedClass;
-    if (isAdmin && selectedClass === 'Semua Kelas') {
-      alert('Pilih kelas spesifik (misal: Kelas 1) terlebih dahulu sebelum mengimpor.');
-      return;
-    }
 
     setIsImporting(true);
     try {
@@ -117,35 +124,107 @@ export default function StudentsAdmin() {
       const workbook = XLSX.read(data);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-      
-      const batch = writeBatch(db);
-      const studentsRef = collection(db, 'students');
-      let count = 0;
 
-      // Skip header row
-      // Expected columns: No Absen, Nama, NISN, L/P, Tempat Lahir, Tanggal Lahir
-      for (let i = 1; i < jsonData.length; i++) {
-        const row = jsonData[i] as any[];
-        if (!row || row.length === 0 || !row[1]) continue; // Assume Nama is at index 1 and required
-        
-        const newDocRef = doc(studentsRef);
-        batch.set(newDocRef, {
-          absen_number: String(row[0] || ''),
-          name: String(row[1] || ''),
-          nisn: String(row[2] || ''),
-          gender: String(row[3] || 'L'),
-          birthPlace: String(row[4] || ''),
-          birthDate: String(row[5] || ''),
-          classId: targetClass, 
-        });
-        count++;
+      if (jsonData.length <= 1) {
+        showToast('Berkas template kosong atau tidak memiliki baris data siswa.', 'error');
+        setIsImporting(false);
+        return;
       }
 
-      await batch.commit();
-      alert(`Berhasil mengimpor ${count} data siswa ke ${targetClass}!`);
-    } catch (error) {
+      // Deteksi Header Kolom
+      const headerRow = (jsonData[0] as any[]).map((h) => String(h || '').trim().toLowerCase());
+      let colAbsen = headerRow.findIndex((h) => h.includes('absen') || h.includes('no'));
+      let colNama = headerRow.findIndex((h) => h.includes('nama'));
+      let colNisn = headerRow.findIndex((h) => h.includes('nisn') || h.includes('induk'));
+      let colKelas = headerRow.findIndex((h) => h.includes('kelas') || h.includes('tingkat'));
+      let colGender = headerRow.findIndex((h) => h.includes('kelamin') || h.includes('gender') || h === 'l/p');
+      let colPhone = headerRow.findIndex((h) => h.includes('hp') || h.includes('telepon') || h.includes('wa') || h.includes('wali'));
+      let colTempat = headerRow.findIndex((h) => h.includes('tempat'));
+      let colTanggal = headerRow.findIndex((h) => h.includes('tanggal') || h.includes('lahir'));
+
+      // Positional fallback jika header format berbeda
+      if (colNama === -1) colNama = 1;
+      if (colAbsen === -1) colAbsen = 0;
+      if (colNisn === -1) colNisn = 2;
+      if (colKelas === -1 && headerRow.length >= 7) colKelas = 3;
+      if (colGender === -1) colGender = colKelas === 3 ? 4 : 3;
+      if (colPhone === -1) colPhone = colKelas === 3 ? 5 : -1;
+      if (colTempat === -1) colTempat = colKelas === 3 ? 6 : 4;
+      if (colTanggal === -1) colTanggal = colKelas === 3 ? 7 : 5;
+
+      const studentsRef = collection(db, 'students');
+      const classCounters: Record<string, number> = {};
+      let totalCount = 0;
+
+      // Kumpulkan seluruh data siswa yang valid
+      const studentsToInsert: any[] = [];
+      for (let i = 1; i < jsonData.length; i++) {
+        const row = jsonData[i] as any[];
+        if (!row || row.length === 0) continue;
+
+        const rawName = String(row[colNama] || '').trim();
+        if (!rawName) continue; // Nama wajib ada
+
+        // Tentukan kelas masing-masing siswa secara otomatis
+        let studentClass = '';
+        if (colKelas !== -1 && row[colKelas]) {
+          studentClass = normalizeClassName(String(row[colKelas]));
+        } else if (selectedClass !== 'Semua Kelas') {
+          studentClass = selectedClass;
+        } else {
+          studentClass = 'Kelas 1 A';
+        }
+
+        const rawGender = String(row[colGender] || 'L').trim().toUpperCase();
+        const gender = rawGender.startsWith('P') ? 'P' : 'L';
+
+        studentsToInsert.push({
+          absen_number: String(row[colAbsen] || `${totalCount + 1}`).trim(),
+          name: rawName,
+          nisn: String(row[colNisn] || '').trim(),
+          gender,
+          classId: studentClass,
+          parentPhone: colPhone !== -1 ? String(row[colPhone] || '').trim() : '',
+          birthPlace: colTempat !== -1 ? String(row[colTempat] || '').trim() : '',
+          birthDate: colTanggal !== -1 ? String(row[colTanggal] || '').trim() : '',
+          catatanWaliKelas: '',
+          importedAt: new Date().toISOString()
+        });
+
+        classCounters[studentClass] = (classCounters[studentClass] || 0) + 1;
+        totalCount++;
+      }
+
+      if (studentsToInsert.length === 0) {
+        showToast('Tidak ada data siswa yang valid untuk diimpor.', 'error');
+        setIsImporting(false);
+        return;
+      }
+
+      // Batch Write in Chunks of 400 (Firebase batch limit is 500)
+      const chunkSize = 400;
+      for (let i = 0; i < studentsToInsert.length; i += chunkSize) {
+        const chunk = studentsToInsert.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        for (const item of chunk) {
+          const newDocRef = doc(studentsRef);
+          batch.set(newDocRef, item);
+        }
+        await batch.commit();
+      }
+
+      // Buat ringkasan pembagian per kelas
+      const classSummary = Object.entries(classCounters)
+        .map(([cls, count]) => `${cls}: ${count} siswa`)
+        .join(', ');
+
+      showToast(
+        `Berhasil mengimpor ${totalCount} siswa! Otomatis terbagi ke ${Object.keys(classCounters).length} kelas (${classSummary}).`,
+        'success'
+      );
+    } catch (error: any) {
       console.error(error);
-      alert('Gagal mengimpor data excel.');
+      showToast('Gagal mengimpor data excel: ' + (error?.message || 'Format tidak valid'), 'error');
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -297,11 +376,12 @@ export default function StudentsAdmin() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isImporting || (isAdmin && selectedClass === 'Semua Kelas')}
-            className="flex items-center space-x-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-4 py-2.5 rounded-xl transition-colors font-medium text-sm disabled:opacity-50"
+            disabled={isImporting}
+            className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl transition-all font-bold text-sm shadow-sm shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
+            title="Impor seluruh data siswa dari template Excel (Otomatis terbagi ke kelasnya masing-masing)"
           >
-            {isImporting ? <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-            <span>{isImporting ? 'Mengimpor...' : 'Impor Excel'}</span>
+            {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            <span>{isImporting ? 'Mengimpor Seluruh Siswa...' : 'Impor Data Siswa'}</span>
           </button>
           
           {isAdmin && selectedClass !== 'Semua Kelas' && (
@@ -317,8 +397,7 @@ export default function StudentsAdmin() {
 
           <button 
             onClick={() => handleOpenModal()}
-            disabled={isAdmin && selectedClass === 'Semua Kelas'}
-            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm shadow-indigo-200 disabled:opacity-50"
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm shadow-indigo-200 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Siswa</span>
@@ -340,14 +419,23 @@ export default function StudentsAdmin() {
           </div>
           
           {isAdmin && (
-            <div className="relative w-full sm:w-48">
+            <div className="relative w-full sm:w-64">
               <Filter className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <select 
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-sm appearance-none"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-sm font-semibold text-slate-700 cursor-pointer"
               >
-                {classesList.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="Semua Kelas">📢 Semua Kelas (Seluruh Siswa)</option>
+                {CLASS_GROUPS.map((group) => (
+                  <optgroup key={group.groupName} label={group.groupName}>
+                    {group.classes.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {cls}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
           )}
@@ -581,9 +669,17 @@ export default function StudentsAdmin() {
                   <select
                     value={formData.classId}
                     onChange={(e) => setFormData({...formData, classId: e.target.value})}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-semibold text-slate-700"
                   >
-                    {singleClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                    {CLASS_GROUPS.map((group) => (
+                      <optgroup key={group.groupName} label={group.groupName}>
+                        {group.classes.map((cls) => (
+                          <option key={cls} value={cls}>
+                            {cls}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
               </div>

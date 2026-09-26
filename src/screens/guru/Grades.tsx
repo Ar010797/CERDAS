@@ -7,6 +7,8 @@ import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
 import { syncAllClassAssignmentGrades } from '../../lib/gradeSync';
+import RaporPreviewModal, { RaporStudentInfo } from '../../components/RaporPreviewModal';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -23,14 +25,14 @@ interface GradeSubject {
   pas: string;
 }
 
-const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
+const CLASSES_LIST = ALL_AVAILABLE_CLASSES;
 
 export default function GradesGuru() {
   const { userData } = useAuth();
   const isAdmin = userData?.role === 'Admin';
   
   const [selectedClass, setSelectedClass] = useState(
-    isAdmin ? 'Kelas 1' : (userData?.assigned_class || 'Kelas 1')
+    isAdmin ? 'Kelas 1 A' : (userData?.assigned_class || 'Kelas 1 A')
   );
   
   const [students, setStudents] = useState<Student[]>([]);
@@ -40,6 +42,7 @@ export default function GradesGuru() {
   const [isKkmModalOpen, setIsKkmModalOpen] = useState(false);
   const [savingKkm, setSavingKkm] = useState(false);
   const [schoolSettings, setSchoolSettings] = useState<any>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', kkmGlobal: '75' });
+  const [previewStudent, setPreviewStudent] = useState<RaporStudentInfo | null>(null);
   
   const [loading, setLoading] = useState(true);
 
@@ -591,11 +594,20 @@ export default function GradesGuru() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => exportPDF(student)}
-                          className="p-2 text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors inline-flex items-center"
-                          title="Cetak PDF Rapor"
+                          onClick={() => {
+                            setPreviewStudent({
+                              id: student.id,
+                              name: student.name,
+                              nisn: student.nisn,
+                              absen_number: student.absen_number,
+                              classId: student.classId || selectedClass
+                            });
+                          }}
+                          className="p-2 text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-xl transition-colors inline-flex items-center font-bold text-xs gap-1"
+                          title="Tinjau Dulu & Unduh PDF Rapor"
                         >
                           <FileDown className="w-4 h-4" />
+                          <span className="hidden sm:inline">Tinjau Rapor</span>
                         </button>
                       </td>
                     </tr>
@@ -866,6 +878,22 @@ export default function GradesGuru() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Tinjau Dulu Rapor Siswa Sebelum Unduh */}
+      {previewStudent && (
+        <RaporPreviewModal
+          isOpen={Boolean(previewStudent)}
+          onClose={() => setPreviewStudent(null)}
+          student={previewStudent}
+          schoolSettings={schoolSettings}
+          subjects={subjects}
+          gradesData={grades[previewStudent.id || ''] || {}}
+          kkmMap={kkmMap}
+          academicYear={schoolSettings?.tahunAjaran || '2026/2027'}
+          teacherName={userData?.name}
+          isAdmin={isAdmin}
+        />
       )}
     </div>
   );

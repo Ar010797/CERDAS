@@ -37,6 +37,8 @@ export default function AssignmentDeadlineBell({ customClassId }: Props) {
     triggerSimulation
   } = useAssignmentDeadlineReminder(customClassId);
 
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
   // Close dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -80,18 +82,18 @@ export default function AssignmentDeadlineBell({ customClassId }: Props) {
         )}
       </button>
 
-      {/* Dropdown Panel */}
+      {/* Dropdown Panel - Full Width on Mobile, Absolute Popover on Desktop */}
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && !isFullScreen && (
           <motion.div
             initial={{ opacity: 0, y: 8, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 mt-2 w-80 sm:w-96 rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden"
+            className="fixed inset-x-2.5 top-16 sm:absolute sm:inset-auto sm:right-0 sm:mt-2 sm:w-96 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 z-[110] overflow-hidden max-h-[85vh] flex flex-col"
           >
             {/* Header */}
-            <div className="p-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex items-center justify-between">
+            <div className="p-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Clock className="w-5 h-5 text-amber-200" />
                 <div>
@@ -103,6 +105,15 @@ export default function AssignmentDeadlineBell({ customClassId }: Props) {
               </div>
 
               <div className="flex items-center gap-1">
+                {/* Maximize Full Screen Button */}
+                <button
+                  onClick={() => setIsFullScreen(true)}
+                  className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors"
+                  title="Tampilkan Full Layar"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-200" />
+                </button>
+
                 {/* Sound toggle button */}
                 <button
                   onClick={toggleSound}
@@ -236,6 +247,92 @@ export default function AssignmentDeadlineBell({ customClassId }: Props) {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Full Screen View Modal if User Expands */}
+      <AnimatePresence>
+        {isFullScreen && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
+            >
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Clock className="w-6 h-6 text-amber-200" />
+                  <div>
+                    <h3 className="font-extrabold text-base sm:text-lg leading-tight">Pemberitahuan Batas Waktu Tugas (Layar Penuh)</h3>
+                    <p className="text-xs text-amber-100">{alertCount > 0 ? `${alertCount} tugas mendekati batas waktu` : 'Semua tugas telah dikumpulkan / aman'}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsFullScreen(false)}
+                  className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-3 flex-1">
+                {alertCount === 0 ? (
+                  <div className="py-12 text-center text-slate-500 dark:text-slate-400 space-y-3">
+                    <CheckCircle2 className="w-16 h-16 text-emerald-500 mx-auto" />
+                    <p className="text-base font-bold text-slate-800 dark:text-white">Semua Tugas Sudah Dikumpulkan & Aman!</p>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Tidak ada tugas mendesak yang mendekati batas waktu saat ini.
+                    </p>
+                  </div>
+                ) : (
+                  activeAlerts.map((alert) => (
+                    <div
+                      key={alert.id}
+                      className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-amber-400 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                            alert.urgency === 'critical' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                          }`}>
+                            {alert.timeFormatted}
+                          </span>
+                          <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                            {alert.subject} • {alert.classId}
+                          </span>
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">{alert.title}</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Tenggat Waktu: {alert.dueDate} {alert.dueTime} WIB</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => {
+                            setIsFullScreen(false);
+                            setIsOpen(false);
+                            navigate('/assignments');
+                          }}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors inline-flex items-center gap-1.5"
+                        >
+                          <span>Kumpulkan</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex justify-end">
+                <button
+                  onClick={() => setIsFullScreen(false)}
+                  className="px-5 py-2.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl text-xs font-bold transition-colors"
+                >
+                  Tutup Tampilan Penuh
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

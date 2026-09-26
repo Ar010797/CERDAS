@@ -148,7 +148,7 @@ export default function QuizQuestionEditor({
     }
   };
 
-  // Ekstrak Soal dari Berkas PDF ke Backend
+  // Ekstrak Soal dari Berkas PDF ke Backend dengan Fallback Base64 untuk Median APK & Android WebView
   const handleExtractFromPdf = async () => {
     if (!selectedPdfFile) return;
 
@@ -160,21 +160,7 @@ export default function QuizQuestionEditor({
     const stepTimer1 = setTimeout(() => setExtractionProgressStep(2), 1200);
     const stepTimer2 = setTimeout(() => setExtractionProgressStep(3), 3500);
 
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedPdfFile);
-
-      const response = await fetch('/api/quiz/import-pdf', {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Gagal mengekstrak soal dari dokumen PDF.');
-      }
-
+    const processQuestionsData = (data: any) => {
       const receivedQuestions: QuizQuestion[] = Array.isArray(data.questions) ? data.questions : [];
       if (receivedQuestions.length === 0) {
         throw new Error('Tidak ditemukan butir soal yang terbaca dari PDF ini. Pastikan PDF memuat teks soal yang jelas.');
@@ -194,10 +180,64 @@ export default function QuizQuestionEditor({
         unlockAudioContext();
         playNotificationSound('announcement');
       } catch {}
+    };
+
+    try {
+      // 1. Percobaan Pertama: FormData multipart
+      let success = false;
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedPdfFile);
+
+        const response = await fetch('/api/quiz/import-pdf', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.success) {
+            processQuestionsData(data);
+            success = true;
+          }
+        }
+      } catch (formErr) {
+        console.warn('FormData fetch issue in WebView, attempting base64 fallback:', formErr);
+      }
+
+      // 2. Percobaan Kedua (Fallback untuk Median APK / Android WebView): Base64 JSON
+      if (!success) {
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const res = reader.result as string;
+            resolve(res);
+          };
+          reader.onerror = () => reject(new Error('Gagal membaca berkas di perangkat Anda.'));
+          reader.readAsDataURL(selectedPdfFile);
+        });
+
+        const response = await fetch('/api/quiz/import-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pdfBase64: base64Data,
+            filename: selectedPdfFile.name,
+            mimeType: selectedPdfFile.type || 'application/pdf'
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Gagal mengekstrak soal dari berkas PDF.');
+        }
+
+        processQuestionsData(data);
+      }
 
     } catch (err: any) {
       console.error('Extraction error:', err);
-      setImportError(err.message || 'Terjadi kesalahan saat memproses berkas PDF.');
+      setImportError(err.message || 'Terjadi kesalahan saat memproses berkas PDF di perangkat Anda. Coba pilih file kembali atau gunakan tab Tempel Teks Soal.');
     } finally {
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
@@ -616,7 +656,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                       <input
                         type="file"
                         ref={fileInputRef}
-                        accept="application/pdf,.pdf"
+                        accept=".pdf,application/pdf,*/*"
                         className="hidden"
                         onChange={(e) => {
                           if (e.target.files && e.target.files.length > 0) {

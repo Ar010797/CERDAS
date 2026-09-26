@@ -1239,7 +1239,11 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
           mimeType = originalName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/pdf';
         }
       } else if (req.body && req.body.pdfBase64) {
-        fileBuffer = Buffer.from(req.body.pdfBase64, "base64");
+        let cleanBase64 = String(req.body.pdfBase64);
+        if (cleanBase64.includes('base64,')) {
+          cleanBase64 = cleanBase64.split('base64,')[1];
+        }
+        fileBuffer = Buffer.from(cleanBase64.trim(), "base64");
         originalName = req.body.filename || "dokumen_soal.pdf";
         mimeType = req.body.mimeType || "application/pdf";
       }

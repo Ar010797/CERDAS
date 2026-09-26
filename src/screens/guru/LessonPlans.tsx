@@ -743,6 +743,8 @@ export default function LessonPlansGuru() {
   // Cross-device PDF & modal states
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewFilename, setPdfPreviewFilename] = useState<string>('');
+  const [pdfPreviewData, setPdfPreviewData] = useState<any>(null);
+  const [pdfModalTab, setPdfModalTab] = useState<'preview' | 'details'>('preview');
   const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
   const [deleteModuleConfirmOpen, setDeleteModuleConfirmOpen] = useState(false);
 
@@ -1853,28 +1855,24 @@ export default function LessonPlansGuru() {
       pdf.text(`Halaman ${i} dari ${totalPages}`, 192, 288, { align: 'right' });
     }
 
-    // 8. CROSS-DEVICE EXPORT & MODAL PREVIEW
+    // 8. CROSS-DEVICE EXPORT & MODAL PREVIEW (TINJAU DULU SEBELUM UNDUH)
     try {
       const blob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(blob);
       setPdfPreviewUrl(blobUrl);
       setPdfPreviewFilename(safeFilename);
+      setPdfPreviewData(dataToExport);
+      setPdfModalTab('preview');
 
-      // Trigger standard download
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = safeFilename;
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        document.body.removeChild(link);
-      }, 2000);
-
-      showToast('PDF E-RPP berhasil disusun dan siap diunduh / dicetak!', 'success');
+      showToast('Pratinjau PDF E-RPP siap! Silakan tinjau terlebih dahulu sebelum mengunduh.', 'success');
     } catch (e: any) {
-      console.warn('Fallback to pdf.save:', e);
-      pdf.save(safeFilename);
-      showToast('Mengunduh dokumen PDF E-RPP...', 'success');
+      console.warn('Preview generation error:', e);
+      try {
+        pdf.save(safeFilename);
+        showToast('Mengunduh dokumen PDF E-RPP...', 'success');
+      } catch (saveErr) {
+        showToast('Gagal menyusun dokumen PDF.', 'error');
+      }
     }
   };
 
@@ -3021,17 +3019,17 @@ export default function LessonPlansGuru() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 dark:bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden transition-colors">
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850">
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-sm sm:text-base font-extrabold text-slate-800 dark:text-white truncate">
-                    Pratinjau Dokumen E-RPP
+                    Tinjau Dulu Dokumen E-RPP
                   </h3>
-                  <p className="text-xs text-slate-400 dark:text-slate-400 font-medium truncate">
-                    {pdfPreviewFilename || 'RPP_Merdeka_Belajar.pdf'}
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
+                    Periksa kembali data RPP sebelum disimpan atau dicetak • {pdfPreviewFilename || 'RPP_Merdeka_Belajar.pdf'}
                   </p>
                 </div>
               </div>
@@ -3039,7 +3037,7 @@ export default function LessonPlansGuru() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => window.open(pdfPreviewUrl, '_blank')}
-                  className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition-colors border border-indigo-200 dark:border-slate-750"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition-colors border border-indigo-200 dark:border-slate-700"
                   title="Buka di tab baru untuk mencetak langsung"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -3048,15 +3046,18 @@ export default function LessonPlansGuru() {
                 <a
                   href={pdfPreviewUrl}
                   download={pdfPreviewFilename}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
-                  title="Unduh file PDF"
+                  onClick={() => {
+                    showToast('Dokumen PDF E-RPP berhasil diunduh ke perangkat!', 'success');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                  title="Konfirmasi & Unduh Berkas PDF Sekarang"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  <span>Unduh PDF</span>
+                  <span>Konfirmasi & Unduh PDF</span>
                 </a>
                 <button
                   onClick={() => setPdfPreviewUrl(null)}
-                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                   title="Tutup Pratinjau"
                 >
                   <X className="w-5 h-5" />
@@ -3064,57 +3065,171 @@ export default function LessonPlansGuru() {
               </div>
             </div>
 
+            {/* Navigation Tabs Inside Preview Modal */}
+            <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900 flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPdfModalTab('preview')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    pdfModalTab === 'preview'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Pratinjau Lembar PDF</span>
+                </button>
+                <button
+                  onClick={() => setPdfModalTab('details')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    pdfModalTab === 'details'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Ringkasan Konten RPP</span>
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+                Standar Kurikulum Merdeka Kemendikbudristek
+              </span>
+            </div>
+
             {/* Modal Body */}
             <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-100/50 dark:bg-slate-950/50">
-              {/* Desktop Iframe */}
-              <div className="hidden md:block w-full h-[65vh] bg-white rounded-2xl shadow-inner border border-slate-200 dark:border-slate-800 overflow-hidden">
-                <iframe
-                  src={pdfPreviewUrl}
-                  title="Pratinjau PDF E-RPP"
-                  className="w-full h-full border-none"
-                />
-              </div>
-
-              {/* Mobile Card */}
-              <div className="md:hidden bg-white dark:bg-slate-850 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 text-center space-y-4 shadow-sm">
-                <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
+              {pdfModalTab === 'preview' ? (
                 <div>
-                  <h4 className="font-extrabold text-slate-800 dark:text-white text-base">Dokumen PDF E-RPP Siap!</h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-                    Dokumen telah diformat rapi dengan kop standar, penomoran soal PTS simetris, dan tanda tangan resmi.
-                  </p>
+                  {/* Desktop Iframe */}
+                  <div className="hidden md:block w-full h-[62vh] bg-white rounded-2xl shadow-inner border border-slate-200 dark:border-slate-800 overflow-hidden">
+                    <iframe
+                      src={pdfPreviewUrl}
+                      title="Pratinjau PDF E-RPP"
+                      className="w-full h-full border-none"
+                    />
+                  </div>
+
+                  {/* Mobile Interactive Card */}
+                  <div className="md:hidden bg-white dark:bg-slate-850 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center shrink-0">
+                        <CheckCircle2 className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-slate-800 dark:text-white text-sm">Dokumen PDF E-RPP Siap Diunduh</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {pdfPreviewFilename}
+                        </p>
+                      </div>
+                    </div>
+
+                    {pdfPreviewData && (
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl space-y-1.5 text-xs border border-slate-100 dark:border-slate-700">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Mata Pelajaran:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{pdfPreviewData.mataPelajaran || mataPelajaran}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Kelas / Semester:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{pdfPreviewData.kelasSemester || kelasSemester}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Materi Pokok:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{pdfPreviewData.materi || materi}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-2 flex flex-col gap-2">
+                      <a
+                        href={pdfPreviewUrl}
+                        download={pdfPreviewFilename}
+                        onClick={() => showToast('Dokumen PDF E-RPP berhasil diunduh ke HP!', 'success')}
+                        className="w-full inline-flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"
+                      >
+                        <FileDown className="w-4 h-4" />
+                        <span>Konfirmasi & Unduh PDF</span>
+                      </a>
+                      <button
+                        onClick={() => window.open(pdfPreviewUrl, '_blank')}
+                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        <span>Buka Lembar Penuh / Cetak</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="pt-2 flex flex-col gap-2.5">
-                  <a
-                    href={pdfPreviewUrl}
-                    download={pdfPreviewFilename}
-                    className="w-full inline-flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"
-                  >
-                    <FileDown className="w-4 h-4" />
-                    Simpan / Unduh ke Perangkat
-                  </a>
-                  <button
-                    onClick={() => window.open(pdfPreviewUrl, '_blank')}
-                    className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-bold transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Buka di Tab Baru / Cetak
-                  </button>
+              ) : (
+                /* Tab Ringkasan Konten RPP */
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[62vh] overflow-y-auto">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <div>
+                      <span className="text-slate-400 block font-medium">Satuan Pendidikan:</span>
+                      <strong className="text-slate-800 dark:text-white">{pdfPreviewData?.satuanPendidikan || satuanPendidikan || schoolSettings.namaSekolah}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block font-medium">Mata Pelajaran & Kelas:</span>
+                      <strong className="text-slate-800 dark:text-white">{pdfPreviewData?.mataPelajaran || mataPelajaran} • {pdfPreviewData?.kelasSemester || kelasSemester}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block font-medium">Materi Pokok:</span>
+                      <strong className="text-slate-800 dark:text-white">{pdfPreviewData?.materi || materi}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block font-medium">Alokasi Waktu:</span>
+                      <strong className="text-slate-800 dark:text-white">{pdfPreviewData?.alokasiWaktu || alokasiWaktu || '2 x 35 Menit'}</strong>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-900">
+                      <h5 className="font-bold text-xs text-indigo-900 dark:text-indigo-300 mb-1">Tujuan Pembelajaran:</h5>
+                      <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                        {pdfPreviewData?.tujuanPembelajaran || tujuanPembelajaran}
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                      <h5 className="font-bold text-xs text-slate-900 dark:text-white">Langkah-Langkah Kegiatan:</h5>
+                      <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+                        <p><strong>A. Pendahuluan:</strong> {pdfPreviewData?.pendahuluan || pendahuluan}</p>
+                        <p><strong>B. Kegiatan Inti:</strong> {pdfPreviewData?.kegiatanInti || kegiatanInti}</p>
+                        <p><strong>C. Penutup:</strong> {pdfPreviewData?.penutup || penutup}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 bg-emerald-50/50 dark:bg-emerald-950/30 rounded-xl border border-emerald-100 dark:border-emerald-900">
+                      <h5 className="font-bold text-xs text-emerald-900 dark:text-emerald-300 mb-1">Latihan Soal PTS & Kunci Jawaban:</h5>
+                      <div className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                        {pdfPreviewData?.latihanSoal || latihanSoal}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Modal Footer */}
-            <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
-              <span>Sesuai Standar Kemendikbudristek No. 14/2019</span>
-              <button
-                onClick={() => setPdfPreviewUrl(null)}
-                className="text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-bold px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                Tutup
-              </button>
+            <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium shrink-0">
+              <span>Pastikan seluruh komponen telah ditinjau dengan cermat</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPdfPreviewUrl(null)}
+                  className="text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-bold px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <a
+                  href={pdfPreviewUrl}
+                  download={pdfPreviewFilename}
+                  onClick={() => showToast('Dokumen PDF E-RPP berhasil diunduh!', 'success')}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  <span>Unduh Dokumen Sekarang</span>
+                </a>
+              </div>
             </div>
           </div>
         </div>

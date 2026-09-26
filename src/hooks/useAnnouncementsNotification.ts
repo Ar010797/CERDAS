@@ -8,6 +8,7 @@ import {
   getOfflineAnnouncements,
   OfflineAnnouncement
 } from '../lib/offlineStorage';
+import { isClassTargetMatching } from '../lib/schoolClasses';
 
 export interface AnnouncementItem {
   id: string;
@@ -17,7 +18,8 @@ export interface AnnouncementItem {
   authorRole?: 'Admin' | 'Guru' | string;
   authorId?: string;
   authorClass?: string;
-  targetClass?: string; // 'Semua Kelas' | 'Kelas 1' | ...
+  targetClass?: string; // 'Semua Kelas' | 'Kelas 1 A, Kelas 1 B' | ...
+  targetClasses?: string[];
   targetRole?: 'Semua' | 'Wali Murid' | 'Guru' | string;
   category?: string;
   priority?: 'Normal' | 'Penting' | string;
@@ -127,11 +129,7 @@ export function useAnnouncementsNotification(studentClassId?: string) {
             const roleMatch = targetRole === 'Semua' || targetRole === 'Wali Murid';
             // Class filter: either target is 'Semua Kelas', or matches student class
             const currentClass = studentClassId || '';
-            const classMatch =
-              targetClass === 'Semua Kelas' ||
-              !currentClass ||
-              targetClass === currentClass ||
-              targetClass.toLowerCase() === currentClass.toLowerCase();
+            const classMatch = isClassTargetMatching(data.targetClasses || data.targetClass, currentClass);
 
             if (roleMatch && classMatch) {
               items.push(item);

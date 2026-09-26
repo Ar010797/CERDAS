@@ -64,7 +64,7 @@ export default function ScheduleReminderBell() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 z-[100] overflow-hidden"
+            className="fixed inset-x-2.5 top-16 sm:absolute sm:inset-auto sm:right-0 sm:mt-2 sm:w-96 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 z-[110] overflow-hidden max-h-[85vh] flex flex-col"
           >
             {/* Header */}
             <div className="p-4 bg-gradient-to-r from-indigo-900 to-indigo-800 text-white flex items-center justify-between">

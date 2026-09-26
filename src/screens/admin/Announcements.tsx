@@ -34,6 +34,7 @@ import {
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { generateAnnouncementPDF } from '../../lib/announcementPdf';
+import { isClassTargetMatching, ALL_AVAILABLE_CLASSES, POPULAR_CLASSES } from '../../lib/schoolClasses';
 
 interface Announcement {
   id: string;
@@ -44,6 +45,7 @@ interface Announcement {
   authorId?: string;
   authorClass?: string;
   targetClass?: string;
+  targetClasses?: string[];
   targetRole?: string;
   category?: string;
   priority?: 'Normal' | 'Penting' | string;
@@ -152,6 +154,9 @@ export default function Announcements() {
   const [targetClass, setTargetClass] = useState<string>(
     isGuru && userData?.assigned_class ? userData.assigned_class : 'Semua Kelas'
   );
+  const [targetClasses, setTargetClasses] = useState<string[]>(
+    isGuru && userData?.assigned_class ? [userData.assigned_class] : ['Semua Kelas']
+  );
   const [targetRole, setTargetRole] = useState<'Semua' | 'Wali Murid' | 'Guru'>('Semua');
   const [category, setCategory] = useState('Pengumuman Umum');
   const [priority, setPriority] = useState<'Normal' | 'Penting'>('Normal');
@@ -232,7 +237,9 @@ export default function Announcements() {
     setCategory('Pengumuman Umum');
     setPriority('Normal');
     setTargetRole('Semua');
-    setTargetClass(isGuru && userData?.assigned_class ? userData.assigned_class : 'Semua Kelas');
+    const initialClasses = isGuru && userData?.assigned_class ? [userData.assigned_class] : ['Semua Kelas'];
+    setTargetClasses(initialClasses);
+    setTargetClass(initialClasses[0]);
     setIsModalOpen(true);
   };
 
@@ -351,6 +358,11 @@ export default function Announcements() {
       const authorName =
         userData?.name || (isAdmin ? 'Admin Sekolah' : `Guru ${userData?.assigned_class || ''}`);
 
+      const selectedClasses = targetClasses.length === 0 ? ['Semua Kelas'] : targetClasses;
+      const formattedTargetClass = selectedClasses.includes('Semua Kelas')
+        ? 'Semua Kelas'
+        : selectedClasses.join(', ');
+
       const docRef = await addDoc(collection(db, 'announcements'), {
         title: title.trim(),
         content: content.trim(),
@@ -358,7 +370,8 @@ export default function Announcements() {
         authorRole,
         authorId: userData?.uid || '',
         authorClass: userData?.assigned_class || '',
-        targetClass,
+        targetClass: formattedTargetClass,
+        targetClasses: selectedClasses,
         targetRole,
         category,
         priority,
@@ -375,7 +388,8 @@ export default function Announcements() {
             id: docRef.id,
             title: title.trim(),
             content: content.trim(),
-            targetClass,
+            targetClass: formattedTargetClass,
+            targetClasses: selectedClasses,
             targetRole,
             authorName,
             category,
@@ -388,7 +402,7 @@ export default function Announcements() {
         console.warn('Push announcement broadcast notice:', pushErr);
       }
 
-      showToast('Pemberitahuan berhasil diterbitkan & disiarkan ke HP wali murid!', 'success');
+      showToast('Pemberitahuan berhasil diterbitkan & disiarkan ke sasaran kelas!', 'success');
       setIsModalOpen(false);
       setTitle('');
       setContent('');
@@ -416,9 +430,11 @@ export default function Announcements() {
     }
   };
 
-  // Filter announcements
+  // Filter announcements with multi-class matching support
   const filteredAnnouncements = announcements.filter((ann) => {
-    const matchClass = selectedFilterClass === 'Semua' || ann.targetClass === selectedFilterClass || ann.targetClass === 'Semua Kelas';
+    const matchClass =
+      selectedFilterClass === 'Semua' ||
+      isClassTargetMatching((ann as any).targetClasses || ann.targetClass, selectedFilterClass);
     const matchCategory = selectedFilterCategory === 'Semua' || ann.category === selectedFilterCategory;
     return matchClass && matchCategory;
   });
@@ -841,35 +857,140 @@ export default function Announcements() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Target Class */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Sasaran Kelas
+              {/* Multi-Target Class Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Sasaran Target Kelas <span className="text-indigo-600 dark:text-indigo-400 font-semibold">(Bisa Pilih & Tandai Beberapa Kelas)</span>
                   </label>
-                  <select
-                    value={targetClass}
-                    onChange={(e) => setTargetClass(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  >
-                    <option value="Semua Kelas">📢 Semua Kelas (Kelas 1 SD s.d. Kelas 9 MTs)</option>
-                    <optgroup label="🏫 Tingkat SD / MI (Kelas 1 - 6)">
-                      {SD_CLASSES.map((cls) => (
-                        <option key={cls} value={cls}>
-                          {cls} (SD)
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="🕌 Tingkat MTs / SMP (Kelas 7 - 9)">
-                      {MTS_CLASSES.map((cls) => (
-                        <option key={cls} value={cls}>
-                          {cls} (MTs)
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
+                  <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setTargetClasses(['Semua Kelas'])}
+                      className={`px-2.5 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        targetClasses.includes('Semua Kelas')
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      📢 Semua Kelas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const sdList = ['Kelas 1 A', 'Kelas 1 B', 'Kelas 2 A', 'Kelas 2 B', 'Kelas 3 A', 'Kelas 3 B', 'Kelas 4 A', 'Kelas 4 B', 'Kelas 5 A', 'Kelas 5 B', 'Kelas 6 A', 'Kelas 6 B'];
+                        setTargetClasses(sdList);
+                      }}
+                      className="px-2.5 py-0.5 rounded-lg font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-all cursor-pointer"
+                    >
+                      🏫 Pilih Semua SD
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const mtsList = ['Kelas 7 MTs A', 'Kelas 7 MTs B', 'Kelas 8 MTs A', 'Kelas 8 MTs B', 'Kelas 9 MTs A', 'Kelas 9 MTs B'];
+                        setTargetClasses(mtsList);
+                      }}
+                      className="px-2.5 py-0.5 rounded-lg font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-all cursor-pointer"
+                    >
+                      🕌 Pilih Semua MTs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetClasses([])}
+                      className="px-2 py-0.5 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 font-medium cursor-pointer"
+                    >
+                      Bersihkan
+                    </button>
+                  </div>
                 </div>
 
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-3 max-h-48 overflow-y-auto">
+                  {/* SD / MI Classes */}
+                  <div>
+                    <div className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <span>🏫</span>
+                      <span>Jenjang SD / MI (Kelas 1 - 6):</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {['Kelas 1 A', 'Kelas 1 B', 'Kelas 2 A', 'Kelas 2 B', 'Kelas 3 A', 'Kelas 3 B', 'Kelas 4 A', 'Kelas 4 B', 'Kelas 5 A', 'Kelas 5 B', 'Kelas 6 A', 'Kelas 6 B'].map((cls) => {
+                        const isSelected = targetClasses.includes(cls);
+                        const isAll = targetClasses.includes('Semua Kelas');
+                        return (
+                          <button
+                            key={cls}
+                            type="button"
+                            onClick={() => {
+                              if (isAll) {
+                                setTargetClasses([cls]);
+                              } else if (isSelected) {
+                                const next = targetClasses.filter((c) => c !== cls);
+                                setTargetClasses(next.length === 0 ? ['Semua Kelas'] : next);
+                              } else {
+                                setTargetClasses([...targetClasses.filter((c) => c !== 'Semua Kelas'), cls]);
+                              }
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                              isSelected && !isAll
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                            }`}
+                          >
+                            {cls}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* MTs Classes */}
+                  <div>
+                    <div className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <span>🕌</span>
+                      <span>Jenjang MTs / SMP (Kelas 7 - 9):</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {['Kelas 7 MTs A', 'Kelas 7 MTs B', 'Kelas 8 MTs A', 'Kelas 8 MTs B', 'Kelas 9 MTs A', 'Kelas 9 MTs B'].map((cls) => {
+                        const isSelected = targetClasses.includes(cls);
+                        const isAll = targetClasses.includes('Semua Kelas');
+                        return (
+                          <button
+                            key={cls}
+                            type="button"
+                            onClick={() => {
+                              if (isAll) {
+                                setTargetClasses([cls]);
+                              } else if (isSelected) {
+                                const next = targetClasses.filter((c) => c !== cls);
+                                setTargetClasses(next.length === 0 ? ['Semua Kelas'] : next);
+                              } else {
+                                setTargetClasses([...targetClasses.filter((c) => c !== 'Semua Kelas'), cls]);
+                              }
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                              isSelected && !isAll
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                            }`}
+                          >
+                            {cls}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                  <span>
+                    {targetClasses.includes('Semua Kelas')
+                      ? '📌 Menargetkan SEMUA kelas di sekolah.'
+                      : `📌 Menargetkan ${targetClasses.length} kelas: ${targetClasses.join(', ')}`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Target Role */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
