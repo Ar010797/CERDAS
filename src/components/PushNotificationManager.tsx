@@ -8,7 +8,8 @@ import {
   Info,
   Volume2,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  Maximize2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -17,8 +18,10 @@ import {
   getNotificationPermissionStatus,
   registerPushNotification,
   sendTestPushNotification,
-  NotificationPermissionState
+  NotificationPermissionState,
+  getDeviceBrand
 } from '../lib/pushNotification';
+import { triggerFloatingNotification } from './FloatingNotificationCenter';
 
 interface PushNotificationManagerProps {
   compact?: boolean;
@@ -66,6 +69,19 @@ export default function PushNotificationManager({ compact = false }: PushNotific
     } finally {
       setTesting(false);
     }
+  };
+
+  const handleTestFullScreen = () => {
+    const brand = getDeviceBrand();
+    triggerFloatingNotification({
+      title: `🔔 Notifikasi Full Layar HP Berhasil!`,
+      body: `Ini adalah tampilan notifikasi penuh di layar HP ${brand}. Pesan pengumuman, rilis nilai rapot, dan tugas baru akan tampil jelas tanpa terpotong dengan nada dering dan getar aktif.`,
+      type: 'announcement',
+      category: 'Pemberitahuan Sistem',
+      openFullScreenImmediately: true
+    });
+    setToastMessage('Notifikasi layar penuh berhasil dibuka!');
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   if (compact) {
