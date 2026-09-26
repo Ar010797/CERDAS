@@ -14,6 +14,7 @@ import {
   Save,
   MessageSquare,
   Clock,
+  Image as ImageIcon,
   Wallet,
   Coins,
   Bell,
@@ -57,8 +58,8 @@ export default function WaliMuridDashboard() {
   const location = useLocation();
   const isOnline = useOnlineStatus();
   
-  // Tab Navigation State (Galeri dihapus sesuai permintaan)
-  const [activeTab, setActiveTab] = useState<'ringkasan' | 'akademik' | 'tugas' | 'pengumuman' | 'jadwal' | 'keuangan' | 'profil'>('ringkasan');
+  // Tab Navigation State
+  const [activeTab, setActiveTab] = useState<'ringkasan' | 'akademik' | 'tugas' | 'pengumuman' | 'jadwal' | 'keuangan' | 'galeri' | 'profil'>('ringkasan');
   const [isRaporPreviewOpen, setIsRaporPreviewOpen] = useState(false);
   
   // Real-time data
@@ -84,21 +85,14 @@ export default function WaliMuridDashboard() {
   }>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', tahunAjaran: '2026/2027' });
   const [loading, setLoading] = useState(true);
 
-  // Extra Data: Tabungan & Kas
+  // Extra Data
+  const [photos, setPhotos] = useState<any[]>([]);
   const [savingTransactions, setSavingTransactions] = useState<any[]>([]);
   const [kasTransactions, setKasTransactions] = useState<any[]>([]);
 
-  // Edit Modal State - Wali murid HANYA boleh mengedit profil anak & kontak wali
+  // Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    gender: 'L',
-    address: '',
-    birthDate: '',
-    birthPlace: '',
-    parentName: '',
-    parentPhone: ''
-  });
+  const [formData, setFormData] = useState({ name: '', gender: 'L', address: '', birthDate: '', birthPlace: '' });
   const [saving, setSaving] = useState(false);
 
   // Announcements Notifications Hook for Wali Murid
@@ -140,21 +134,18 @@ export default function WaliMuridDashboard() {
     const unsubStudent = onSnapshot(doc(db, 'students', userData.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const fullStudent: any = { id: docSnap.id, ...data };
-        setStudentData(fullStudent);
+        setStudentData(data);
         setFormData({
-          name: fullStudent.name || '',
-          gender: fullStudent.gender || 'L',
-          address: fullStudent.address || '',
-          birthDate: fullStudent.birthDate || '',
-          birthPlace: fullStudent.birthPlace || '',
-          parentName: fullStudent.parentName || fullStudent.namaWali || '',
-          parentPhone: fullStudent.parentPhone || fullStudent.noHpWali || ''
+          name: data.name || '',
+          gender: data.gender || 'L',
+          address: data.address || '',
+          birthDate: data.birthDate || '',
+          birthPlace: data.birthPlace || ''
         });
       }
     }, (err) => console.warn("unsubStudent error:", err));
 
-    // Grades (Read-only access for wali murid)
+    // Grades
     const unsubGrades = onSnapshot(doc(db, 'grades', userData.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -239,14 +230,12 @@ export default function WaliMuridDashboard() {
     };
   }, [userData, todayStr]);
 
-  // Subjects and finance (Gallery removed per user request)
+  // Subjects, gallery, and finance
   useEffect(() => {
-    const studentClass = studentData?.classId || userData?.assigned_class || userData?.studentClass || 'Kelas 1';
-    const studentUid = studentData?.id || userData?.uid;
-    if (!studentUid) return;
+    if (!studentData?.classId || !studentData?.id) return;
     
     // Subjects
-    const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', studentClass), (docSnap) => {
+    const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', studentData.classId), (docSnap) => {
       if (docSnap.exists()) {
         const d = docSnap.data();
         setSubjects(d.subjects || []);
@@ -257,60 +246,48 @@ export default function WaliMuridDashboard() {
       }
     }, (err) => console.warn("unsubSubjects error:", err));
 
-    const parseTimestamp = (d: any) => {
-      if (!d) return 0;
-      if (typeof d.toDate === 'function') return d.toDate().getTime();
-      if (d.seconds) return d.seconds * 1000;
-      const parsed = new Date(d).getTime();
-      return isNaN(parsed) ? 0 : parsed;
-    };
+    // Gallery
+    const qGallery = query(collection(db, 'gallery'), where('classId', '==', studentData.classId));
+    const unsubGallery = onSnapshot(qGallery, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      docs.sort((a: any, b: any) => (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0));
+      setPhotos(docs);
+    }, (err) => console.warn("unsubGallery error:", err));
 
-    // Savings (Tabungan Santri)
-    const qSavings = query(collection(db, 'savings'), where('studentId', '==', studentUid));
+    // Savings
+    const qSavings = query(collection(db, 'savings'), where('studentId', '==', studentData.id));
     const unsubSavings = onSnapshot(qSavings, (snap) => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      docs.sort((a: any, b: any) => parseTimestamp(b.date) - parseTimestamp(a.date));
+      docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
       setSavingTransactions(docs);
     }, (err) => console.warn("unsubSavings error:", err));
 
-    // Kas Kelas
-    const qKas = query(collection(db, 'kas'), where('classId', '==', studentClass));
+    // Kas
+    const qKas = query(collection(db, 'kas'), where('classId', '==', studentData.classId));
     const unsubKas = onSnapshot(qKas, (snap) => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      docs.sort((a: any, b: any) => parseTimestamp(b.date) - parseTimestamp(a.date));
+      docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
       setKasTransactions(docs);
     }, (err) => console.warn("unsubKas error:", err));
 
     return () => {
       unsubSubjects();
+      unsubGallery();
       unsubSavings();
       unsubKas();
     };
-  }, [studentData?.classId, studentData?.id, userData]);
+  }, [studentData?.classId, studentData?.id]);
 
-  // Wali murid HANYA memiliki akses mengedit biodata santri dan kontak wali murid.
-  // Data nilai, nomor induk, NISN, kelas, dan status kehadiran dikunci total.
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const allowedProfileData = {
-        name: formData.name.trim(),
-        gender: formData.gender,
-        birthPlace: formData.birthPlace.trim(),
-        birthDate: formData.birthDate,
-        address: formData.address.trim(),
-        parentName: formData.parentName.trim(),
-        parentPhone: formData.parentPhone.trim(),
-        updatedAt: new Date().toISOString()
-      };
-
-      await updateDoc(doc(db, 'students', userData!.uid), allowedProfileData);
-      alert('Data profil santri dan wali murid berhasil diperbarui!');
+      await updateDoc(doc(db, 'students', userData!.uid), formData);
+      alert('Data santri berhasil diperbarui!');
       setIsModalOpen(false);
     } catch (error) {
-      console.error("Gagal perbarui profil santri:", error);
-      alert('Gagal memperbarui profil. Silakan coba kembali.');
+      console.error(error);
+      alert('Gagal memperbarui profil.');
     } finally {
       setSaving(false);
     }
@@ -834,6 +811,18 @@ export default function WaliMuridDashboard() {
         </button>
 
         <button
+          onClick={() => setActiveTab('galeri')}
+          className={`py-2 px-3.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            activeTab === 'galeri'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+        >
+          <ImageIcon className="w-3.5 h-3.5" />
+          <span>Galeri Kegiatan</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('profil')}
           className={`py-2 px-3.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
             activeTab === 'profil'
@@ -957,26 +946,6 @@ export default function WaliMuridDashboard() {
       {/* TAB: AKADEMIK (Laporan Nilai & Rapor) */}
       {activeTab === 'akademik' && (
         <div className="space-y-6 animate-in fade-in duration-150">
-          {/* Readonly info notice: Wali Murid cannot modify grades */}
-          <div className="bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl p-4 flex items-start sm:items-center gap-3 shadow-2xs">
-            <div className="p-2 bg-indigo-600 text-white rounded-xl shrink-0">
-              <Award className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="text-xs sm:text-sm font-bold text-indigo-950 dark:text-indigo-200">
-                  Laporan Hasil Belajar & Nilai Resmi Sekolah
-                </h4>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-200 text-indigo-900 dark:bg-indigo-900 dark:text-indigo-200">
-                  Akses Terkunci (Hanya Baca)
-                </span>
-              </div>
-              <p className="text-xs text-indigo-800/80 dark:text-indigo-300/80 mt-0.5 leading-relaxed">
-                Seluruh nilai tugas otomatis, nilai kuis online, PTS, PAS, dan KKM diinput serta divalidasi langsung oleh Dewan Guru & Wali Kelas. Wali murid berhak memantau perkembangan akademik anak secara transparan dan akuntabel tanpa wewenang mengubah data nilai.
-              </p>
-            </div>
-          </div>
-
           {/* Attendance Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-xs border border-emerald-100 dark:border-emerald-950/80 text-center">
@@ -1182,10 +1151,7 @@ export default function WaliMuridDashboard() {
       {/* TAB: TUGAS (Modul Pengumpulan Tugas & Kuis Online) */}
       {activeTab === 'tugas' && (
         <div className="space-y-4 animate-in fade-in duration-150">
-          <AssignmentsScreen 
-            forcedClassId={studentData?.classId} 
-            forcedStudentId={studentData?.id || userData?.uid} 
-          />
+          <AssignmentsScreen />
         </div>
       )}
 
@@ -1562,25 +1528,6 @@ export default function WaliMuridDashboard() {
       {/* TAB: KEUANGAN */}
       {activeTab === 'keuangan' && (
         <div className="space-y-6 animate-in fade-in duration-150">
-          <div className="bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200/80 dark:border-teal-800/60 rounded-2xl p-4 flex items-start sm:items-center gap-3 shadow-2xs">
-            <div className="p-2 bg-teal-600 text-white rounded-xl shrink-0">
-              <Wallet className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="text-xs sm:text-sm font-bold text-teal-950 dark:text-teal-200">
-                  Laporan Keuangan & Tabungan Resmi Santri
-                </h4>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-200 text-teal-900 dark:bg-teal-900 dark:text-teal-200">
-                  Hanya Baca (Read-Only)
-                </span>
-              </div>
-              <p className="text-xs text-teal-800/80 dark:text-teal-300/80 mt-0.5 leading-relaxed">
-                Pencatatan setor/tarik tabungan santri dan mutasi kas kelas dikelola secara resmi oleh Bendahara Sekolah dan Wali Kelas. Wali murid dapat memverifikasi saldo dan riwayat transaksi secara real-time.
-              </p>
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="bg-gradient-to-br from-emerald-600 to-teal-700 p-6 rounded-3xl text-white shadow-lg">
               <div className="flex items-center space-x-3 mb-3">
@@ -1683,6 +1630,44 @@ export default function WaliMuridDashboard() {
         </div>
       )}
 
+      {/* TAB: GALERI KEGIATAN */}
+      {activeTab === 'galeri' && (
+        <div className="space-y-4 animate-in fade-in duration-150">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-slate-800 dark:text-white">Galeri Kegiatan Santri Kelas {studentData?.classId}</h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            {photos.length === 0 ? (
+              <div className="col-span-full bg-white dark:bg-slate-900 rounded-3xl p-12 text-center border border-slate-200/80 dark:border-slate-800 flex flex-col items-center">
+                <ImageIcon className="w-12 h-12 text-slate-300 dark:text-slate-600 mb-3" />
+                <h4 className="text-base font-bold text-slate-700 dark:text-slate-300">Belum Ada Foto Kegiatan</h4>
+                <p className="text-xs text-slate-400 mt-1">Dokumentasi momen kegiatan kelas akan diunggah oleh wali kelas di sini.</p>
+              </div>
+            ) : (
+              photos.map((photo) => (
+                <div key={photo.id} className="bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden group">
+                  <div className="aspect-square bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
+                    <img 
+                      src={photo.url} 
+                      alt={photo.caption} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <div className="p-3">
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 line-clamp-2">
+                      {photo.caption || 'Momen kegiatan kelas'}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {photo.createdAt?.toDate ? format(photo.createdAt.toDate(), 'dd MMM yyyy', { locale: id }) : ''}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       {/* TAB: PROFIL SANTRI */}
       {activeTab === 'profil' && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xs border border-slate-200/80 dark:border-slate-800 p-6 animate-in fade-in duration-150">
@@ -1710,28 +1695,12 @@ export default function WaliMuridDashboard() {
               <p className="text-sm font-bold text-slate-800 dark:text-white">{studentData?.nisn || '-'}</p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 mb-0.5">Kelas Terdaftar</p>
-              <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{studentData?.classId || '-'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Nomor Absen</p>
-              <p className="text-sm font-bold text-slate-800 dark:text-white">{studentData?.absen_number || '-'}</p>
-            </div>
-            <div>
               <p className="text-xs text-slate-400 mb-0.5">Jenis Kelamin</p>
               <p className="text-sm font-bold text-slate-800 dark:text-white">{studentData?.gender === 'L' ? 'Laki-laki' : 'Perempuan'}</p>
             </div>
             <div>
               <p className="text-xs text-slate-400 mb-0.5">Tempat, Tanggal Lahir</p>
               <p className="text-sm font-bold text-slate-800 dark:text-white">{studentData?.birthPlace || '-'}, {studentData?.birthDate || '-'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Nama Orang Tua / Wali</p>
-              <p className="text-sm font-bold text-slate-800 dark:text-white">{studentData?.parentName || studentData?.namaWali || '-'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">No. WhatsApp / HP Wali Murid</p>
-              <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{studentData?.parentPhone || studentData?.noHpWali || '-'}</p>
             </div>
             <div className="sm:col-span-2">
               <p className="text-xs text-slate-400 mb-0.5">Alamat Tempat Tinggal</p>
@@ -1746,10 +1715,7 @@ export default function WaliMuridDashboard() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in duration-200">
             <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Koreksi Data Santri & Wali</h3>
-                <p className="text-[11px] text-slate-400">Hanya profil biodata & kontak yang dapat diperbarui.</p>
-              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Koreksi Data Santri</h3>
               <button 
                 onClick={() => setIsModalOpen(false)} 
                 className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1759,19 +1725,6 @@ export default function WaliMuridDashboard() {
             </div>
             
             <form onSubmit={handleUpdateProfile} className="p-5 space-y-4">
-              {/* Locked System Fields Notice */}
-              <div className="bg-slate-100 dark:bg-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs border border-slate-200/60 dark:border-slate-700/60">
-                <div>
-                  <span className="text-slate-400 block text-[10px] font-semibold uppercase">Kelas & NISN (Terkunci)</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">
-                    {studentData?.classId || '-'} • NISN: {studentData?.nisn || '-'} • No: {studentData?.absen_number || '-'}
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold text-slate-500 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-md">
-                  Arsip Madrasah
-                </span>
-              </div>
-
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Lengkap Santri</label>
                 <input
@@ -1816,29 +1769,6 @@ export default function WaliMuridDashboard() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Orang Tua / Wali</label>
-                  <input
-                    type="text"
-                    placeholder="Nama Ayah / Ibu"
-                    value={formData.parentName}
-                    onChange={(e) => setFormData({ ...formData, parentName: e.target.value })}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">No. WhatsApp / HP</label>
-                  <input
-                    type="tel"
-                    placeholder="08xxxxxxxxxx"
-                    value={formData.parentPhone}
-                    onChange={(e) => setFormData({ ...formData, parentPhone: e.target.value })}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Alamat Lengkap</label>
                 <textarea
@@ -1853,14 +1783,14 @@ export default function WaliMuridDashboard() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>{saving ? 'Menyimpan...' : 'Simpan Perubahan'}</span>

@@ -132,17 +132,15 @@ const ALL_CLASSES = [
   'Kelas 7', 'Kelas 8', 'Kelas 9'
 ];
 
-export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { forcedClassId?: string; forcedStudentId?: string } = {}) {
+export default function AssignmentsScreen() {
   const { userData } = useAuth();
   const isAdmin = userData?.role === 'Admin';
   const isGuru = userData?.role === 'Guru';
   const isWaliMurid = userData?.role === 'Wali Murid';
 
   // Current active class selection
-  const defaultClass = forcedClassId
-    ? forcedClassId
-    : isWaliMurid
-    ? (userData?.studentClass || userData?.assigned_class || 'Kelas 1')
+  const defaultClass = isWaliMurid
+    ? (userData?.studentClass || 'Kelas 1')
     : isGuru
     ? (userData?.assigned_class || 'Kelas 1')
     : 'Kelas 1';
@@ -214,14 +212,12 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
 
   // Synchronize target class for Wali Murid
   useEffect(() => {
-    if (forcedClassId) {
-      setSelectedClass(forcedClassId);
-    } else if (isWaliMurid && (userData?.studentClass || userData?.assigned_class)) {
-      setSelectedClass(userData.studentClass || userData.assigned_class || 'Kelas 1');
+    if (isWaliMurid && userData?.studentClass) {
+      setSelectedClass(userData.studentClass);
     } else if (isGuru && userData?.assigned_class) {
       setSelectedClass(userData.assigned_class);
     }
-  }, [forcedClassId, userData, isWaliMurid, isGuru]);
+  }, [userData, isWaliMurid, isGuru]);
 
   // Listen to Available Subjects for the class
   useEffect(() => {
@@ -335,9 +331,8 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
   // Wali murid's student profile
   const currentStudent = useMemo(() => {
     if (!isWaliMurid) return null;
-    const targetUid = forcedStudentId || userData?.uid;
-    if (targetUid) {
-      const found = students.find(s => s.id === targetUid);
+    if (userData?.uid) {
+      const found = students.find(s => s.id === userData.uid);
       if (found) return found;
     }
     if (userData?.studentId) {
@@ -350,13 +345,13 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
     }
     if (students.length > 0) return students[0];
     return {
-      id: targetUid || 'siswa',
+      id: userData?.uid || 'siswa',
       name: userData?.name || 'Siswa',
       absen_number: '-',
       nisn: '-',
       classId: selectedClass
     };
-  }, [students, isWaliMurid, userData, forcedStudentId, selectedClass]);
+  }, [students, isWaliMurid, userData, selectedClass]);
 
   // Submissions map by assignmentId -> submission
   const studentSubmissionsMap = useMemo(() => {
