@@ -253,6 +253,24 @@ export async function showDeviceNotification(options: {
     }
   } catch {}
 
+  // 2b. Picu Notifikasi Native Median (GoNative) & Capacitor jika berjalan di APK Mobile
+  try {
+    const w = window as any;
+    if (w.median?.push?.showNotification) {
+      w.median.push.showNotification({
+        title: options.title,
+        body: options.body,
+        url: options.url || '/?tab=pengumuman'
+      });
+    } else if (w.gonative?.push?.showNotification) {
+      w.gonative.push.showNotification({
+        title: options.title,
+        body: options.body,
+        url: options.url || '/?tab=pengumuman'
+      });
+    }
+  } catch {}
+
   // 3. Tampilkan lewat Web Notification jika diizinkan
   if ('Notification' in window && Notification.permission === 'granted') {
     const notifOptions: any = {

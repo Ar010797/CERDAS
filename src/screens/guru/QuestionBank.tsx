@@ -106,15 +106,18 @@ export default function QuestionBank() {
     const file = e.target.files?.[0];
     if (!file || !activeFolder) return;
 
-    // Optional: allow only docs/pdfs
+    // Allow docs/pdfs/text with flexible detection for Android WebViews & Median
+    const fileNameLower = file.name.toLowerCase();
+    const isAllowedExt = fileNameLower.endsWith('.pdf') || fileNameLower.endsWith('.docx') || fileNameLower.endsWith('.doc') || fileNameLower.endsWith('.txt');
     const allowedTypes = [
       'application/pdf',
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'text/plain'
+      'text/plain',
+      'application/octet-stream'
     ];
-    if (!allowedTypes.includes(file.type) && !file.name.endsWith('.docx') && !file.name.endsWith('.pdf')) {
-      showToast("Hanya mendukung file PDF atau Word/Text", "error");
+    if (!isAllowedExt && (!file.type || !allowedTypes.includes(file.type))) {
+      showToast("Hanya mendukung file PDF, Word, atau Text (.pdf, .docx, .txt)", "error");
       return;
     }
 
@@ -331,7 +334,7 @@ export default function QuestionBank() {
                 <label className="flex items-center space-x-2 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 px-4 py-2 rounded-xl transition-colors font-semibold text-sm cursor-pointer disabled:opacity-50 border border-emerald-200 dark:border-emerald-800">
                   <Upload className="w-4 h-4" />
                   <span>{isUploading ? 'Memproses AI...' : 'Import Word/PDF'}</span>
-                  <input type="file" className="hidden" accept=".pdf,.doc,.docx,text/plain" onChange={handleFileUpload} disabled={isUploading} />
+                  <input type="file" className="hidden" accept=".pdf,.doc,.docx,text/plain,application/pdf,application/octet-stream,*/*" onChange={handleFileUpload} disabled={isUploading} />
                 </label>
                 <button
                   onClick={() => setIsQuestionModalOpen(true)}

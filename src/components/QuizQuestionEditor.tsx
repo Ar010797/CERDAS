@@ -688,9 +688,21 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
 
             {/* Pesan Kesalahan jika ada */}
             {importError && (
-              <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center gap-2 border border-rose-200 dark:border-rose-900/60">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
-                <span>{importError}</span>
+              <div className="mb-4 p-3.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border border-rose-200 dark:border-rose-900/60 animate-in fade-in">
+                <div className="flex items-start sm:items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5 sm:mt-0" />
+                  <span>{importError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveImportTab('text');
+                    setImportError(null);
+                  }}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shrink-0 self-start sm:self-auto shadow-2xs cursor-pointer"
+                >
+                  Buka Tab Tempel Teks
+                </button>
               </div>
             )}
 
@@ -704,6 +716,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                     <div
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
                       className={`relative overflow-hidden p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center transition-all cursor-pointer ${
                         selectedPdfFile
                           ? 'border-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30'
@@ -713,7 +726,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                       <input
                         type="file"
                         ref={fileInputRef}
-                        accept="application/pdf,.pdf"
+                        accept=".pdf,application/pdf,application/octet-stream,*/*"
                         className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
                         onChange={(e) => {
                           if (e.target.files && e.target.files.length > 0) {
@@ -732,9 +745,39 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
 
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
                         {selectedPdfFile
-                          ? `Ukuran berkas: ${(selectedPdfFile.size / (1024 * 1024)).toFixed(2)} MB • Siap dipindai`
-                          : 'Sentuh area ini untuk memilih berkas PDF naskah tugas / ujian dari perangkat HP atau komputer Anda.'}
+                          ? `Ukuran berkas: ${(selectedPdfFile.size / (1024 * 1024)).toFixed(2)} MB • Berkas siap dipindai AI`
+                          : 'Sentuh area ini atau gunakan tombol di bawah untuk memilih naskah soal PDF dari HP (Median / Browser) atau Komputer Anda.'}
                       </p>
+
+                      {/* Tombol Aksi Nyata yang Dapat Disentuh di HP */}
+                      <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2 relative z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fileInputRef.current?.click();
+                          }}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-bold shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <FileUp className="w-3.5 h-3.5 text-rose-400" />
+                          <span>{selectedPdfFile ? 'Ganti Berkas PDF' : 'Pilih Berkas PDF'}</span>
+                        </button>
+
+                        {selectedPdfFile && (
+                          <button
+                            type="button"
+                            disabled={isExtractingPdf}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExtractFromPdf();
+                            }}
+                            className="px-5 py-2 bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Ekstrak Soal Sekarang</span>
+                          </button>
+                        )}
+                      </div>
 
                       <div className="mt-4 flex items-center justify-center gap-2">
                         <span className="px-2.5 py-1 bg-white dark:bg-slate-750 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold border border-slate-200 dark:border-slate-700">

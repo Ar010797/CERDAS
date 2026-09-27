@@ -1156,65 +1156,111 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const ai = getAi();
       const fileBuffer = req.file.buffer;
-      const mimeType = req.file.mimetype || "application/pdf";
+      let mimeType = req.file.mimetype || "application/pdf";
+      if (!mimeType || mimeType === 'application/octet-stream' || req.file.originalname?.toLowerCase().endsWith('.pdf')) {
+        mimeType = 'application/pdf';
+      }
       const base64Data = fileBuffer.toString("base64");
 
-      const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.8-flash",
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType: mimeType
-              }
-            },
-            {
-              text: `Ekstrak soal-soal dari dokumen ini. Kategorikan apakah itu 'Pilihan Ganda' atau 'Uraian'. Untuk Pilihan Ganda, ambil opsi (A,B,C,D) dan jawaban benarnya jika ada. Kembalikan dalam format JSON array.`
-            }
-          ]
-        },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                text: { type: Type.STRING, description: "Pertanyaan soal" },
-                type: { type: Type.STRING, description: "Hanya gunakan salah satu dari: 'Pilihan Ganda' atau 'Uraian'" },
-                options: { 
-                  type: Type.ARRAY, 
-                  items: { type: Type.STRING },
-                  description: "Array pilihan jawaban (untuk Pilihan Ganda). Kosongkan jika Uraian."
-                },
-                correctAnswer: { 
-                  type: Type.STRING, 
-                  description: "Jawaban yang benar dari pilihan ganda. Kosongkan jika uraian." 
+      let json: any = null;
+
+      try {
+        const ai = getAi();
+        const response = await callGeminiWithRetry(ai, {
+          model: "gemini-3.8-flash",
+          timeoutMs: 30000,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: mimeType
                 }
               },
-              required: ["text", "type"]
+              {
+                text: `Ekstrak soal-soal dari dokumen ini. Kategorikan apakah itu 'Pilihan Ganda' atau 'Uraian'. Untuk Pilihan Ganda, ambil opsi (A,B,C,D) dan jawaban benarnya jika ada. Kembalikan dalam format JSON array.`
+              }
+            ]
+          },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  text: { type: Type.STRING, description: "Pertanyaan soal" },
+                  type: { type: Type.STRING, description: "Hanya gunakan salah satu dari: 'Pilihan Ganda' atau 'Uraian'" },
+                  options: { 
+                    type: Type.ARRAY, 
+                    items: { type: Type.STRING },
+                    description: "Array pilihan jawaban (untuk Pilihan Ganda). Kosongkan jika Uraian."
+                  },
+                  correctAnswer: { 
+                    type: Type.STRING, 
+                    description: "Jawaban yang benar dari pilihan ganda. Kosongkan jika uraian." 
+                  }
+                },
+                required: ["text", "type"]
+              }
             }
           }
-        }
-      });
+        });
 
-      let text = response.text || "";
-      if (!text) throw new Error("Tidak ada respon dari layanan AI.");
-      text = text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-      let json: any = null;
-      try {
-        json = JSON.parse(text);
-      } catch (e) {
-        const match = text.match(/\[[\s\S]*\]/);
-        if (match) {
-          json = JSON.parse(match[0]);
-        } else {
-          throw new Error("Format hasil ekstraksi tidak valid sebagai JSON.");
+        let text = response.text || "";
+        text = text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+        try {
+          json = JSON.parse(text);
+        } catch (e) {
+          const match = text.match(/\[[\s\S]*\]/);
+          if (match) {
+            json = JSON.parse(match[0]);
+          }
+        }
+      } catch (aiErr: any) {
+        console.warn("[Extract Questions AI Notice]:", aiErr?.message || aiErr);
+      }
+
+      // Fallback jika AI gagal / timeout
+      if (!Array.isArray(json) || json.length === 0) {
+        const rawText = extractTextFromPdfBuffer(fileBuffer);
+        if (rawText) {
+          const lines = rawText.split('\n').filter(l => l.trim().length > 0);
+          const fallbackQs: any[] = [];
+          let cur: any = null;
+          for (const line of lines) {
+            const m = line.match(/^(\d+)[\.\)]\s*(.+)/);
+            if (m) {
+              if (cur) fallbackQs.push(cur);
+              cur = {
+                text: m[2].trim(),
+                type: 'Pilihan Ganda',
+                options: [],
+                correctAnswer: ''
+              };
+              continue;
+            }
+            const optM = line.match(/^([A-D])[\.\)]\s*(.+)/i);
+            if (optM && cur) {
+              cur.options.push(optM[2].trim());
+              continue;
+            }
+            if (cur && cur.options.length === 0) {
+              cur.text += ' ' + line.trim();
+            }
+          }
+          if (cur) fallbackQs.push(cur);
+          if (fallbackQs.length > 0) {
+            json = fallbackQs;
+          }
         }
       }
+
+      if (!Array.isArray(json) || json.length === 0) {
+        return res.status(422).json({ error: "Tidak dapat mengekstrak butir soal dari berkas ini. Pastikan format teks terbaca jelas." });
+      }
+
       res.json(json);
 
     } catch (error: any) {
