@@ -36,6 +36,7 @@ export default function QuizQuestionEditor({
 
   // State untuk Impor PDF
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  const [selectedPdfBase64, setSelectedPdfBase64] = useState<string | null>(null);
   const [isExtractingPdf, setIsExtractingPdf] = useState(false);
   const [extractionProgressStep, setExtractionProgressStep] = useState(1);
   const [extractedPdfQuestions, setExtractedPdfQuestions] = useState<QuizQuestion[]>([]);
@@ -122,11 +123,28 @@ export default function QuizQuestionEditor({
     }
   };
 
+  const handleLoadSampleText = () => {
+    setImportText(`1. Siapakah presiden pertama Republik Indonesia yang membacakan teks proklamasi?
+A. Mohammad Hatta
+B. Ir. Soekarno
+C. Sutan Sjahrir
+D. Ki Hajar Dewantara
+Kunci: B
+Poin: 10
+Pembahasan: Ir. Soekarno bersama Moh. Hatta memproklamasikan kemerdekaan RI pada 17 Agustus 1945.
+
+2. [Esai] Jelaskan makna penting persatuan dan kesatuan dalam keberagaman bangsa Indonesia!
+Kunci: toleransi, kebersamaan, bhinneka tunggal ika, kekuatan bangsa
+Poin: 20
+Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, dan budaya.`);
+    setImportError(null);
+  };
+
   // Handler Pilih Berkas PDF
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (!file) return;
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (!isPdf) {
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf') || file.type.includes('pdf') || !file.type;
+    if (!isPdf && !file.name.toLowerCase().includes('.pdf')) {
       setImportError('Format berkas harus berupa dokumen PDF (.pdf).');
       return;
     }
@@ -139,6 +157,28 @@ export default function QuizQuestionEditor({
     setExtractedPdfQuestions([]);
     setSelectedExtractedIndices([]);
     setPdfStats(null);
+
+    // Langsung konversi ke Base64 saat dipilih agar fresh dan tidak terhambat content provider Android
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+      }
+      setSelectedPdfBase64(btoa(binary));
+    } catch (e) {
+      console.warn("ArrayBuffer conversion notice:", e);
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result as string;
+          setSelectedPdfBase64(res.includes('base64,') ? res.split('base64,')[1] : res);
+        };
+        reader.readAsDataURL(file);
+      } catch {}
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -156,7 +196,6 @@ export default function QuizQuestionEditor({
     setImportError(null);
     setExtractionProgressStep(1);
 
-    // Timer simulasi progres untuk feedback interaktif
     const stepTimer1 = setTimeout(() => setExtractionProgressStep(2), 1200);
     const stepTimer2 = setTimeout(() => setExtractionProgressStep(3), 3500);
 
@@ -183,9 +222,57 @@ export default function QuizQuestionEditor({
     };
 
     try {
-      // 1. Percobaan Pertama: FormData multipart
-      let success = false;
+      // Dapatkan base64 string yang aman
+      let base64String = selectedPdfBase64;
+      if (!base64String) {
+        try {
+          const buffer = await selectedPdfFile.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          const chunkSize = 8192;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+          }
+          base64String = btoa(binary);
+        } catch {
+          base64String = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const res = reader.result as string;
+              resolve(res.includes('base64,') ? res.split('base64,')[1] : res);
+            };
+            reader.onerror = () => reject(new Error('Gagal membaca berkas di perangkat Anda.'));
+            reader.readAsDataURL(selectedPdfFile);
+          });
+        }
+      }
+
+      // 1. Percobaan Utama: JSON Base64 (paling andal di Android WebView & Median APK)
+      let extracted = false;
       try {
+        const response = await fetch('/api/quiz/import-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pdfBase64: base64String,
+            filename: selectedPdfFile.name,
+            mimeType: selectedPdfFile.type || 'application/pdf'
+          })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
+          processQuestionsData(data);
+          extracted = true;
+        } else if (!response.ok && data?.error) {
+          throw new Error(data.error);
+        }
+      } catch (jsonErr: any) {
+        console.warn('JSON Base64 attempt error, trying FormData fallback:', jsonErr);
+      }
+
+      // 2. Percobaan Cadangan: FormData multipart
+      if (!extracted) {
         const formData = new FormData();
         formData.append('file', selectedPdfFile);
 
@@ -194,50 +281,21 @@ export default function QuizQuestionEditor({
           body: formData
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.success) {
-            processQuestionsData(data);
-            success = true;
-          }
-        }
-      } catch (formErr) {
-        console.warn('FormData fetch issue in WebView, attempting base64 fallback:', formErr);
-      }
-
-      // 2. Percobaan Kedua (Fallback untuk Median APK / Android WebView): Base64 JSON
-      if (!success) {
-        const base64Data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const res = reader.result as string;
-            resolve(res);
-          };
-          reader.onerror = () => reject(new Error('Gagal membaca berkas di perangkat Anda.'));
-          reader.readAsDataURL(selectedPdfFile);
-        });
-
-        const response = await fetch('/api/quiz/import-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pdfBase64: base64Data,
-            filename: selectedPdfFile.name,
-            mimeType: selectedPdfFile.type || 'application/pdf'
-          })
-        });
-
         const data = await response.json();
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || 'Gagal mengekstrak soal dari berkas PDF.');
+        if (response.ok && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
+          processQuestionsData(data);
+          extracted = true;
+        } else {
+          throw new Error(data?.error || 'Gagal mengekstrak butir soal dari berkas PDF.');
         }
-
-        processQuestionsData(data);
       }
 
     } catch (err: any) {
       console.error('Extraction error:', err);
-      setImportError(err.message || 'Terjadi kesalahan saat memproses berkas PDF di perangkat Anda. Coba pilih file kembali atau gunakan tab Tempel Teks Soal.');
+      setImportError(
+        (err.message || 'Terjadi kesalahan saat memproses berkas PDF di perangkat Anda.') +
+        ' Anda juga dapat menyalin naskah soal dan menempelnya langsung di tab "Tempel Teks Soal".'
+      );
     } finally {
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
@@ -646,8 +704,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                     <div
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={handleDrop}
-                      onClick={() => fileInputRef.current?.click()}
-                      className={`p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center transition-all cursor-pointer ${
+                      className={`relative overflow-hidden p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center transition-all cursor-pointer ${
                         selectedPdfFile
                           ? 'border-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30'
                           : 'border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 hover:bg-slate-100/70 hover:border-indigo-400'
@@ -656,8 +713,8 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                       <input
                         type="file"
                         ref={fileInputRef}
-                        accept=".pdf,application/pdf,*/*"
-                        className="hidden"
+                        accept="application/pdf,.pdf"
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
                         onChange={(e) => {
                           if (e.target.files && e.target.files.length > 0) {
                             handleFileSelect(e.target.files[0]);
@@ -670,13 +727,13 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                       </div>
 
                       <h5 className="text-sm font-bold text-slate-800 dark:text-white">
-                        {selectedPdfFile ? selectedPdfFile.name : 'Tarik & Lepas Dokumen PDF Soal ke Sini'}
+                        {selectedPdfFile ? selectedPdfFile.name : 'Pilih / Sentuh Berkas PDF Naskah Soal'}
                       </h5>
 
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
                         {selectedPdfFile
                           ? `Ukuran berkas: ${(selectedPdfFile.size / (1024 * 1024)).toFixed(2)} MB • Siap dipindai`
-                          : 'Atau klik untuk memilih berkas PDF naskah tugas / ujian dari komputer Anda.'}
+                          : 'Sentuh area ini untuk memilih berkas PDF naskah tugas / ujian dari perangkat HP atau komputer Anda.'}
                       </p>
 
                       <div className="mt-4 flex items-center justify-center gap-2">

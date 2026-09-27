@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { triggerFloatingNotification } from '../components/FloatingNotificationCenter';
 
 export interface UpcomingScheduleAlert {
   id: string;
@@ -216,7 +217,18 @@ export function useScheduleReminder(customClassId?: string) {
           playScheduleChime();
         }
 
-        // Browser notification if in background
+        // 1. Selalu tampilkan In-App Floating Heads-Up Banner di aplikasi
+        try {
+          triggerFloatingNotification({
+            title: `🔔 Jadwal Dimulai dalam ${alert.minutesUntilStart} Menit!`,
+            body: `${alert.mataPelajaran} (${alert.classId}) akan dimulai pukul ${alert.startsAt} WIB. Pengajar: ${alert.pengajar}`,
+            type: 'general',
+            category: 'Pengingat Jadwal',
+            durationMs: 8000
+          });
+        } catch {}
+
+        // 2. Browser notification jika diizinkan
         if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
           try {
             new Notification(`🔔 Jadwal Dimulai dalam ${alert.minutesUntilStart} Menit!`, {

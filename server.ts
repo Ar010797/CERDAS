@@ -1223,7 +1223,45 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }
   });
 
-  // API 2b: Import & Extract Online Quiz Questions from PDF document (Multimodal Gemini 3.8 Flash)
+  // Helper untuk mengekstrak teks langsung dari buffer berkas PDF
+  const extractTextFromPdfBuffer = (buffer: Buffer): string => {
+    try {
+      const raw = buffer.toString("latin1");
+      const textPieces: string[] = [];
+
+      // 1. Ekstrak dari blok BT ... ET (PDF standard text object)
+      const btBlocks = raw.match(/BT[\s\S]*?ET/g);
+      if (btBlocks) {
+        for (const block of btBlocks) {
+          const matches = block.match(/\(([^)]+)\)/g);
+          if (matches) {
+            const line = matches.map(x => x.slice(1, -1).replace(/\\[rntbf\\]/g, ' ')).join(' ').trim();
+            if (line.length > 2 && /[a-zA-Z0-9]/.test(line)) {
+              textPieces.push(line);
+            }
+          }
+        }
+      }
+
+      // 2. Ekstrak dari teks di dalam tanda kurung ( ... )
+      const parenMatches = raw.match(/\(([a-zA-Z0-9\s.,?!:;'"()/-]{3,})\)/g);
+      if (parenMatches) {
+        for (const m of parenMatches) {
+          const clean = m.slice(1, -1).trim();
+          if (clean.length > 3 && !textPieces.includes(clean)) {
+            textPieces.push(clean);
+          }
+        }
+      }
+
+      return textPieces.join("\n");
+    } catch (e) {
+      console.warn("extractTextFromPdfBuffer error:", e);
+      return "";
+    }
+  };
+
+  // API 2b: Import & Extract Online Quiz Questions from PDF document (Multimodal Gemini 3.8 Flash & Text Fallback)
   app.post(["/api/quiz/import-pdf", "/api/extract-questions-from-pdf"], upload.single("file"), async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
@@ -1236,7 +1274,7 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         originalName = req.file.originalname || "dokumen_soal.pdf";
         mimeType = req.file.mimetype || "application/pdf";
         if (!mimeType || mimeType === 'application/octet-stream') {
-          mimeType = originalName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/pdf';
+          mimeType = 'application/pdf';
         }
       } else if (req.body && req.body.pdfBase64) {
         let cleanBase64 = String(req.body.pdfBase64);
@@ -1253,21 +1291,25 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
       }
 
       const base64Data = fileBuffer.toString("base64");
-      const ai = getAi();
+      let parsedQuestions: any[] = [];
+      let extractionSource = "ai_multimodal";
 
-      const response = await callGeminiWithRetry(ai, {
-        model: "gemini-3.8-flash",
-        timeoutMs: 40000,
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType: mimeType
-              }
-            },
-            {
-              text: `Anda adalah pakar kurikulum dan asisten pembuat soal ujian sekolah (SD/SMP/SMA).
+      // 1. Percobaan Utama: Multimodal Gemini 3.8 Flash
+      try {
+        const ai = getAi();
+        const response = await callGeminiWithRetry(ai, {
+          model: "gemini-3.8-flash",
+          timeoutMs: 35000,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: "application/pdf"
+                }
+              },
+              {
+                text: `Anda adalah pakar kurikulum dan asisten pembuat soal ujian sekolah (SD/SMP/SMA).
 Tugas Anda adalah membaca dan menganalisis seluruh isi dokumen PDF bank soal / lembar tugas ini secara teliti.
 Ekstrak SEMUA butir soal yang ada di dalam dokumen menjadi format array JSON terstruktur yang siap dipakai untuk ujian online interaktif.
 
@@ -1295,53 +1337,140 @@ Aturan Ekstraksi Setiap Soal:
    - Pembahasan singkat atau alasan edukatif mengapa jawaban tersebut benar (1-2 kalimat).
 
 Kembalikan format JSON murni berupa array of objects.`
-            }
-          ]
-        },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                questionText: { type: Type.STRING, description: "Kalimat soal tanpa nomor" },
-                type: { type: Type.STRING, description: "Hanya 'multiple_choice' atau 'essay'" },
-                options: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING, description: "Huruf opsi: 'A', 'B', 'C', 'D'" },
-                      text: { type: Type.STRING, description: "Teks opsi jawaban tanpa awalan huruf" }
+              }
+            ]
+          },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  questionText: { type: Type.STRING, description: "Kalimat soal tanpa nomor" },
+                  type: { type: Type.STRING, description: "Hanya 'multiple_choice' atau 'essay'" },
+                  options: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING, description: "Huruf opsi: 'A', 'B', 'C', 'D'" },
+                        text: { type: Type.STRING, description: "Teks opsi jawaban tanpa awalan huruf" }
+                      },
+                      required: ["id", "text"]
                     },
-                    required: ["id", "text"]
+                    description: "Array pilihan opsi untuk multiple_choice"
                   },
-                  description: "Array pilihan opsi untuk multiple_choice"
+                  correctAnswer: { type: Type.STRING, description: "Kunci jawaban: huruf 'A'/'B'/'C'/'D' untuk PG, atau kata kunci untuk esai" },
+                  points: { type: Type.NUMBER, description: "Bobot nilai (misal 10)" },
+                  explanation: { type: Type.STRING, description: "Pembahasan singkat" }
                 },
-                correctAnswer: { type: Type.STRING, description: "Kunci jawaban: huruf 'A'/'B'/'C'/'D' untuk PG, atau kata kunci untuk esai" },
-                points: { type: Type.NUMBER, description: "Bobot nilai (misal 10)" },
-                explanation: { type: Type.STRING, description: "Pembahasan singkat" }
-              },
-              required: ["questionText", "type", "points"]
+                required: ["questionText", "type", "points"]
+              }
+            }
+          }
+        });
+
+        let rawText = response.text || "";
+        rawText = rawText.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+
+        try {
+          parsedQuestions = JSON.parse(rawText);
+        } catch {
+          const match = rawText.match(/\[[\s\S]*\]/);
+          if (match) {
+            parsedQuestions = JSON.parse(match[0]);
+          }
+        }
+      } catch (aiErr: any) {
+        console.warn("[PDF Multimodal notice]:", aiErr?.message || aiErr);
+      }
+
+      // 2. Percobaan Cadangan (Fallback Teks Buffer jika multimodal belum mengembalikan soal):
+      if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+        extractionSource = "text_extractor_fallback";
+        const extractedText = extractTextFromPdfBuffer(fileBuffer);
+        
+        if (extractedText.length > 20) {
+          try {
+            // Coba panggil AI text generator dengan teks hasil ekstrak PDF
+            const ai = getAi();
+            const textResponse = await callGeminiWithRetry(ai, {
+              model: "gemini-3.8-flash",
+              timeoutMs: 25000,
+              contents: `Anda adalah pakar pembuat soal sekolah. Ubah teks dokumen PDF berikut menjadi array JSON butir soal ujian online:
+${extractedText.slice(0, 8000)}
+
+Format JSON Array yang diminta:
+[
+  {
+    "questionText": "Teks pertanyaan",
+    "type": "multiple_choice",
+    "options": [{"id": "A", "text": "Pilihan A"}, {"id": "B", "text": "Pilihan B"}, {"id": "C", "text": "Pilihan C"}, {"id": "D", "text": "Pilihan D"}],
+    "correctAnswer": "A",
+    "points": 10,
+    "explanation": "Pembahasan singkat"
+  }
+]
+Kembalikan JSON murni array of objects.`
+            });
+
+            const txt = (textResponse.text || "").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+            const match = txt.match(/\[[\s\S]*\]/);
+            if (match) {
+              parsedQuestions = JSON.parse(match[0]);
+            }
+          } catch (textAiErr) {
+            console.warn("[Text AI Fallback notice]:", textAiErr);
+          }
+
+          // Jika AI masih belum berhasil, gunakan parser heuristik berbasis teks
+          if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+            const lines = extractedText.split("\n").filter(l => l.trim().length > 0);
+            const simpleQuestions: any[] = [];
+            let currentQ: any = null;
+
+            for (const line of lines) {
+              const numMatch = line.match(/^(\d+)[\.\)]\s*(.+)/);
+              if (numMatch) {
+                if (currentQ) simpleQuestions.push(currentQ);
+                currentQ = {
+                  questionText: numMatch[2].trim(),
+                  type: 'multiple_choice',
+                  options: [],
+                  correctAnswer: 'A',
+                  points: 10,
+                  explanation: 'Pembahasan'
+                };
+                continue;
+              }
+
+              const optMatch = line.match(/^([A-D])[\.\)]\s*(.+)/i);
+              if (optMatch && currentQ) {
+                currentQ.options.push({
+                  id: optMatch[1].toUpperCase(),
+                  text: optMatch[2].trim()
+                });
+                continue;
+              }
+
+              if (currentQ && currentQ.options.length === 0) {
+                currentQ.questionText += ' ' + line.trim();
+              }
+            }
+            if (currentQ) simpleQuestions.push(currentQ);
+            if (simpleQuestions.length > 0) {
+              parsedQuestions = simpleQuestions;
             }
           }
         }
-      });
+      }
 
-      let rawText = response.text || "";
-      rawText = rawText.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-
-      let parsedQuestions: any[] = [];
-      try {
-        parsedQuestions = JSON.parse(rawText);
-      } catch (parseErr) {
-        const match = rawText.match(/\[[\s\S]*\]/);
-        if (match) {
-          parsedQuestions = JSON.parse(match[0]);
-        } else {
-          throw new Error("Gagal mengurai respon AI menjadi format butir soal.");
-        }
+      if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+        return res.status(422).json({
+          success: false,
+          error: "Dokumen PDF terbaca namun tidak terdeteksi butir soal dengan format nomor atau pilihan ganda. Silakan gunakan tab 'Tempel Teks Soal' untuk memasukkan naskah soal langsung."
+        });
       }
 
       if (!Array.isArray(parsedQuestions)) {

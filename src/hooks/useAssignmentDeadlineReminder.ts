@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { getOfflineAssignments } from '../lib/offlineStorage';
+import { triggerFloatingNotification } from '../components/FloatingNotificationCenter';
 
 export interface AssignmentDeadlineAlert {
   id: string; // `${assignmentId}_${hoursLeft}h`
@@ -124,12 +125,10 @@ export async function requestBrowserNotificationPermission(): Promise<Notificati
 }
 
 /**
- * Menampilkan Browser Notification API untuk pengingat tenggat tugas
+ * Menampilkan Notifikasi untuk pengingat tenggat tugas
+ * Bekerja hybrid: Selalu memicu In-App Floating Banner + Web Notification jika diizinkan
  */
 export function sendBrowserDeadlineNotification(alert: AssignmentDeadlineAlert) {
-  if (typeof window === 'undefined' || !('Notification' in window)) return;
-  if (Notification.permission !== 'granted') return;
-
   const hours = alert.diffHours;
   const minutes = alert.diffMinutes;
   let timeStr = `${hours} jam lagi`;
@@ -142,6 +141,22 @@ export function sendBrowserDeadlineNotification(alert: AssignmentDeadlineAlert) 
     : `⏰ Pengingat Tugas: ${alert.title}`;
 
   const body = `Mata Pelajaran: ${alert.subject}\nBatas Waktu: ${alert.dueDate} pukul ${alert.dueTime} (${timeStr}). Segera selesaikan dan kirim lembar jawaban Anda!`;
+
+  // 1. Selalu tampilkan In-App Floating Heads-Up Banner (tidak pernah terblokir oleh browser/Median APK)
+  try {
+    triggerFloatingNotification({
+      title,
+      body,
+      url: '/walimurid/assignments',
+      type: 'new_assignment',
+      category: 'Pengingat Tugas & Ujian',
+      durationMs: 9000
+    });
+  } catch {}
+
+  // 2. Tampilkan Web Notification browser jika diizinkan
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
 
   try {
     // 1. Coba lewat Service Worker jika ada

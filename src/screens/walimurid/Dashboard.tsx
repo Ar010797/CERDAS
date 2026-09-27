@@ -14,7 +14,6 @@ import {
   Save,
   MessageSquare,
   Clock,
-  Image as ImageIcon,
   Wallet,
   Coins,
   Bell,
@@ -59,7 +58,7 @@ export default function WaliMuridDashboard() {
   const isOnline = useOnlineStatus();
   
   // Tab Navigation State
-  const [activeTab, setActiveTab] = useState<'ringkasan' | 'akademik' | 'tugas' | 'pengumuman' | 'jadwal' | 'keuangan' | 'galeri' | 'profil'>('ringkasan');
+  const [activeTab, setActiveTab] = useState<'ringkasan' | 'akademik' | 'tugas' | 'pengumuman' | 'jadwal' | 'keuangan' | 'profil'>('ringkasan');
   const [isRaporPreviewOpen, setIsRaporPreviewOpen] = useState(false);
   
   // Real-time data
@@ -86,7 +85,6 @@ export default function WaliMuridDashboard() {
   const [loading, setLoading] = useState(true);
 
   // Extra Data
-  const [photos, setPhotos] = useState<any[]>([]);
   const [savingTransactions, setSavingTransactions] = useState<any[]>([]);
   const [kasTransactions, setKasTransactions] = useState<any[]>([]);
 
@@ -134,7 +132,7 @@ export default function WaliMuridDashboard() {
     const unsubStudent = onSnapshot(doc(db, 'students', userData.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setStudentData(data);
+        setStudentData({ id: docSnap.id, ...data });
         setFormData({
           name: data.name || '',
           gender: data.gender || 'L',
@@ -230,53 +228,55 @@ export default function WaliMuridDashboard() {
     };
   }, [userData, todayStr]);
 
-  // Subjects, gallery, and finance
+  // Subjects and finance (Tabungan & Kas)
   useEffect(() => {
-    if (!studentData?.classId || !studentData?.id) return;
+    const classId = studentData?.classId;
+    const currentStudentId = studentData?.id || userData?.uid;
+    if (!classId && !currentStudentId) return;
     
     // Subjects
-    const unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', studentData.classId), (docSnap) => {
-      if (docSnap.exists()) {
-        const d = docSnap.data();
-        setSubjects(d.subjects || []);
-        setKkmMap(d.kkmMap || {});
-      } else {
-        setSubjects([]);
-        setKkmMap({});
-      }
-    }, (err) => console.warn("unsubSubjects error:", err));
+    let unsubSubjects = () => {};
+    if (classId) {
+      unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', classId), (docSnap) => {
+        if (docSnap.exists()) {
+          const d = docSnap.data();
+          setSubjects(d.subjects || []);
+          setKkmMap(d.kkmMap || {});
+        } else {
+          setSubjects([]);
+          setKkmMap({});
+        }
+      }, (err) => console.warn("unsubSubjects error:", err));
+    }
 
-    // Gallery
-    const qGallery = query(collection(db, 'gallery'), where('classId', '==', studentData.classId));
-    const unsubGallery = onSnapshot(qGallery, (snap) => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      docs.sort((a: any, b: any) => (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0));
-      setPhotos(docs);
-    }, (err) => console.warn("unsubGallery error:", err));
+    // Savings (Tabungan Siswa)
+    let unsubSavings = () => {};
+    if (currentStudentId) {
+      const qSavings = query(collection(db, 'savings'), where('studentId', '==', currentStudentId));
+      unsubSavings = onSnapshot(qSavings, (snap) => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        setSavingTransactions(docs);
+      }, (err) => console.warn("unsubSavings error:", err));
+    }
 
-    // Savings
-    const qSavings = query(collection(db, 'savings'), where('studentId', '==', studentData.id));
-    const unsubSavings = onSnapshot(qSavings, (snap) => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-      setSavingTransactions(docs);
-    }, (err) => console.warn("unsubSavings error:", err));
-
-    // Kas
-    const qKas = query(collection(db, 'kas'), where('classId', '==', studentData.classId));
-    const unsubKas = onSnapshot(qKas, (snap) => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-      setKasTransactions(docs);
-    }, (err) => console.warn("unsubKas error:", err));
+    // Kas Kelas
+    let unsubKas = () => {};
+    if (classId) {
+      const qKas = query(collection(db, 'kas'), where('classId', '==', classId));
+      unsubKas = onSnapshot(qKas, (snap) => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        docs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        setKasTransactions(docs);
+      }, (err) => console.warn("unsubKas error:", err));
+    }
 
     return () => {
       unsubSubjects();
-      unsubGallery();
       unsubSavings();
       unsubKas();
     };
-  }, [studentData?.classId, studentData?.id]);
+  }, [studentData?.classId, studentData?.id, userData?.uid]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -808,18 +808,6 @@ export default function WaliMuridDashboard() {
         >
           <Wallet className="w-3.5 h-3.5" />
           <span>Keuangan & Tabungan</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('galeri')}
-          className={`py-2 px-3.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
-            activeTab === 'galeri'
-              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
-        >
-          <ImageIcon className="w-3.5 h-3.5" />
-          <span>Galeri Kegiatan</span>
         </button>
 
         <button
@@ -1626,44 +1614,6 @@ export default function WaliMuridDashboard() {
                 </table>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB: GALERI KEGIATAN */}
-      {activeTab === 'galeri' && (
-        <div className="space-y-4 animate-in fade-in duration-150">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-slate-800 dark:text-white">Galeri Kegiatan Santri Kelas {studentData?.classId}</h3>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-            {photos.length === 0 ? (
-              <div className="col-span-full bg-white dark:bg-slate-900 rounded-3xl p-12 text-center border border-slate-200/80 dark:border-slate-800 flex flex-col items-center">
-                <ImageIcon className="w-12 h-12 text-slate-300 dark:text-slate-600 mb-3" />
-                <h4 className="text-base font-bold text-slate-700 dark:text-slate-300">Belum Ada Foto Kegiatan</h4>
-                <p className="text-xs text-slate-400 mt-1">Dokumentasi momen kegiatan kelas akan diunggah oleh wali kelas di sini.</p>
-              </div>
-            ) : (
-              photos.map((photo) => (
-                <div key={photo.id} className="bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden group">
-                  <div className="aspect-square bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
-                    <img 
-                      src={photo.url} 
-                      alt={photo.caption} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  </div>
-                  <div className="p-3">
-                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 line-clamp-2">
-                      {photo.caption || 'Momen kegiatan kelas'}
-                    </p>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      {photo.createdAt?.toDate ? format(photo.createdAt.toDate(), 'dd MMM yyyy', { locale: id }) : ''}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
           </div>
         </div>
       )}
