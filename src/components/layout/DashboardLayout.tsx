@@ -11,6 +11,7 @@ import AssignmentDeadlineBell from '../AssignmentDeadlineBell';
 import AssignmentDeadlineBanner from '../AssignmentDeadlineBanner';
 import { useScheduleReminder } from '../../hooks/useScheduleReminder';
 import { useAssignmentDeadlineReminder } from '../../hooks/useAssignmentDeadlineReminder';
+import { useNativeFCMPush } from '../../hooks/useNativeFCMPush';
 import { OfflineIndicator } from '../OfflineIndicator';
 import { PWAInstallButton } from '../PWAInstallButton';
 import FloatingNotificationCenter from '../FloatingNotificationCenter';
@@ -60,6 +61,9 @@ export const DashboardLayout = () => {
     requestPermission: requestDeadlineNotifPermission,
     triggerSimulation: triggerDeadlineSimulation
   } = useAssignmentDeadlineReminder();
+
+  // Automatic Native Mobile Push (FCM / Median / Capacitor) Initialization
+  useNativeFCMPush();
 
   const handleLogout = () => {
     logout();
