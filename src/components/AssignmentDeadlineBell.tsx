@@ -137,14 +137,27 @@ export default function AssignmentDeadlineBell({ customClassId }: Props) {
               <div className="px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800/50 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
                   <Bell className="w-3.5 h-3.5" />
-                  <span>Notifikasi browser belum aktif</span>
+                  <span>
+                    {notificationPermission === 'denied' ? 'Notifikasi dicekal peramban' : 'Notifikasi browser belum aktif'}
+                  </span>
                 </div>
-                <button
-                  onClick={requestPermission}
-                  className="px-2 py-0.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px]"
-                >
-                  Izinkan
-                </button>
+                {notificationPermission === 'denied' ? (
+                  <button
+                    onClick={() => {
+                      alert('Notifikasi saat ini diblokir oleh setelan browser Anda.\n\nCara Membuka:\n1. Klik ikon gembok di sebelah kiri alamat web URL (atas).\n2. Pilih Izin / Notifikasi -> Ubah ke "Izinkan" (Allow).\n3. Refresh halaman aplikasi.\n\nCatatan: Banner mengambang di dalam aplikasi tetap 100% aktif.');
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px]"
+                  >
+                    Buka Blokir
+                  </button>
+                ) : (
+                  <button
+                    onClick={requestPermission}
+                    className="px-2 py-0.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px]"
+                  >
+                    Izinkan
+                  </button>
+                )}
               </div>
             )}
 

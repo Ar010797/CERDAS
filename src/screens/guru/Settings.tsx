@@ -4,6 +4,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { BookOpen, Building, AlertTriangle, Plus, Trash2, Save, Users, CheckCircle, PenTool } from 'lucide-react';
 import DigitalSignatureUpload from '../../components/DigitalSignatureUpload';
+import ClassSelectWithCustom from '../../components/ClassSelectWithCustom';
 
 export default function SettingsGuru() {
   const { userData, login } = useAuth();
@@ -315,13 +316,11 @@ export default function SettingsGuru() {
             </h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nama Kelas yang Anda Pegang</label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Kelas 1, Kelas 2A"
+                <ClassSelectWithCustom
+                  label="Nama Kelas yang Anda Pegang"
                   value={kelasName}
-                  onChange={e => setKelasName(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  onChange={val => setKelasName(val)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-semibold"
                 />
               </div>
               <div>

@@ -5,6 +5,7 @@ import { Upload, Plus, Trash2, Search, FileSpreadsheet, Filter, Edit2, X, FileDo
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../contexts/AuthContext';
 import { normalizeClassName, CLASS_GROUPS, POPULAR_CLASSES, ALL_AVAILABLE_CLASSES } from '../../lib/schoolClasses';
+import ClassSelectWithCustom from '../../components/ClassSelectWithCustom';
 
 interface Student {
   id: string;
@@ -664,23 +665,13 @@ export default function StudentsAdmin() {
                     <option value="P">Perempuan</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Kelas</label>
-                  <select
+                <div className="w-full">
+                  <ClassSelectWithCustom
+                    label="Kelas"
                     value={formData.classId}
-                    onChange={(e) => setFormData({...formData, classId: e.target.value})}
+                    onChange={(val) => setFormData({...formData, classId: val})}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-semibold text-slate-700"
-                  >
-                    {CLASS_GROUPS.map((group) => (
-                      <optgroup key={group.groupName} label={group.groupName}>
-                        {group.classes.map((cls) => (
-                          <option key={cls} value={cls}>
-                            {cls}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
 

@@ -147,7 +147,7 @@ export function sendBrowserDeadlineNotification(alert: AssignmentDeadlineAlert) 
     triggerFloatingNotification({
       title,
       body,
-      url: '/walimurid/assignments',
+      url: '/assignments',
       type: 'new_assignment',
       category: 'Pengingat Tugas & Ujian',
       durationMs: 9000

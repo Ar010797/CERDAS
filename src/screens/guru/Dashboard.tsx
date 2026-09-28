@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, getDocs, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
@@ -15,7 +15,8 @@ import {
   CheckCircle2, 
   Sparkles,
   Clock,
-  Layers
+  AlertCircle,
+  HelpCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
@@ -24,13 +25,22 @@ import CalendarWidget from '../../components/CalendarWidget';
 
 export default function GuruDashboard() {
   const { userData } = useAuth();
-  const assignedClass = userData?.assigned_class || 'Kelas 1';
+  const assignedClass = userData?.assigned_class || 'Kelas 1 A';
   const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayDisplay = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id });
 
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [studentCount, setStudentCount] = useState<number>(0);
-  const [todayAttendanceCount, setTodayAttendanceCount] = useState<{ hadir: number; total: number }>({ hadir: 0, total: 0 });
+  const [attendanceBreakdown, setAttendanceBreakdown] = useState<{
+    hadir: number;
+    izin: number;
+    sakit: number;
+    alpa: number;
+    total: number;
+  }>({ hadir: 0, izin: 0, sakit: 0, alpa: 0, total: 0 });
   const [activeAssignmentsCount, setActiveAssignmentsCount] = useState<number>(0);
+  const [pendingGradingCount, setPendingGradingCount] = useState<number>(0);
+  const [kasBalance, setKasBalance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -47,16 +57,23 @@ export default function GuruDashboard() {
       where('date', '==', todayStr)
     );
     const unsubAtt = onSnapshot(qAtt, (snap) => {
-      let hadirCount = 0;
+      let hadir = 0;
+      let izin = 0;
+      let sakit = 0;
+      let alpa = 0;
       snap.forEach(d => {
-        if (d.data().status === 'Hadir') hadirCount++;
+        const st = d.data().status;
+        if (st === 'Hadir') hadir++;
+        else if (st === 'Izin') izin++;
+        else if (st === 'Sakit') sakit++;
+        else if (st === 'Alpa') alpa++;
       });
-      setTodayAttendanceCount({ hadir: hadirCount, total: snap.size });
+      setAttendanceBreakdown({ hadir, izin, sakit, alpa, total: snap.size });
     }, (err) => console.warn('unsubAtt error:', err));
 
     // 3. Tugas Aktif
     const qAssign = query(
-      collection(db, 'assignments'),
+      collection(db, 'tugas'),
       where('classId', '==', assignedClass),
       where('status', '==', 'active')
     );
@@ -64,8 +81,33 @@ export default function GuruDashboard() {
       setActiveAssignmentsCount(snap.size);
     }, (err) => console.warn('unsubAssign error:', err));
 
-    // 4. Pengumuman Terbaru
-    const qAnnounce = query(collection(db, 'announcements'), orderBy('date', 'desc'), limit(4));
+    // 4. Submisi Tugas yang Belum Dinilai (Pending Grading)
+    const qSubmissions = query(
+      collection(db, 'pengumpulan_tugas'),
+      where('classId', '==', assignedClass),
+      where('status', '==', 'submitted')
+    );
+    const unsubSubmissions = onSnapshot(qSubmissions, (snap) => {
+      setPendingGradingCount(snap.size);
+    }, (err) => console.warn('unsubSubmissions error:', err));
+
+    // 5. Kas Kelas
+    const qKas = query(
+      collection(db, 'kas_transactions'),
+      where('classId', '==', assignedClass)
+    );
+    const unsubKas = onSnapshot(qKas, (snap) => {
+      let balance = 0;
+      snap.forEach(d => {
+        const item = d.data();
+        if (item.type === 'masuk') balance += Number(item.amount) || 0;
+        else if (item.type === 'keluar') balance -= Number(item.amount) || 0;
+      });
+      setKasBalance(balance);
+    }, (err) => console.warn('unsubKas error:', err));
+
+    // 6. Pengumuman Terbaru
+    const qAnnounce = query(collection(db, 'announcements'), orderBy('date', 'desc'), limit(3));
     const unsubAnnounce = onSnapshot(qAnnounce, (snap) => {
       setAnnouncements(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
@@ -78,140 +120,220 @@ export default function GuruDashboard() {
       unsubStudents();
       unsubAtt();
       unsubAssign();
+      unsubSubmissions();
+      unsubKas();
       unsubAnnounce();
     };
   }, [assignedClass, todayStr]);
 
-  const quickMenus = [
-    {
-      title: 'Absensi Harian',
-      desc: todayAttendanceCount.total > 0
-        ? `${todayAttendanceCount.hadir} dari ${studentCount} santri hadir`
-        : 'Belum input kehadiran hari ini',
-      icon: ClipboardList,
-      to: '/guru/attendance',
-      color: 'bg-emerald-500',
-      badge: todayAttendanceCount.total > 0 ? 'Sudah Diisi' : 'Perlu Diisi'
-    },
-    {
-      title: 'Penilaian & Rapor',
-      desc: 'Kelola nilai tugas, PTS, PAS & cetak rapor',
-      icon: BookOpen,
-      to: '/guru/grades',
-      color: 'bg-indigo-600',
-      badge: 'Akademik'
-    },
-    {
-      title: 'Tugas & Ujian Online',
-      desc: `${activeAssignmentsCount} tugas online sedang aktif`,
-      icon: FileCheck,
-      to: '/guru/assignments',
-      color: 'bg-blue-600',
-      badge: `${activeAssignmentsCount} Aktif`
-    },
-    {
-      title: 'Bank Soal Ujian',
-      desc: 'Buat & impor naskah soal PDF otomatis',
-      icon: Layers,
-      to: '/guru/question-bank',
-      color: 'bg-purple-600',
-      badge: 'Cepat & AI'
-    },
-    {
-      title: 'Tabungan & Kas',
-      desc: 'Catat setoran tabungan & pengeluaran kas',
-      icon: Wallet,
-      to: '/guru/finance',
-      color: 'bg-amber-600',
-      badge: 'Keuangan'
-    }
-  ];
+  const hasAttendanceToday = attendanceBreakdown.total > 0;
+  const attendanceRate = studentCount > 0 
+    ? Math.round((attendanceBreakdown.hadir / studentCount) * 100) 
+    : 0;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* 1. Header Ringkas & Elegan */}
-      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-700 dark:from-slate-900 dark:via-indigo-950 dark:to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-md relative overflow-hidden border border-indigo-500/20">
+    <div className="space-y-6 max-w-7xl mx-auto pb-10">
+      {/* 1. Header Ringkas, Elegan, & Fokus Informasi Utama */}
+      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-indigo-500/20">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full -translate-y-1/3 translate-x-1/3 blur-2xl pointer-events-none" />
+
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm text-xs font-semibold mb-3 border border-white/20">
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-xs font-bold border border-white/20">
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span>Wali Kelas • {assignedClass}</span>
+              <span className="text-indigo-200">|</span>
+              <span className="text-indigo-200">{userData?.academicYear || 'T.A 2026/2027'}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Selamat Bertugas, {userData?.name || 'Bapak/Ibu Guru'}!
+
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+              Selamat Bertugas, {userData?.name || 'Ustadz / Ustadzah'}
             </h1>
-            <p className="text-indigo-100 dark:text-slate-300 text-xs sm:text-sm mt-1.5 max-w-xl leading-relaxed">
-              Pantau kehadiran santri, nilai akademik, tugas online, dan jadwal mengajar dengan mudah di satu tempat.
+
+            <p className="text-xs sm:text-sm text-indigo-200 font-medium">
+              Kelola aktivitas belajar, pantau kehadiran santri, dan tinjau kemajuan kelas Anda secara efektif.
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0">
-            <div className="bg-white/15 dark:bg-slate-800/80 backdrop-blur-sm px-4 py-2.5 rounded-2xl border border-white/20 flex items-center gap-2.5">
-              <CalendarDays className="w-5 h-5 text-indigo-200" />
-              <div className="text-left">
+          {/* Quick Date & Attendance Status CTA */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/15 flex items-center gap-3">
+              <CalendarDays className="w-5 h-5 text-indigo-300 shrink-0" />
+              <div>
                 <p className="text-[10px] text-indigo-200 uppercase tracking-wider font-bold">Hari Ini</p>
-                <p className="text-xs font-bold">{format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })}</p>
+                <p className="text-xs font-bold text-white">{todayDisplay}</p>
               </div>
             </div>
 
             <Link
               to="/guru/attendance"
-              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center gap-2"
+              className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 active:scale-95 ${
+                hasAttendanceToday
+                  ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                  : 'bg-amber-500 hover:bg-amber-600 text-white animate-pulse'
+              }`}
             >
               <ClipboardList className="w-4 h-4" />
-              <span>Input Absensi</span>
+              <span>{hasAttendanceToday ? '✅ Presensi Terisi' : '⚠️ Input Absensi Hari Ini'}</span>
             </Link>
           </div>
         </div>
       </div>
 
-      {/* 2. Menu Pintar Cepat (Simple & Berfungsi Maksimal) */}
-      <div>
-        <div className="flex items-center justify-between mb-3 px-1">
-          <h2 className="text-sm font-bold text-slate-800 dark:text-white uppercase tracking-wider">
-            Menu Utama Pengajaran
-          </h2>
-          <span className="text-xs text-slate-400">Kelas: {assignedClass} ({studentCount} Siswa Terdaftar)</span>
+      {/* 2. 4 Kartu Metrik Utama Operasional (Bukan Duplikasi Menu) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+        {/* Metrik 1: Kehadiran Siswa Hari Ini */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-2xs hover:shadow-sm transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Kehadiran Santri</span>
+              <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                <ClipboardList className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-900 dark:text-white">
+                {attendanceBreakdown.hadir}
+              </span>
+              <span className="text-xs text-slate-400">
+                / {studentCount} Santri
+              </span>
+            </div>
+
+            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 mt-2.5 overflow-hidden">
+              <div 
+                className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" 
+                style={{ width: `${Math.min(100, attendanceRate)}%` }} 
+              />
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {hasAttendanceToday 
+              ? `${attendanceBreakdown.izin} Izin, ${attendanceBreakdown.sakit} Sakit, ${attendanceBreakdown.alpa} Alpa`
+              : 'Belum ada absensi tersimpan'}
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5">
-          {quickMenus.map((item, idx) => (
-            <Link
-              key={idx}
-              to={item.to}
-              className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 shadow-2xs hover:shadow-sm transition-all group flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className={`w-10 h-10 rounded-xl ${item.color} text-white flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform`}>
-                    <item.icon className="w-5 h-5" />
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                    {item.badge}
-                  </span>
-                </div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                  {item.title}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
-                  {item.desc}
-                </p>
+        {/* Metrik 2: Tugas Menunggu Penilaian Guru */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-2xs hover:shadow-sm transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Perlu Dinilai</span>
+              <div className={`p-2 rounded-xl ${
+                pendingGradingCount > 0
+                  ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                  : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
+              }`}>
+                <FileCheck className="w-4 h-4" />
               </div>
+            </div>
 
-              <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                <span>Buka Menu</span>
-                <ArrowRight className="w-3.5 h-3.5 ml-1 group-hover:translate-x-1 transition-transform" />
+            <div className="flex items-baseline gap-2">
+              <span className={`text-2xl font-black ${pendingGradingCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
+                {pendingGradingCount}
+              </span>
+              <span className="text-xs text-slate-400">Submisi Masuk</span>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {pendingGradingCount > 0 ? (
+              <Link 
+                to="/guru/assignments" 
+                className="text-[11px] font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 flex items-center gap-1"
+              >
+                <span>Beri Nilai Sekarang</span>
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+            ) : (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                Semua tugas terkirim telah dinilai
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Metrik 3: Tugas Aktif Berjalan */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-2xs hover:shadow-sm transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Tugas Aktif</span>
+              <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                <BookOpen className="w-4 h-4" />
               </div>
-            </Link>
-          ))}
+            </div>
+
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-900 dark:text-white">
+                {activeAssignmentsCount}
+              </span>
+              <span className="text-xs text-slate-400">Tugas & Kuis</span>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            Nilai tugas otomatis masuk ke rapor
+          </p>
+        </div>
+
+        {/* Metrik 4: Saldo Kas Kelas */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-2xs hover:shadow-sm transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Saldo Kas Kelas</span>
+              <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+                <Wallet className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="flex items-baseline gap-1">
+              <span className="text-xs font-bold text-slate-400">Rp</span>
+              <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white truncate">
+                {kasBalance.toLocaleString('id-ID')}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            Kas perbendaharaan {assignedClass}
+          </p>
         </div>
       </div>
 
-      {/* 3. Grid: Jadwal Pelajaran & Pengumuman Sekolah */}
+      {/* 3. Action Alert Banner jika ada Tugas Siswa yang belum dinilai */}
+      {pendingGradingCount > 0 && (
+        <div className="bg-gradient-to-r from-rose-500 via-red-500 to-amber-600 text-white rounded-3xl p-4 sm:p-5 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-white/20 backdrop-blur-md">
+              <AlertCircle className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h4 className="text-sm sm:text-base font-black">
+                {pendingGradingCount} Tugas Siswa Baru Masuk Menunggu Penilaian
+              </h4>
+              <p className="text-xs text-white/90 font-medium">
+                Santri telah mengumpulkan tugas. Berikan nilai dan feedback agar skor otomatis tersinkronisasi ke buku rapor siswa.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/guru/assignments"
+            className="px-4 py-2 bg-white text-slate-900 hover:bg-yellow-200 rounded-xl font-bold text-xs transition-all shadow-sm shrink-0 flex items-center gap-1.5"
+          >
+            <span>Buka Lembar Penilaian</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      )}
+
+      {/* 4. Tampilan Utama: Jadwal Pelajaran & Kalender Kegiatan */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Kolom Kiri: Jadwal & Kalender */}
+        {/* Kolom Kiri: Jadwal Mengajar & Kalender Kelas */}
         <div className="lg:col-span-2 space-y-6">
-          <ScheduleWidget classId={assignedClass} title={`Jadwal Pengajaran & Ujian (${assignedClass})`} />
+          <ScheduleWidget classId={assignedClass} title={`Jadwal Pelajaran & Mengajar (${assignedClass})`} />
           <CalendarWidget targetRole="guru" classFilter={assignedClass} />
         </div>
 
@@ -222,42 +344,44 @@ export default function GuruDashboard() {
               <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-xl">
                 <Bell className="w-4 h-4" />
               </div>
-              <h3 className="text-sm font-bold text-slate-800 dark:text-white">Pengumuman Sekolah</h3>
+              <h3 className="font-bold text-slate-800 dark:text-white text-sm">
+                Pengumuman Sekolah
+              </h3>
             </div>
             <Link
               to="/guru/announcements"
-              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
             >
-              Lihat Semua
+              <span>Semua</span>
+              <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
 
           <div className="space-y-3">
-            {loading ? (
-              <p className="text-slate-400 text-xs text-center py-6">Memuat pengumuman...</p>
-            ) : announcements.length === 0 ? (
-              <div className="text-center py-8">
-                <Bell className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2 opacity-50" />
-                <p className="text-xs text-slate-500">Belum ada pengumuman baru.</p>
-              </div>
+            {announcements.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">
+                Belum ada pengumuman terbaru saat ini.
+              </p>
             ) : (
-              announcements.map((ann) => (
+              announcements.map((item) => (
                 <div
-                  key={ann.id}
-                  className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 hover:border-indigo-200 transition-colors"
+                  key={item.id}
+                  className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60 space-y-1"
                 >
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 mb-1 line-clamp-1">
-                    {ann.title}
-                  </h4>
-                  <p className="text-slate-600 dark:text-slate-300 text-xs line-clamp-2 leading-relaxed">
-                    {ann.content}
-                  </p>
-                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>{ann.author || 'Admin Sekolah'}</span>
-                    <span>
-                      {ann.date?.toDate ? format(ann.date.toDate(), 'dd MMM yyyy') : (ann.date || '')}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                      {item.category || 'Informasi'}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {item.date}
                     </span>
                   </div>
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 line-clamp-1">
+                    {item.title}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                    {item.content}
+                  </p>
                 </div>
               ))
             )}

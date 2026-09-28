@@ -471,8 +471,37 @@ export default function GradesGuru() {
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-700 rounded-3xl p-6 text-white shadow-lg">
         <h1 className="text-2xl font-bold tracking-tight">Manajemen Nilai & Rapor</h1>
         <p className="text-indigo-100 text-sm mt-1 max-w-xl">
-          Kelola nilai tugas, PTS, dan PAS siswa. Cetak otomatis ke PDF dalam bentuk Laporan Hasil Belajar.
+          Kelola nilai tugas, ulangan harian (UH), PTS, dan PAS siswa. Cetak otomatis ke PDF dalam bentuk Laporan Hasil Belajar resmi.
         </p>
+      </div>
+
+      {/* Info Card: Mekanisme Sinkronisasi Otomatis & Input Manual */}
+      <div className="bg-gradient-to-r from-indigo-50 to-emerald-50 dark:from-indigo-950/40 dark:to-emerald-950/30 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-indigo-600 text-white shrink-0">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div className="space-y-0.5">
+            <p className="font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm">
+              Mekanisme Pengisian Nilai Rapor CERDAS
+            </p>
+            <p className="text-slate-600 dark:text-slate-300">
+              ✅ <b>Nilai Tugas</b>: Masuk secara <b>otomatis</b> dari penilaian guru di lembar tugas atau kuis online aplikasi. <br />
+              ✍️ <b>Nilai UH, PTS, & PAS</b>: Diinput secara <b>manual</b> oleh guru melalui tombol <i>Input / Edit Nilai</i>.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSyncAssignments}
+          disabled={syncingAssignments}
+          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl shadow-xs shrink-0 flex items-center gap-1.5 transition-all"
+          title="Tarik seluruh nilai tugas dan kuis online siswa yang sudah dinilai"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${syncingAssignments ? 'animate-spin' : ''}`} />
+          <span>{syncingAssignments ? 'Menyinkronkan...' : 'Sinkronkan Tugas Sekarang'}</span>
+        </button>
       </div>
 
       <div className="bg-white dark:bg-slate-850 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden transition-colors">

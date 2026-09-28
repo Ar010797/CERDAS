@@ -6,6 +6,7 @@ import { auth, db } from '../lib/firebase';
 import { GraduationCap, Loader2, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAuth, UserData } from '../contexts/AuthContext';
+import ClassSelectWithCustom from '../components/ClassSelectWithCustom';
 
 type RoleOption = 'Admin' | 'Guru' | 'Wali Murid';
 
@@ -305,14 +306,12 @@ export default function Login() {
                 
                 {selectedRole === 'Guru' && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Wali Kelas Untuk</label>
-                    <select
+                    <ClassSelectWithCustom
+                      label="Wali Kelas Untuk"
                       value={registerClass}
-                      onChange={(e) => setRegisterClass(e.target.value)}
+                      onChange={(val) => setRegisterClass(val)}
                       className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-slate-800 font-medium"
-                    >
-                      {CLASSES_LIST.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    />
                   </div>
                 )}
               </>

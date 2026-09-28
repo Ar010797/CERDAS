@@ -54,6 +54,22 @@ const RootRedirect = () => {
   return <Navigate to="/login" replace />;
 };
 
+const AssignmentsRoleRedirect = () => {
+  const { userData, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 transition-colors">
+        <div className="w-8 h-8 border-3 border-indigo-200 dark:border-indigo-900 border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin mb-3" />
+        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Membuka tugas...</span>
+      </div>
+    );
+  }
+  if (!userData) return <Navigate to="/login" replace />;
+  if (userData.role === 'Admin') return <Navigate to="/admin/assignments" replace />;
+  if (userData.role === 'Guru') return <Navigate to="/guru/assignments" replace />;
+  return <Navigate to="/walimurid/assignments" replace />;
+};
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -116,6 +132,9 @@ export default function App() {
                 <Route path="calendar" element={<AcademicCalendar />} />
                 <Route path="announcements" element={<AnnouncementsAdmin />} />
               </Route>
+
+              {/* Direct route for notification clicks / shortcut */}
+              <Route path="/assignments" element={<AssignmentsRoleRedirect />} />
 
               {/* Catch-all route to prevent blank page on any unknown path or 404 */}
               <Route path="*" element={<Navigate to="/" replace />} />

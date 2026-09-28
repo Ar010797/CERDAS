@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Users, Plus, Edit2, Trash2, Shield, User, X, CheckCircle, AlertTriangle } from 'lucide-react';
+import ClassSelectWithCustom from '../../components/ClassSelectWithCustom';
 
 interface UserData {
   id: string;
@@ -351,14 +352,12 @@ export default function UsersAdmin() {
 
               {formData.role === 'Guru' && (
                 <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Wali Kelas Untuk</label>
-                  <select
+                  <ClassSelectWithCustom
+                    label="Wali Kelas Untuk"
                     value={formData.assigned_class}
-                    onChange={(e) => setFormData({...formData, assigned_class: e.target.value})}
+                    onChange={(val) => setFormData({...formData, assigned_class: val})}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-800"
-                  >
-                    {CLASSES_LIST.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  />
                 </div>
               )}
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   AlertTriangle, 
@@ -11,7 +11,9 @@ import {
   Bell, 
   CheckCircle2, 
   Sparkles,
-  ShieldAlert
+  ShieldAlert,
+  HelpCircle,
+  ExternalLink
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AssignmentDeadlineAlert } from '../hooks/useAssignmentDeadlineReminder';
@@ -36,6 +38,7 @@ export default function AssignmentDeadlineBanner({
   onTestReminder
 }: AssignmentDeadlineBannerProps) {
   const navigate = useNavigate();
+  const [showUnblockModal, setShowUnblockModal] = useState(false);
 
   if (!alerts || alerts.length === 0) return null;
 
@@ -123,7 +126,19 @@ export default function AssignmentDeadlineBanner({
                       title="Aktifkan notifikasi browser agar muncul di layar HP / Laptop"
                     >
                       <Bell className="w-3.5 h-3.5 text-amber-200" />
-                      <span className="hidden sm:inline">Izinkan Notifikasi Browser</span>
+                      <span className="hidden sm:inline">Izinkan Notifikasi</span>
+                    </button>
+                  )}
+
+                  {/* Web Notification Denied / Blocked Helper Button */}
+                  {notificationPermission === 'denied' && (
+                    <button
+                      onClick={() => setShowUnblockModal(true)}
+                      className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-950/80 text-rose-200 border border-rose-300/40 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      title="Notifikasi peramban diblokir oleh browser. Klik untuk melihat panduan mudah membukanya."
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-300 animate-pulse" />
+                      <span>Notifikasi Web Diblokir</span>
                     </button>
                   )}
 
@@ -162,6 +177,85 @@ export default function AssignmentDeadlineBanner({
             </motion.div>
           );
         })}
+      </AnimatePresence>
+
+      {/* Modal Panduan Buka Blokir Notifikasi Web */}
+      <AnimatePresence>
+        {showUnblockModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400">
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base">Panduan Buka Blokir Notifikasi</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Notifikasi peramban saat ini dicekal oleh pengaturan web browser
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowUnblockModal(false)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* In-App Reassurance */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 flex items-start gap-2.5 text-xs text-emerald-900 dark:text-emerald-200 font-medium">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                <span>
+                  <b>Tenang!</b> Banner pemberitahuan mengambang dan nada audio di dalam aplikasi CERDAS tetap <b>100% aktif berfungsi</b> mengingatkan tenggat tugas Anda.
+                </span>
+              </div>
+
+              {/* Steps to unblock */}
+              <div className="space-y-3 text-xs">
+                <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[11px]">
+                  Cara Mengaktifkan Notifikasi Layar Kunci / Pop-up:
+                </h4>
+
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2">
+                  <p className="font-bold text-slate-900 dark:text-white">
+                    📱 Pada Google Chrome / Android:
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-300">
+                    <li>Klik ikon <b>Gembok / Setelan Situs</b> di samping kiri kolom URL browser (paling atas).</li>
+                    <li>Pilih menu <b>Izin (Permissions)</b> atau <b>Notifikasi</b>.</li>
+                    <li>Ubah status dari <i>Blokir</i> menjadi <b>Izinkan (Allow)</b>.</li>
+                    <li>Muat ulang (refresh) halaman aplikasi.</li>
+                  </ol>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2">
+                  <p className="font-bold text-slate-900 dark:text-white">
+                    📱 Pada Aplikasi Median APK / WebView HP:
+                  </p>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                    Buka menu <b>Pengaturan HP &gt; Aplikasi &gt; CERDAS &gt; Notifikasi</b>, lalu pastikan tombol <b>Izinkan Notifikasi</b> telah diaktifkan ke posisi ON.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={() => setShowUnblockModal(false)}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all"
+                >
+                  Saya Mengerti
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
     </div>
   );
