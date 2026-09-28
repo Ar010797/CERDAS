@@ -17,6 +17,7 @@ import {
   Filter
 } from 'lucide-react';
 import { playNotificationSound, unlockAudioContext } from '../lib/audioNotifier';
+import { extractQuestionsDirectlyFromPdf } from '../lib/pdfQuestionExtractor';
 
 interface QuizQuestionEditorProps {
   questions: QuizQuestion[];
@@ -180,19 +181,28 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
 
   // Helper untuk membaca respons server secara aman tanpa memicu 'Unexpected end of JSON input'
   const parseSafeResponse = async (response: Response): Promise<any> => {
-    const text = await response.text();
-    if (!text || text.trim().length === 0) {
-      return { success: false, error: 'Server tidak memberikan data respons.' };
-    }
     try {
-      return JSON.parse(text);
-    } catch {
-      console.warn("Response was not JSON:", text.slice(0, 100));
-      return { success: false, error: 'Respons server tidak berformat JSON valid.' };
+      const text = await response.text();
+      if (!text || text.trim().length === 0) {
+        return { success: false, error: 'Server tidak memberikan data respons.' };
+      }
+      try {
+        return JSON.parse(text);
+      } catch {
+        const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (jsonMatch) {
+          try {
+            return JSON.parse(jsonMatch[0]);
+          } catch {}
+        }
+        return { success: false, error: 'Respons server tidak berformat JSON valid.' };
+      }
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Gagal membaca respons dari server.' };
     }
   };
 
-  // Ekstrak Soal dari Berkas PDF ke Backend dengan Fallback Base64 untuk Median APK & Android WebView
+  // Ekstrak Soal dari Berkas PDF (Dukungan Penuh Multi-Perangkat: Server AI + Client-Side Fast Extractor)
   const handleExtractFromPdf = async () => {
     if (!selectedPdfFile) return;
 
@@ -240,11 +250,12 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
         });
       }
 
-      // 1. Percobaan Utama: JSON Base64 (sangat andal di Android WebView & Median APK)
       let extracted = false;
+
+      // 1. Percobaan Utama: Kirim ke server API /api/quiz/import-pdf (JSON Base64)
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        const timeoutId = setTimeout(() => controller.abort(), 35000);
 
         const response = await fetch('/api/quiz/import-pdf', {
           method: 'POST',
@@ -266,20 +277,20 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
           processQuestionsData(data);
           extracted = true;
         } else if (data?.error) {
-          console.warn('JSON Base64 notice:', data.error);
+          console.warn('JSON Base64 server notice:', data.error);
         }
       } catch (jsonErr: any) {
         console.warn('JSON Base64 attempt notice, trying FormData fallback:', jsonErr);
       }
 
-      // 2. Percobaan Cadangan: FormData multipart
+      // 2. Percobaan Cadangan: FormData multipart ke server
       if (!extracted) {
         try {
           const formData = new FormData();
           formData.append('file', selectedPdfFile);
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 20000);
+          const timeoutId = setTimeout(() => controller.abort(), 35000);
 
           const response = await fetch('/api/quiz/import-pdf', {
             method: 'POST',
@@ -292,12 +303,54 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
           if (data && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
             processQuestionsData(data);
             extracted = true;
-          } else {
-            throw new Error(data?.error || 'Gagal mengekstrak butir soal dari berkas PDF.');
           }
         } catch (formErr: any) {
-          throw new Error(formErr?.message || 'Gagal memproses berkas PDF di perangkat Anda.');
+          console.warn('FormData fallback notice:', formErr);
         }
+      }
+
+      // 3. PERCOBAAN TAHAN BANTING: Ekstraksi Cerdas Langsung di Perangkat Klien (Offline & Universal untuk Semua HP / Median APK)
+      if (!extracted) {
+        try {
+          console.log('[Client Extractor] Menjalankan pemindai soal PDF langsung di perangkat klien...');
+          const localResult = await extractQuestionsDirectlyFromPdf(base64String || selectedPdfFile);
+          if (localResult && localResult.success && localResult.questions.length > 0) {
+            processQuestionsData({
+              success: true,
+              fileName: selectedPdfFile.name,
+              totalDetected: localResult.questions.length,
+              questions: localResult.questions
+            });
+            extracted = true;
+          } else if (localResult?.text && localResult.text.length > 20) {
+            // Teks terbaca di klien tapi butuh AI! Kirim teks murni (sangat ringan, < 2KB) ke /api/extract-questions
+            try {
+              const textResp = await fetch('/api/extract-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: localResult.text.slice(0, 10000) })
+              });
+              const textData = await parseSafeResponse(textResp);
+              if (Array.isArray(textData) && textData.length > 0) {
+                processQuestionsData({
+                  success: true,
+                  fileName: selectedPdfFile.name,
+                  totalDetected: textData.length,
+                  questions: textData
+                });
+                extracted = true;
+              }
+            } catch (txtErr) {
+              console.warn('Client text AI error:', txtErr);
+            }
+          }
+        } catch (clientErr) {
+          console.warn('[Client Extractor error]:', clientErr);
+        }
+      }
+
+      if (!extracted) {
+        throw new Error('Tidak dapat mengekstrak butir soal secara otomatis dari berkas PDF ini. Pastikan berkas PDF memuat teks naskah soal yang dapat dibaca.');
       }
 
     } catch (err: any) {

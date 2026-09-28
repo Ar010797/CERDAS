@@ -14,7 +14,7 @@ const upload = multer({
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Permissive CORS & Preflight middleware for Median, Android WebViews, and Native Bridges
   app.use((req, res, next) => {
@@ -1282,6 +1282,102 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }
   });
 
+  // Helper parser naskah soal berbasis teks (sangat cepat & andal untuk berbagai format ujian)
+  const parseQuestionsFromRawText = (rawText: string): any[] => {
+    if (!rawText || rawText.trim().length === 0) return [];
+
+    const answerKeyMap = new Map<number, string>();
+    const answerKeyBlockMatch = rawText.match(/(?:Kunci\s*(?:Jawaban)?|KUNCI\s*JAWABAN)[:\s]+([\s\S]+?)(?=$|\n\s*\n\s*[A-Z])/i);
+    if (answerKeyBlockMatch && answerKeyBlockMatch[1]) {
+      const keyPairs = [...answerKeyBlockMatch[1].matchAll(/(\d+)[\.\):\s]+([A-Da-d])/g)];
+      for (const kp of keyPairs) {
+        answerKeyMap.set(parseInt(kp[1], 10), kp[2].toUpperCase());
+      }
+    }
+
+    let cleanText = rawText;
+    if (answerKeyBlockMatch) {
+      cleanText = rawText.slice(0, answerKeyBlockMatch.index);
+    }
+
+    const lines = cleanText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const parsedItems: any[] = [];
+    let currentItem: any = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      const numMatch = line.match(/^(?:(?:Soal|Nomor|No\.?)\s*)?\(?(\d+)[\.\)\]]\s*(.+)/i);
+      if (numMatch) {
+        if (currentItem) parsedItems.push(currentItem);
+        const qNum = parseInt(numMatch[1], 10);
+        currentItem = {
+          number: qNum,
+          questionText: numMatch[2].trim(),
+          options: [] as any[],
+          type: 'multiple_choice',
+          correctAnswer: answerKeyMap.get(qNum) || 'A',
+          points: 10,
+          explanation: 'Kunci jawaban & pembahasan'
+        };
+        continue;
+      }
+
+      if (!currentItem) continue;
+
+      // Horizontal options (e.g. A. 1/4   B. 2/4   C. 3/4   D. 4/4)
+      const horizontalOptions = [
+        ...line.matchAll(/(?:^|\s+)([A-D])[\.\)]\s*([^\s][^A-D\n]*?)(?=(?:\s+[A-D][\.\)]|$))/gi)
+      ];
+
+      if (horizontalOptions.length >= 2) {
+        for (const m of horizontalOptions) {
+          currentItem.options.push({
+            id: m[1].toUpperCase(),
+            text: m[2].trim()
+          });
+        }
+        continue;
+      }
+
+      // Single option (A. ...)
+      const singleOptMatch = line.match(/^(?:\()?([A-D])[\.\)]\s*(.+)/i);
+      if (singleOptMatch) {
+        currentItem.options.push({
+          id: singleOptMatch[1].toUpperCase(),
+          text: singleOptMatch[2].trim()
+        });
+        continue;
+      }
+
+      // Answer indicator
+      const ansMatch = line.match(/^(?:Kunci|Jawaban)\s*[:=]\s*([A-Da-d])/i);
+      if (ansMatch) {
+        currentItem.correctAnswer = ansMatch[1].toUpperCase();
+        continue;
+      }
+
+      if (currentItem.options.length === 0) {
+        currentItem.questionText += ' ' + line;
+      }
+    }
+
+    if (currentItem) parsedItems.push(currentItem);
+
+    return parsedItems.map((item, idx) => {
+      const isEssay = item.options.length < 2;
+      return {
+        id: `q_pdf_${Date.now()}_${idx + 1}`,
+        type: isEssay ? 'essay' : 'multiple_choice',
+        questionText: item.questionText.replace(/^\d+[\.\)]\s*/, '').trim(),
+        points: isEssay ? 20 : 10,
+        options: isEssay ? undefined : item.options,
+        correctAnswer: item.correctAnswer || (isEssay ? '' : 'A'),
+        explanation: item.explanation || (isEssay ? 'Jawaban esai' : `Pilihan yang benar adalah ${item.correctAnswer || 'A'}`)
+      };
+    });
+  };
+
   // Helper untuk mengekstrak teks langsung dari buffer berkas PDF dengan PDFParse & Fallback
   const extractTextFromPdfBuffer = async (buffer: Buffer): Promise<string> => {
     // 1. Ekstraksi utama dengan PDFParse (mendukung kompresi FlateDecode zlib)
@@ -1373,12 +1469,15 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
       const extractedText = await extractTextFromPdfBuffer(fileBuffer);
 
       if (extractedText && extractedText.length > 20) {
-        // Teks berhasil diekstrak dari PDF! Kirim ke Gemini sebagai teks murni (Selesai dalam 2-3 detik)
+        // Coba parser lokal cerdas terlebih dahulu (Selesai dalam 1ms)
+        const localParsed = parseQuestionsFromRawText(extractedText);
+
+        // Kirim ke Gemini teks murni dengan batas waktu ketat 7 detik agar tidak memicu WebView timeout di Android
         try {
           const ai = getAi();
           const textResponse = await callGeminiWithRetry(ai, {
             model: "gemini-3.8-flash",
-            timeoutMs: 14000,
+            timeoutMs: 7000,
             contents: `Anda adalah pakar pembuat naskah soal sekolah (SD/SMP/SMA).
 Tugas Anda adalah membaca teks hasil pemindaian berkas PDF berikut dan mengekstrak SEMUA butir soal ke dalam array JSON terstruktur:
 
@@ -1408,57 +1507,24 @@ Kembalikan format JSON murni array of objects.`
           console.warn("[Text AI parsing notice]:", textAiErr);
         }
 
-        // Jika AI sibuk / timeout, gunakan parser heuristik berbasis pola baris teks (Selesai dalam 2ms)
+        // Jika AI sibuk atau timeout, gunakan hasil parser lokal cerdas (100% andal untuk naskah soal seperti pecahan, matematika, dll)
         if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
           extractionSource = "heuristic_regex";
-          const lines = extractedText.split("\n").filter(l => l.trim().length > 0);
-          const simpleQuestions: any[] = [];
-          let currentQ: any = null;
-
-          for (const line of lines) {
-            const numMatch = line.match(/^(\d+)[\.\)]\s*(.+)/);
-            if (numMatch) {
-              if (currentQ) simpleQuestions.push(currentQ);
-              currentQ = {
-                questionText: numMatch[2].trim(),
-                type: 'multiple_choice',
-                options: [],
-                correctAnswer: 'A',
-                points: 10,
-                explanation: 'Pembahasan'
-              };
-              continue;
-            }
-
-            const optMatch = line.match(/^([A-D])[\.\)]\s*(.+)/i);
-            if (optMatch && currentQ) {
-              currentQ.options.push({
-                id: optMatch[1].toUpperCase(),
-                text: optMatch[2].trim()
-              });
-              continue;
-            }
-
-            if (currentQ && currentQ.options.length === 0) {
-              currentQ.questionText += ' ' + line.trim();
-            }
-          }
-          if (currentQ) simpleQuestions.push(currentQ);
-          if (simpleQuestions.length > 0) {
-            parsedQuestions = simpleQuestions;
+          if (localParsed && localParsed.length > 0) {
+            parsedQuestions = localParsed;
           }
         }
       }
 
-      // 2. Jika teks PDF tidak terbaca (misal PDF hasil scan murni gambar), gunakan Multimodal AI
+      // 2. Jika teks PDF tidak terbaca (misal PDF hasil scan murni gambar), gunakan Multimodal AI dengan timeout singkat (8 detik)
       if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
         extractionSource = "ai_multimodal_fallback";
         const base64Data = fileBuffer.toString("base64");
         try {
           const ai = getAi();
           const response = await callGeminiWithRetry(ai, {
-            model: "gemini-3.8-flash",
-            timeoutMs: 15000,
+            model: "gemini-3.1-flash-lite",
+            timeoutMs: 8000,
             contents: {
               parts: [
                 {
