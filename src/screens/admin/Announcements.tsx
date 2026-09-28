@@ -143,6 +143,8 @@ export default function Announcements() {
   const { userData } = useAuth();
   const isAdmin = userData?.role === 'Admin';
   const isGuru = userData?.role === 'Guru';
+  const isWaliMurid = userData?.role === 'Wali Murid';
+  const canManageAnnouncements = isAdmin || isGuru;
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -226,6 +228,11 @@ export default function Announcements() {
   }, []);
 
   const handleOpenModal = () => {
+    if (!canManageAnnouncements) {
+      showToast('Wali Murid hanya memiliki izin untuk membaca pengumuman sekolah.', 'error');
+      return;
+    }
+
     const defaultSigner = isGuru && userData?.assigned_class
       ? `Wali Kelas ${userData.assigned_class} & Dewan Guru`
       : 'Pihak Sekolah & Dewan Guru';
@@ -347,6 +354,10 @@ export default function Announcements() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageAnnouncements) {
+      showToast('Hanya Admin dan Guru yang berwenang menerbitkan pengumuman.', 'error');
+      return;
+    }
     if (!title.trim() || !content.trim()) {
       showToast('Judul dan isi pengumuman wajib diisi!', 'error');
       return;
@@ -432,6 +443,11 @@ export default function Announcements() {
 
   // Filter announcements with multi-class matching support
   const filteredAnnouncements = announcements.filter((ann) => {
+    // Jika role Wali Murid, jangan tampilkan pengumuman internal khusus Guru
+    if (isWaliMurid && ann.targetRole === 'Guru') {
+      return false;
+    }
+
     const matchClass =
       selectedFilterClass === 'Semua' ||
       isClassTargetMatching((ann as any).targetClasses || ann.targetClass, selectedFilterClass);
@@ -446,7 +462,7 @@ export default function Announcements() {
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-semibold text-indigo-200 mb-2">
             <Megaphone className="w-3.5 h-3.5 text-amber-300" />
-            <span>Pusat Siaran & Notifikasi</span>
+            <span>{canManageAnnouncements ? 'Pusat Siaran & Notifikasi' : 'Papan Informasi Madrasah'}</span>
             {(!isOnline || isUsingOfflineData) && (
               <span className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold">
                 <Database className="w-3 h-3" />
@@ -454,22 +470,34 @@ export default function Announcements() {
               </span>
             )}
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight">Manajemen Pengumuman</h1>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
+            {canManageAnnouncements ? 'Manajemen Pengumuman' : 'Pengumuman & Edaran Sekolah'}
+          </h1>
           <p className="text-xs sm:text-sm text-indigo-100 max-w-xl mt-1 leading-relaxed">
-            Terbitkan informasi dan pemberitahuan resmi dari Admin atau Guru secara langsung ke
-            dashboard Wali Murid dengan notifikasi otomatis ke perangkat HP.
+            {canManageAnnouncements
+              ? 'Terbitkan informasi dan pemberitahuan resmi dari Admin atau Guru secara langsung ke dashboard Wali Murid dengan notifikasi otomatis ke perangkat HP.'
+              : 'Informasi dan edaran resmi dari pihak Madrasah dan Wali Kelas untuk memantau agenda sekolah dan kegiatan pembelajaran ananda.'}
           </p>
         </div>
 
-        <div className="relative z-10 shrink-0">
-          <button
-            onClick={handleOpenModal}
-            className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-slate-900 px-5 py-3 rounded-2xl transition-all font-bold text-sm shadow-lg shadow-amber-900/30 hover:scale-102 active:scale-98"
-          >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span>Buat Pengumuman Baru</span>
-          </button>
-        </div>
+        {canManageAnnouncements ? (
+          <div className="relative z-10 shrink-0">
+            <button
+              onClick={handleOpenModal}
+              className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-slate-900 px-5 py-3 rounded-2xl transition-all font-bold text-sm shadow-lg shadow-amber-900/30 hover:scale-102 active:scale-98"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>Buat Pengumuman Baru</span>
+            </button>
+          </div>
+        ) : (
+          <div className="relative z-10 shrink-0">
+            <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-xs font-bold text-white shadow-sm">
+              <Megaphone className="w-4 h-4 text-amber-300" />
+              <span>Papan Informasi Siswa</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filter and stats */}
@@ -524,13 +552,22 @@ export default function Announcements() {
         </div>
       </div>
 
-      {/* Info Tip about Deleting and Clean Archive */}
-      <div className="flex items-center gap-2.5 px-4 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl text-xs text-indigo-900 dark:text-indigo-200">
-        <span className="text-base">🗑️</span>
-        <p>
-          <b>Fitur Hapus Aktif:</b> Untuk menjaga kerapian informasi, Anda dapat menghapus pengumuman yang salah ketik atau yang masa kegiatannya sudah berlalu kapan saja menggunakan tombol <b>Hapus</b> berwarna merah pada kartu pengumuman.
-        </p>
-      </div>
+      {/* Info Tip */}
+      {canManageAnnouncements ? (
+        <div className="flex items-center gap-2.5 px-4 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl text-xs text-indigo-900 dark:text-indigo-200">
+          <span className="text-base">🗑️</span>
+          <p>
+            <b>Fitur Hapus Aktif:</b> Untuk menjaga kerapian informasi, Anda dapat menghapus pengumuman yang salah ketik atau yang masa kegiatannya sudah berlalu kapan saja menggunakan tombol <b>Hapus</b> berwarna merah pada kartu pengumuman.
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2.5 px-4 py-2.5 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 rounded-2xl text-xs text-emerald-900 dark:text-emerald-200">
+          <span className="text-base">📢</span>
+          <p>
+            <b>Pemberitahuan Resmi:</b> Seluruh pengumuman di bawah ini diterbitkan langsung oleh pihak Madrasah dan Wali Kelas. Anda dapat mengunduh berkas surat edaran resmi berformat PDF untuk disimpan.
+          </p>
+        </div>
+      )}
 
       {/* Announcements List */}
       <div className="grid grid-cols-1 gap-4">
@@ -546,7 +583,9 @@ export default function Announcements() {
             </div>
             <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Belum Ada Pengumuman</h3>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-sm">
-              Klik tombol "Buat Pengumuman Baru" untuk menerbitkan pemberitahuan kepada Wali Murid.
+              {canManageAnnouncements
+                ? 'Klik tombol "Buat Pengumuman Baru" untuk menerbitkan pemberitahuan kepada Wali Murid.'
+                : 'Belum ada surat edaran atau pengumuman terbaru yang diterbitkan pihak sekolah saat ini.'}
             </p>
           </div>
         ) : (
@@ -653,7 +692,7 @@ export default function Announcements() {
                       <Download className="w-3.5 h-3.5" />
                       <span>Unduh PDF</span>
                     </button>
-                    {(isAdmin || isGuru || userData?.role !== 'Wali Murid') && (
+                    {canManageAnnouncements && (
                       <button
                         type="button"
                         onClick={() => setAnnouncementToDelete(ann)}
@@ -728,8 +767,8 @@ export default function Announcements() {
         </div>
       )}
 
-      {/* Modal Form for Composing Announcement */}
-      {isModalOpen && (
+      {/* Modal Form for Composing Announcement (Only for Admin & Guru) */}
+      {isModalOpen && canManageAnnouncements && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden my-6 border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in duration-200">
             {/* Modal Header */}
