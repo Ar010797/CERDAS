@@ -158,26 +158,16 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
     setSelectedExtractedIndices([]);
     setPdfStats(null);
 
-    // Langsung konversi ke Base64 saat dipilih agar fresh dan tidak terhambat content provider Android
+    // Konversi ke Base64 menggunakan FileReader yang andal di Android WebView & Median APK
     try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      const chunkSize = 8192;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-      }
-      setSelectedPdfBase64(btoa(binary));
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = (reader.result as string) || '';
+        setSelectedPdfBase64(res.includes('base64,') ? res.split('base64,')[1] : res);
+      };
+      reader.readAsDataURL(file);
     } catch (e) {
-      console.warn("ArrayBuffer conversion notice:", e);
-      try {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const res = reader.result as string;
-          setSelectedPdfBase64(res.includes('base64,') ? res.split('base64,')[1] : res);
-        };
-        reader.readAsDataURL(file);
-      } catch {}
+      console.warn("FileReader notice:", e);
     }
   };
 
@@ -185,6 +175,20 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFileSelect(e.dataTransfer.files[0]);
+    }
+  };
+
+  // Helper untuk membaca respons server secara aman tanpa memicu 'Unexpected end of JSON input'
+  const parseSafeResponse = async (response: Response): Promise<any> => {
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+      return { success: false, error: 'Server tidak memberikan data respons.' };
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      console.warn("Response was not JSON:", text.slice(0, 100));
+      return { success: false, error: 'Respons server tidak berformat JSON valid.' };
     }
   };
 
@@ -196,8 +200,8 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
     setImportError(null);
     setExtractionProgressStep(1);
 
-    const stepTimer1 = setTimeout(() => setExtractionProgressStep(2), 1200);
-    const stepTimer2 = setTimeout(() => setExtractionProgressStep(3), 3500);
+    const stepTimer1 = setTimeout(() => setExtractionProgressStep(2), 1000);
+    const stepTimer2 = setTimeout(() => setExtractionProgressStep(3), 2500);
 
     const processQuestionsData = (data: any) => {
       const receivedQuestions: QuizQuestion[] = Array.isArray(data.questions) ? data.questions : [];
@@ -222,79 +226,92 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
     };
 
     try {
-      // Dapatkan base64 string yang aman
+      // Dapatkan base64 string yang aman lewat FileReader
       let base64String = selectedPdfBase64;
       if (!base64String) {
-        try {
-          const buffer = await selectedPdfFile.arrayBuffer();
-          const bytes = new Uint8Array(buffer);
-          let binary = '';
-          const chunkSize = 8192;
-          for (let i = 0; i < bytes.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-          }
-          base64String = btoa(binary);
-        } catch {
-          base64String = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const res = reader.result as string;
-              resolve(res.includes('base64,') ? res.split('base64,')[1] : res);
-            };
-            reader.onerror = () => reject(new Error('Gagal membaca berkas di perangkat Anda.'));
-            reader.readAsDataURL(selectedPdfFile);
-          });
-        }
+        base64String = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const res = (reader.result as string) || '';
+            resolve(res.includes('base64,') ? res.split('base64,')[1] : res);
+          };
+          reader.onerror = () => reject(new Error('Gagal membaca berkas di perangkat Anda.'));
+          reader.readAsDataURL(selectedPdfFile);
+        });
       }
 
-      // 1. Percobaan Utama: JSON Base64 (paling andal di Android WebView & Median APK)
+      // 1. Percobaan Utama: JSON Base64 (sangat andal di Android WebView & Median APK)
       let extracted = false;
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+
         const response = await fetch('/api/quiz/import-pdf', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify({
             pdfBase64: base64String,
             filename: selectedPdfFile.name,
             mimeType: selectedPdfFile.type || 'application/pdf'
-          })
+          }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
-        const data = await response.json();
-        if (response.ok && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
+        const data = await parseSafeResponse(response);
+        if (data && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
           processQuestionsData(data);
           extracted = true;
-        } else if (!response.ok && data?.error) {
-          throw new Error(data.error);
+        } else if (data?.error) {
+          console.warn('JSON Base64 notice:', data.error);
         }
       } catch (jsonErr: any) {
-        console.warn('JSON Base64 attempt error, trying FormData fallback:', jsonErr);
+        console.warn('JSON Base64 attempt notice, trying FormData fallback:', jsonErr);
       }
 
       // 2. Percobaan Cadangan: FormData multipart
       if (!extracted) {
-        const formData = new FormData();
-        formData.append('file', selectedPdfFile);
+        try {
+          const formData = new FormData();
+          formData.append('file', selectedPdfFile);
 
-        const response = await fetch('/api/quiz/import-pdf', {
-          method: 'POST',
-          body: formData
-        });
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-        const data = await response.json();
-        if (response.ok && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
-          processQuestionsData(data);
-          extracted = true;
-        } else {
-          throw new Error(data?.error || 'Gagal mengekstrak butir soal dari berkas PDF.');
+          const response = await fetch('/api/quiz/import-pdf', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          const data = await parseSafeResponse(response);
+          if (data && data.success && Array.isArray(data.questions) && data.questions.length > 0) {
+            processQuestionsData(data);
+            extracted = true;
+          } else {
+            throw new Error(data?.error || 'Gagal mengekstrak butir soal dari berkas PDF.');
+          }
+        } catch (formErr: any) {
+          throw new Error(formErr?.message || 'Gagal memproses berkas PDF di perangkat Anda.');
         }
       }
 
     } catch (err: any) {
       console.error('Extraction error:', err);
+      let errMsg = err?.message || 'Terjadi kesalahan saat memproses berkas PDF di perangkat Anda.';
+      if (
+        errMsg.toLowerCase().includes('json') || 
+        errMsg.toLowerCase().includes('unexpected') || 
+        errMsg.toLowerCase().includes('end of input')
+      ) {
+        errMsg = 'Koneksi ke server terputus saat membaca berkas PDF.';
+      }
       setImportError(
-        (err.message || 'Terjadi kesalahan saat memproses berkas PDF di perangkat Anda.') +
-        ' Anda juga dapat menyalin naskah soal dan menempelnya langsung di tab "Tempel Teks Soal".'
+        errMsg + ' Anda juga dapat menyalin naskah soal dan menempelnya langsung di tab "Tempel Teks Soal".'
       );
     } finally {
       clearTimeout(stepTimer1);
@@ -302,6 +319,7 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
       setIsExtractingPdf(false);
     }
   };
+
 
   // Toggle selection pada butir soal hasil ekstrak
   const handleToggleExtractedIndex = (index: number) => {

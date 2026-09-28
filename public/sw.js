@@ -1,8 +1,8 @@
 // Service Worker for CERDAS - Administrasi Sekolah
-// Version 2: Mendukung Caching Aset Offline, IndexedDB fallback, & Push Notification
+// Version 3: Mendukung Caching Aset Kritis Offline (Jadwal, Tugas, Shell SPA), IndexedDB Fallback, & Push Notification
 
-const CACHE_NAME = 'cerdas-static-v2';
-const RUNTIME_CACHE = 'cerdas-runtime-v2';
+const CACHE_NAME = 'cerdas-static-v3';
+const RUNTIME_CACHE = 'cerdas-runtime-v3';
 
 // Aset statis inti yang selalu di-cache saat Service Worker terpasang
 const PRECACHE_ASSETS = [
@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Jangan cache request non-GET atau request ke Firebase Firestore / Auth / API push
+  // Jangan cache request non-GET atau request ke Firebase Firestore / Auth / API push / API AI
   if (
     request.method !== 'GET' ||
     url.pathname.startsWith('/api/') ||
@@ -51,12 +51,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 1. Navigasi Halaman HTML (SPA) -> Network First dengan Fallback ke Cache
+  // 1. Navigasi Halaman HTML (SPA) -> Network First dengan Fallback ke Cache App Shell (/index.html)
+  // Ini memastikan guru dan admin yang membuka rute jadwal/tugas saat offline tetap dapat mengakses aplikasi
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.status === 200) {
+          if (response && response.status === 200) {
             const responseClone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
           }
@@ -75,9 +76,10 @@ self.addEventListener('fetch', (event) => {
 
   // 2. Static Assets (JS, CSS, SVG, Images, Fonts) -> Stale While Revalidate
   if (
-    url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|webp|woff|woff2|ico)$/) ||
+    url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|webp|woff|woff2|ico|json)$/) ||
     url.hostname.includes('fonts.googleapis.com') ||
-    url.hostname.includes('fonts.gstatic.com')
+    url.hostname.includes('fonts.gstatic.com') ||
+    url.pathname.startsWith('/assets/')
   ) {
     event.respondWith(
       caches.open(RUNTIME_CACHE).then(async (cache) => {
@@ -98,6 +100,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 });
+
 
 // Menangkap event Push Notification saat aplikasi ditutup
 self.addEventListener('push', (event) => {

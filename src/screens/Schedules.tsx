@@ -7,6 +7,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Plus, Trash2, Edit2, Upload, FileDown, Clock, BookOpen, User, MapPin, X, CheckCircle, AlertTriangle, FileSpreadsheet, Filter, Image as ImageIcon, Sparkles, LayoutGrid } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import IllustratedSchedulePoster from '../components/IllustratedSchedulePoster';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { saveOfflineSchedules, getOfflineSchedules, OfflineSchedule } from '../lib/offlineStorage';
+import { WifiOff, Database } from 'lucide-react';
 
 interface ScheduleItem {
   id: string;
@@ -71,8 +74,21 @@ export default function SchedulesScreen() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  const isOnline = useOnlineStatus();
+  const [isLoadedFromOfflineCache, setIsLoadedFromOfflineCache] = useState(false);
+
   useEffect(() => {
     setLoading(true);
+
+    // Initial instant load from offline cache (IndexedDB & LocalStorage)
+    getOfflineSchedules(selectedClass).then((cached) => {
+      if (cached && cached.length > 0) {
+        setSchedules(cached as ScheduleItem[]);
+        setIsLoadedFromOfflineCache(true);
+        setLoading(false);
+      }
+    });
+
     let q = query(collection(db, 'jadwal_kelas'));
     if (selectedClass) {
       q = query(collection(db, 'jadwal_kelas'), where('classId', '==', selectedClass));
@@ -81,11 +97,18 @@ export default function SchedulesScreen() {
     const unsub = onSnapshot(q, (snap) => {
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as ScheduleItem));
       setSchedules(items);
+      setIsLoadedFromOfflineCache(false);
       setLoading(false);
+
+      // Persist to local offline store
+      if (items.length > 0) {
+        saveOfflineSchedules(items as any, selectedClass);
+      }
     }, (error) => {
-      console.error(error);
+      console.warn("Firestore schedule listener notice (offline fallback active):", error);
       setLoading(false);
     });
+
 
     // Listen for custom image
     const unsubImage = onSnapshot(doc(db, 'jadwal_images', selectedClass), (docSnap) => {
@@ -551,6 +574,27 @@ export default function SchedulesScreen() {
 
   return (
     <div className="space-y-6">
+      {/* Offline Mode Banner */}
+      {(!isOnline || isLoadedFromOfflineCache) && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-3.5 flex items-center justify-between text-amber-800 dark:text-amber-300 text-xs shadow-xs animate-in fade-in">
+          <div className="flex items-center space-x-2.5">
+            <span className="p-1.5 bg-amber-100 dark:bg-amber-900/60 rounded-xl">
+              <WifiOff className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            </span>
+            <div>
+              <span className="font-bold">Mode Offline Aktif</span>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                Menampilkan jadwal tersimpan dari penyimpanan lokal perangkat. Anda tetap dapat melihat jadwal kelas tanpa koneksi internet.
+              </p>
+            </div>
+          </div>
+          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 bg-amber-200/60 dark:bg-amber-900/40 rounded-lg text-[10px] font-bold">
+            <Database className="w-3 h-3" />
+            Tersimpan di Cache
+          </span>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-700 rounded-3xl p-6 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">

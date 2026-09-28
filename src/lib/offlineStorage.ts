@@ -5,14 +5,28 @@
  */
 
 const DB_NAME = 'cerdas_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORES = {
   ASSIGNMENTS: 'offline_assignments',
   SUBMISSIONS: 'offline_submissions',
   ANNOUNCEMENTS: 'offline_announcements',
+  SCHEDULES: 'offline_schedules',
   META: 'offline_meta',
 } as const;
+
+export interface OfflineSchedule {
+  id: string;
+  classId: string;
+  type: 'pelajaran' | 'ujian';
+  hari: string;
+  jam: string;
+  mataPelajaran: string;
+  pengajar: string;
+  ruangan?: string;
+  keterangan?: string;
+  cachedAt?: number;
+}
 
 export interface OfflineAssignment {
   id: string;
@@ -102,7 +116,14 @@ function openDB(): Promise<IDBDatabase> {
         store.createIndex('category', 'category', { unique: false });
       }
 
-      // 4. Meta store
+      // 4. Schedules store
+      if (!db.objectStoreNames.contains(STORES.SCHEDULES)) {
+        const store = db.createObjectStore(STORES.SCHEDULES, { keyPath: 'id' });
+        store.createIndex('classId', 'classId', { unique: false });
+        store.createIndex('hari', 'hari', { unique: false });
+      }
+
+      // 5. Meta store
       if (!db.objectStoreNames.contains(STORES.META)) {
         db.createObjectStore(STORES.META, { keyPath: 'key' });
       }
@@ -364,10 +385,64 @@ export async function getOfflineMeta(key: string): Promise<any> {
   }
 }
 
+// ----------------------------------------------------
+// Schedules
+// ----------------------------------------------------
+
+export async function saveOfflineSchedules(schedules: OfflineSchedule[], classId?: string): Promise<void> {
+  const withMeta = schedules.map((s) => ({
+    ...s,
+    classId: s.classId || classId || '',
+    cachedAt: Date.now()
+  }));
+
+  // Also save to localStorage as quick synchronous backup for mobile WebViews
+  try {
+    const key = classId ? `cerdas_schedules_${classId}` : 'cerdas_schedules_all';
+    localStorage.setItem(key, JSON.stringify(withMeta));
+    localStorage.setItem('cerdas_schedules_last_cached', Date.now().toString());
+  } catch {}
+
+  await putItems(STORES.SCHEDULES, withMeta);
+}
+
+export async function getOfflineSchedules(classId?: string): Promise<OfflineSchedule[]> {
+  try {
+    const all = await getAllItems<OfflineSchedule>(STORES.SCHEDULES);
+    if (all && all.length > 0) {
+      if (!classId || classId === 'Semua' || classId === 'Semua Kelas') {
+        return all;
+      }
+      return all.filter((s) => !s.classId || s.classId === classId);
+    }
+  } catch (err) {
+    console.warn('getOfflineSchedules indexedDB fallback to localStorage:', err);
+  }
+
+  // Fallback to localStorage
+  try {
+    const key = classId ? `cerdas_schedules_${classId}` : 'cerdas_schedules_all';
+    const stored = localStorage.getItem(key) || localStorage.getItem('cerdas_schedules_all');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        return classId ? parsed.filter((s: any) => !s.classId || s.classId === classId) : parsed;
+      }
+    }
+  } catch {}
+
+  return [];
+}
+
+
+export async function removeOfflineSchedule(id: string): Promise<void> {
+  await deleteItem(STORES.SCHEDULES, id);
+}
+
 export async function clearAllOfflineData(): Promise<void> {
   try {
     const db = await openDB();
-    const stores = [STORES.ASSIGNMENTS, STORES.SUBMISSIONS, STORES.ANNOUNCEMENTS, STORES.META];
+    const stores = [STORES.ASSIGNMENTS, STORES.SUBMISSIONS, STORES.ANNOUNCEMENTS, STORES.SCHEDULES, STORES.META];
     return new Promise((resolve, reject) => {
       const tx = db.transaction(stores, 'readwrite');
       stores.forEach((s) => tx.objectStore(s).clear());
@@ -384,3 +459,4 @@ export async function clearAllOfflineData(): Promise<void> {
     console.warn('clearAllOfflineData error:', err);
   }
 }
+

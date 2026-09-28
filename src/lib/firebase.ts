@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, Firestore } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import config from '../../firebase-applet-config.json';
@@ -17,11 +17,34 @@ const firebaseConfig = {
 // Initialize or reuse main Firebase App safely
 export const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Cloud Firestore and get a reference to the service
+// Initialize Cloud Firestore with offline persistent cache so schedules, assignments & data are available offline
 const firestoreDatabaseId = config.firestoreDatabaseId;
-export const db = firestoreDatabaseId
-  ? getFirestore(app, firestoreDatabaseId)
-  : getFirestore(app);
+
+let resolvedDb: Firestore;
+try {
+  if (firestoreDatabaseId) {
+    resolvedDb = initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      },
+      firestoreDatabaseId
+    );
+  } else {
+    resolvedDb = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    });
+  }
+} catch {
+  // If already initialized or fallback
+  resolvedDb = firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
+}
+
+export const db: Firestore = resolvedDb;
 
 export const auth: Auth = getAuth(app);
 export const storage = getStorage(app);
@@ -37,3 +60,4 @@ try {
 }
 
 export const adminAuth: Auth = resolvedAdminAuth || auth;
+
