@@ -173,9 +173,9 @@ export function calculateQuizScore(
  * Poin: 20
  */
 export function parseImportedQuestions(inputText: string): QuizQuestion[] {
-  if (!inputText.trim()) return [];
+  if (!inputText || !inputText.trim()) return [];
 
-  // Cek apakah format JSON
+  // Cek apakah format JSON murni
   try {
     const parsed = JSON.parse(inputText);
     if (Array.isArray(parsed) && parsed.length > 0 && (parsed[0].questionText || parsed[0].question)) {
@@ -183,107 +183,190 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
         id: item.id || `q_${Date.now()}_${idx + 1}`,
         type: item.type === 'essay' ? 'essay' : 'multiple_choice',
         questionText: item.questionText || item.question || `Soal ${idx + 1}`,
-        points: Number(item.points) || 10,
-        options: item.options || [
+        points: Number(item.points) || (item.type === 'essay' ? 20 : 10),
+        options: item.options || (item.type === 'essay' ? undefined : [
           { id: 'A', text: item.optionA || 'Pilihan A' },
           { id: 'B', text: item.optionB || 'Pilihan B' },
           { id: 'C', text: item.optionC || 'Pilihan C' },
           { id: 'D', text: item.optionD || 'Pilihan D' }
-        ],
-        correctAnswer: (item.correctAnswer || item.answerKey || 'A').toString().trim().toUpperCase(),
+        ]),
+        correctAnswer: (item.correctAnswer || item.answerKey || (item.type === 'essay' ? '' : 'A')).toString().trim().toUpperCase(),
         explanation: item.explanation || item.pembahasan || ''
       }));
     }
   } catch {}
 
-  // Parse format teks terstruktur
-  const questions: QuizQuestion[] = [];
-  const blocks = inputText.split(/\n\s*(?=\d+[\.\)]\s+)/g);
+  // 1. Standalone Answer Key Table di akhir teks (jika berbentuk tabel/daftar 3+ butir dengan nomor dan kunci di akhir)
+  const answerKeyMap = new Map<number, string>();
+  const bottomKeyMatch = inputText.match(/(?:^|\n)\s*(?:TABEL\s+)?(?:KUNCI\s+JAWABAN|ANSWER\s+KEY)[:\s\n]+([\s\S]+?)$/i);
+  let cleanText = inputText;
+  if (bottomKeyMatch && bottomKeyMatch[1]) {
+    const keyPairs = [...bottomKeyMatch[1].matchAll(/(\d+)[\.\):\s]+([A-Ea-e])/g)];
+    if (keyPairs.length >= 3) {
+      for (const kp of keyPairs) {
+        answerKeyMap.set(parseInt(kp[1], 10), kp[2].toUpperCase());
+      }
+      cleanText = inputText.slice(0, bottomKeyMatch.index);
+    }
+  }
 
-  blocks.forEach((block, idx) => {
-    const lines = block
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (lines.length === 0) return;
+  // Pisahkan teks per baris dan bersihkan watermark/nomor halaman/kop
+  const rawLines = cleanText.split(/\r?\n/).map(l => l.trim());
+  const lines: string[] = [];
 
-    // Baris pertama: Nomor & teks soal
-    const firstLine = lines[0].replace(/^\d+[\.\)]\s*/, '').trim();
-    const isEssay =
-      firstLine.toLowerCase().includes('[esai]') ||
-      firstLine.toLowerCase().includes('(esai)') ||
-      block.toLowerCase().includes('tipe: esai') ||
-      block.toLowerCase().includes('type: essay');
+  for (const line of rawLines) {
+    if (!line) continue;
+    if (/^--\s*\d+\s+(?:of|\/)\s+\d+\s*--$/i.test(line)) continue;
+    if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(line)) continue;
+    if (/^[-=_*~]{3,}$/.test(line)) continue;
+    lines.push(line);
+  }
 
-    const cleanQuestionText = firstLine
-      .replace(/\[esai\]/gi, '')
-      .replace(/\(esai\)/gi, '')
-      .trim();
+  const items: Array<{
+    number: number;
+    questionText: string;
+    options: QuizOption[];
+    type: 'multiple_choice' | 'essay';
+    correctAnswer: string;
+    points: number;
+    explanation: string;
+    hasAnswer: boolean;
+    isComplete: boolean;
+  }> = [];
 
-    let points = 10;
-    let correctAnswer = '';
-    let explanation = '';
-    const options: QuizOption[] = [];
+  let current: typeof items[0] | null = null;
+  let currentTarget: 'question' | 'option' | 'explanation' | 'after_answer' | 'after_points' = 'question';
+  let currentOptionId: string | null = null;
 
-    // Baca baris-baris berikutnya
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
+  const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?(\d+)[\.\)\]]\s*(.*)$/i;
+  const singleOptRegex = /^(?:\()?([A-Ea-e])[\.\)]\s*(.*)$/;
+  const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban|answer(?:\s*key)?)\s*[:=]\s*([A-Ea-e]|\S.*)$/i;
+  const pointRegex = /^(?:poin|bobot|skor|score|points)\s*[:=]?\s*(\d+)?$/i;
+  const expRegex = /^(?:pembahasan|penjelasan|alasan|explanation)\s*[:=]\s*(.*)$/i;
 
-      // Opsi Pilihan Ganda (A., B., C., D.)
-      const optMatch = line.match(/^([A-D])[\.\)]\s*(.+)$/i);
-      if (optMatch && !isEssay) {
-        options.push({
-          id: optMatch[1].toUpperCase(),
-          text: optMatch[2].trim()
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Deteksi awal soal baru (misal: "1.", "1)", "No. 1", dll)
+    const numMatch = line.match(qNumRegex);
+    if (numMatch) {
+      const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete;
+      if (isActuallyNewQ) {
+        if (current) items.push(current);
+        const qNum = parseInt(numMatch[1], 10);
+        const rawQ = numMatch[2].trim();
+        const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(rawQ) ||
+                        /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(rawQ);
+
+        current = {
+          number: qNum,
+          questionText: rawQ.replace(/^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\))\s*/i, '').trim(),
+          options: [],
+          type: isEssay ? 'essay' : 'multiple_choice',
+          correctAnswer: answerKeyMap.get(qNum) || '',
+          points: isEssay ? 20 : 10,
+          explanation: '',
+          hasAnswer: false,
+          isComplete: false
+        };
+        currentTarget = 'question';
+        currentOptionId = null;
+        continue;
+      }
+    }
+
+    if (!current) {
+      // Judul/Kop sebelum nomor soal 1 (e.g. 'Penilaian Akhir Semester', 'Mata Pelajaran: ...') - lewati
+      continue;
+    }
+
+    // Deteksi Kunci Jawaban: 'Kunci: B' atau 'Jawaban: D'
+    const ansMatch = line.match(ansRegex);
+    if (ansMatch) {
+      const val = ansMatch[1].trim();
+      if (/^[A-Ea-e]$/.test(val)) {
+        current.correctAnswer = val.toUpperCase();
+      } else {
+        current.correctAnswer = val;
+      }
+      current.hasAnswer = true;
+      currentTarget = 'after_answer';
+      continue;
+    }
+
+    // Deteksi Poin: 'Poin:' atau 'Poin: 10'
+    const ptMatch = line.match(pointRegex);
+    if (ptMatch) {
+      if (ptMatch[1]) {
+        current.points = parseInt(ptMatch[1], 10) || current.points;
+      }
+      currentTarget = 'after_points';
+      continue;
+    }
+
+    // Deteksi Pembahasan: 'Pembahasan: ...'
+    const expMatch = line.match(expRegex);
+    if (expMatch) {
+      current.explanation = expMatch[1].trim();
+      currentTarget = 'explanation';
+      continue;
+    }
+
+    // Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
+    const horizOpts = [...line.matchAll(/(?:^|\s+)([A-Ea-e])[\.\)]\s*([^\s][^A-E\n]*?)(?=(?:\s+[A-Ea-e][\.\)]|$))/g)];
+    if (horizOpts.length >= 2) {
+      for (const m of horizOpts) {
+        current.options.push({
+          id: m[1].toUpperCase(),
+          text: m[2].trim()
         });
-        continue;
       }
-
-      // Kunci Jawaban
-      const keyMatch = line.match(/^(?:Kunci|Jawaban|Kunci Jawaban|Answer)\s*[:=]\s*(.+)$/i);
-      if (keyMatch) {
-        correctAnswer = keyMatch[1].trim();
-        continue;
-      }
-
-      // Poin / Bobot
-      const pointMatch = line.match(/^(?:Poin|Bobot|Skor|Score|Points)\s*[:=]\s*(\d+)$/i);
-      if (pointMatch) {
-        points = parseInt(pointMatch[1], 10) || 10;
-        continue;
-      }
-
-      // Pembahasan
-      const expMatch = line.match(/^(?:Pembahasan|Penjelasan|Explanation)\s*[:=]\s*(.+)$/i);
-      if (expMatch) {
-        explanation = expMatch[1].trim();
-        continue;
-      }
+      current.type = 'multiple_choice';
+      currentTarget = 'after_points';
+      continue;
     }
 
-    if (isEssay || options.length < 2) {
-      questions.push({
-        id: `q_${Date.now()}_${idx + 1}`,
-        type: 'essay',
-        questionText: cleanQuestionText || firstLine,
-        points: points || 20,
-        correctAnswer: correctAnswer || '',
-        explanation
+    // Deteksi Opsi Vertikal: 'A. Opsi teks', 'B. Opsi teks'
+    const singleOpt = line.match(singleOptRegex);
+    if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]$/.test(singleOpt[1]))) {
+      const optId = singleOpt[1].toUpperCase();
+      const optText = singleOpt[2].trim();
+      current.options.push({
+        id: optId,
+        text: optText
       });
-    } else {
-      questions.push({
-        id: `q_${Date.now()}_${idx + 1}`,
-        type: 'multiple_choice',
-        questionText: cleanQuestionText || firstLine,
-        points: points || 10,
-        options,
-        correctAnswer: (correctAnswer || 'A').toUpperCase().slice(0, 1),
-        explanation
-      });
+      current.type = 'multiple_choice';
+      currentTarget = 'option';
+      currentOptionId = optId;
+      continue;
     }
+
+    // Penanganan Teks Multi-Baris (Paragraf bacaan, cerita, puisi, dialog, opsi panjang)
+    if (currentTarget === 'explanation') {
+      current.explanation += ' ' + line;
+    } else if (currentTarget === 'option' && currentOptionId) {
+      const opt = current.options.find(o => o.id === currentOptionId);
+      if (opt) opt.text += ' ' + line;
+    } else if (currentTarget === 'question' && current.options.length === 0) {
+      current.questionText += ' ' + line;
+    }
+  }
+
+  if (current) items.push(current);
+
+  return items.map((item, idx) => {
+    const isEssay = item.type === 'essay' || item.options.length < 2;
+    const finalAnswer = item.correctAnswer || (isEssay ? '' : (item.options[0]?.id || 'A'));
+    return {
+      id: `q_${Date.now()}_${idx + 1}`,
+      type: isEssay ? 'essay' : 'multiple_choice',
+      questionText: item.questionText || `Soal ${idx + 1}`,
+      points: item.points || (isEssay ? 20 : 10),
+      options: isEssay ? undefined : item.options,
+      correctAnswer: finalAnswer,
+      explanation: item.explanation || (isEssay ? 'Jawaban esai' : `Kunci jawaban: ${finalAnswer}`)
+    };
   });
-
-  return questions;
 }
 
 // ----------------------------------------------------
