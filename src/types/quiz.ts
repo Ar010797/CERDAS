@@ -422,18 +422,37 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   if (current) items.push(current);
 
   return items.map((item, idx) => {
-    const isEssay = item.type === 'essay' || item.options.length < 2;
-    const finalAnswer = item.correctAnswer || (isEssay ? '' : (item.options[0]?.id || 'A'));
+    // Pastikan ID opsi unik (A, B, C, D) dan tidak ada duplikasi kunci ID seperti dua 'B' atau dua 'D'
+    const cleanOptions: QuizOption[] = [];
+    const usedIds = new Set<string>();
+    const defaultOptionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+    (item.options || []).forEach((opt, optIndex) => {
+      let candidateId = opt.id || defaultOptionLetters[optIndex] || `opt_${optIndex + 1}`;
+      if (usedIds.has(candidateId)) {
+        const nextAvailable = defaultOptionLetters.find(l => !usedIds.has(l));
+        candidateId = nextAvailable || `${candidateId}_${optIndex + 1}`;
+      }
+      usedIds.add(candidateId);
+      cleanOptions.push({
+        id: candidateId,
+        text: opt.text || ''
+      });
+    });
+
+    const isEssay = item.type === 'essay' || cleanOptions.length < 2;
+    const finalAnswer = item.correctAnswer || (isEssay ? '' : (cleanOptions[0]?.id || 'A'));
     return {
       id: `q_${Date.now()}_${idx + 1}`,
       type: isEssay ? 'essay' : 'multiple_choice',
       questionText: item.questionText || `Soal ${idx + 1}`,
       points: item.points || (isEssay ? 20 : 10),
-      options: isEssay ? undefined : item.options,
+      options: isEssay ? undefined : cleanOptions,
       correctAnswer: finalAnswer,
       explanation: item.explanation || ''
     };
   });
+
 }
 
 // ----------------------------------------------------

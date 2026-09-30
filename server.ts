@@ -1505,18 +1505,37 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     if (current) items.push(current);
 
     return items.map((item, idx) => {
-      const isEssay = item.type === 'essay' || item.options.length < 2;
-      const finalAnswer = item.correctAnswer || (isEssay ? '' : (item.options[0]?.id || 'A'));
+      // Pastikan ID opsi unik (A, B, C, D) dan tidak ada duplikasi kunci ID seperti dua 'B' atau dua 'D'
+      const cleanOptions: any[] = [];
+      const usedIds = new Set<string>();
+      const defaultOptionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+      (item.options || []).forEach((opt: any, optIndex: number) => {
+        let candidateId = opt.id || defaultOptionLetters[optIndex] || `opt_${optIndex + 1}`;
+        if (usedIds.has(candidateId)) {
+          const nextAvailable = defaultOptionLetters.find(l => !usedIds.has(l));
+          candidateId = nextAvailable || `${candidateId}_${optIndex + 1}`;
+        }
+        usedIds.add(candidateId);
+        cleanOptions.push({
+          id: candidateId,
+          text: opt.text || ''
+        });
+      });
+
+      const isEssay = item.type === 'essay' || cleanOptions.length < 2;
+      const finalAnswer = item.correctAnswer || (isEssay ? '' : (cleanOptions[0]?.id || 'A'));
       return {
         id: `q_doc_${Date.now()}_${idx + 1}`,
         type: isEssay ? 'essay' : 'multiple_choice',
         questionText: item.questionText || `Soal ${item.number || idx + 1}`,
         points: item.points || (isEssay ? 20 : 10),
-        options: isEssay ? undefined : item.options,
+        options: isEssay ? undefined : cleanOptions,
         correctAnswer: finalAnswer,
         explanation: item.explanation || ''
       };
     });
+
   };
 
   // Helper untuk mengekstrak teks langsung dari buffer berkas Word (.docx) dengan mammoth

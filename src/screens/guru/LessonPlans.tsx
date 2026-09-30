@@ -2813,9 +2813,9 @@ export default function LessonPlansGuru() {
                                     {/* Options (A, B, C, D) */}
                                     {q.options && q.options.length > 0 && (
                                       <div className={`grid grid-cols-1 ${q.options.some(o => o.text.length > 65) ? '' : 'md:grid-cols-2'} gap-2.5 pl-0 sm:pl-10`}>
-                                        {q.options.map((opt) => (
+                                        {q.options.map((opt, optIdx) => (
                                           <div
-                                            key={opt.label}
+                                            key={`q-${q.number}-opt-${opt.label || optIdx}-${optIdx}`}
                                             className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-800/50 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors shadow-2xs group"
                                           >
                                             <span className="w-6 h-6 rounded-lg bg-white dark:bg-slate-750 border border-slate-300 dark:border-slate-650 text-slate-800 dark:text-slate-200 font-extrabold text-xs flex items-center justify-center shrink-0 group-hover:border-indigo-400 group-hover:text-indigo-600 transition-colors">
@@ -2933,9 +2933,9 @@ export default function LessonPlansGuru() {
 
                                    {q.options && q.options.length > 0 && (
                                     <div className={`grid grid-cols-1 ${q.options.some(o => o.text.length > 65) ? '' : 'md:grid-cols-2'} gap-2.5 pt-1`}>
-                                      {q.options.map((opt) => (
+                                      {q.options.map((opt, optIdx) => (
                                         <div
-                                          key={opt.label}
+                                          key={`preview-q-${q.number}-opt-${opt.label || optIdx}-${optIdx}`}
                                           className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-850 text-sm hover:border-indigo-200 dark:hover:border-indigo-700 transition-colors shadow-xs"
                                         >
                                           <span className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-extrabold text-xs flex items-center justify-center shrink-0">

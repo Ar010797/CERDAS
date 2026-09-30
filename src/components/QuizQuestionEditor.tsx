@@ -660,12 +660,12 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {q.options.map((opt) => {
+                    {q.options.map((opt, optIdx) => {
                       const isCorrect = q.correctAnswer === opt.id;
 
                       return (
                         <div
-                          key={opt.id}
+                          key={`${q.id || qIdx}-opt-${opt.id || optIdx}-${optIdx}`}
                           className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${
                             isCorrect
                               ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-600'
@@ -1070,11 +1070,11 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                                 {/* Opsi PG */}
                                 {q.type === 'multiple_choice' && q.options && (
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                                    {q.options.map((opt) => {
+                                    {q.options.map((opt, optIdx) => {
                                       const isCorrect = q.correctAnswer === opt.id;
                                       return (
                                         <div
-                                          key={opt.id}
+                                          key={`${q.id || idx}-preview-opt-${opt.id || optIdx}-${optIdx}`}
                                           className={`text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
                                             isCorrect
                                               ? 'bg-emerald-100/80 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-700'

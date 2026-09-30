@@ -485,12 +485,12 @@ export default function OnlineQuizTakerModal({
                 Pilih Salah Satu Jawaban:
               </p>
 
-              {currentQuestion.options.map((opt) => {
+              {currentQuestion.options.map((opt, optIdx) => {
                 const isSelected = answers[currentQuestion.id] === opt.id;
 
                 return (
                   <button
-                    key={opt.id}
+                    key={`${currentQuestion.id}-opt-${opt.id || optIdx}-${optIdx}`}
                     type="button"
                     onClick={() => handleAnswerChange(currentQuestion.id, opt.id)}
                     className={`w-full text-left p-4 rounded-2xl border transition-all flex items-center gap-3.5 cursor-pointer ${
