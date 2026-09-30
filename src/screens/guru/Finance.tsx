@@ -10,14 +10,18 @@ interface Student {
   id: string;
   name: string;
   absen_number: string;
+  nisn?: string;
+  classId?: string;
 }
 
 interface SavingTransaction {
   id: string;
   studentId: string;
+  studentName?: string;
   amount: number;
   type: 'setor' | 'tarik';
   date: any;
+  createdAt?: number;
   note: string;
 }
 
@@ -26,6 +30,7 @@ interface KasTransaction {
   amount: number;
   type: 'masuk' | 'keluar';
   date: any;
+  createdAt?: number;
   note: string;
   classId: string;
 }
@@ -59,13 +64,21 @@ export default function FinanceGuru() {
   useEffect(() => {
     // Fetch students
     const fetchStudents = async () => {
-      const q = query(collection(db, 'students'), where('classId', '==', selectedClass));
-      const snap = await getDocs(q);
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-      data.sort((a, b) => (parseInt(a.absen_number) || 0) - (parseInt(b.absen_number) || 0));
-      setStudents(data);
-      if (data.length > 0 && !selectedStudent) {
-        setSelectedStudent(data[0].id);
+      try {
+        const q = query(collection(db, 'students'), where('classId', '==', selectedClass));
+        const snap = await getDocs(q);
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+        data.sort((a, b) => (parseInt(a.absen_number) || 0) - (parseInt(b.absen_number) || 0));
+        setStudents(data);
+        if (data.length > 0) {
+          if (!selectedStudent || !data.some(s => s.id === selectedStudent)) {
+            setSelectedStudent(data[0].id);
+          }
+        } else {
+          setSelectedStudent('');
+        }
+      } catch (err) {
+        console.warn('Error fetching students for finance:', err);
       }
     };
     fetchStudents();
@@ -79,7 +92,11 @@ export default function FinanceGuru() {
       );
       const unsub = onSnapshot(q, (snap) => {
         const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavingTransaction));
-        docs.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        docs.sort((a, b) => {
+          const timeA = a.createdAt || (a.date?.toDate ? a.date.toDate().getTime() : (a.date?.seconds ? a.date.seconds * 1000 : new Date(a.date || 0).getTime()));
+          const timeB = b.createdAt || (b.date?.toDate ? b.date.toDate().getTime() : (b.date?.seconds ? b.date.seconds * 1000 : new Date(b.date || 0).getTime()));
+          return timeB - timeA;
+        });
         setSavingTransactions(docs);
       }, (err) => console.warn("Savings snapshot error:", err));
       return () => unsub();
@@ -90,7 +107,11 @@ export default function FinanceGuru() {
       );
       const unsub = onSnapshot(q, (snap) => {
         const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as KasTransaction));
-        docs.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        docs.sort((a, b) => {
+          const timeA = a.createdAt || (a.date?.toDate ? a.date.toDate().getTime() : (a.date?.seconds ? a.date.seconds * 1000 : new Date(a.date || 0).getTime()));
+          const timeB = b.createdAt || (b.date?.toDate ? b.date.toDate().getTime() : (b.date?.seconds ? b.date.seconds * 1000 : new Date(b.date || 0).getTime()));
+          return timeB - timeA;
+        });
         setKasTransactions(docs);
       }, (err) => console.warn("Kas snapshot error:", err));
       return () => unsub();
@@ -103,27 +124,69 @@ export default function FinanceGuru() {
     
     setIsSubmitting(true);
     try {
+      const nowMs = Date.now();
+      const numAmount = Number(amount);
+
       if (activeTab === 'tabungan') {
-        await addDoc(collection(db, 'savings'), {
+        const studentObj = students.find(s => s.id === selectedStudent);
+        const payload = {
           studentId: selectedStudent,
-          classId: selectedClass, // to help with parent queries later if needed
-          amount: Number(amount),
+          studentName: (studentObj?.name || '').trim(),
+          nisn: (studentObj?.nisn || '').trim(),
+          classId: selectedClass,
+          amount: numAmount,
           type: transactionType,
           date: serverTimestamp(),
-          note: note || (transactionType === 'setor' ? 'Setoran Tabungan' : 'Penarikan Tabungan')
-        });
+          createdAt: nowMs,
+          note: note.trim() || (transactionType === 'setor' ? 'Setoran Tabungan' : 'Penarikan Tabungan')
+        };
+
+        await addDoc(collection(db, 'savings'), payload);
+
+        // Beritahu Wali Murid langsung via student_notifications & Push Notification
+        try {
+          const titleText = transactionType === 'setor' ? '💰 Setoran Tabungan Santri' : '💸 Penarikan Tabungan Santri';
+          const bodyText = `Setoran tabungan sebesar Rp ${numAmount.toLocaleString('id-ID')} untuk ananda ${studentObj?.name || 'Santri'} berhasil dicatat oleh Wali Kelas.`;
+          
+          await addDoc(collection(db, 'student_notifications'), {
+            studentId: selectedStudent,
+            title: titleText,
+            message: bodyText,
+            type: 'savings',
+            date: serverTimestamp(),
+            createdAt: nowMs,
+            read: false
+          });
+
+          fetch('/api/send-push-announcement', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: titleText,
+              body: bodyText,
+              targetClass: selectedClass,
+              targetRole: 'Wali Murid',
+              studentId: selectedStudent,
+              type: 'savings',
+              url: '/?tab=keuangan'
+            })
+          }).catch(() => {});
+        } catch (notifErr) {
+          console.warn('Savings parent alert notice:', notifErr);
+        }
       } else {
         await addDoc(collection(db, 'kas'), {
           classId: selectedClass,
-          amount: Number(amount),
+          amount: numAmount,
           type: transactionType === 'setor' ? 'masuk' : 'keluar',
           date: serverTimestamp(),
-          note: note || (transactionType === 'setor' ? 'Pemasukan Kas' : 'Pengeluaran Kas')
+          createdAt: nowMs,
+          note: note.trim() || (transactionType === 'setor' ? 'Pemasukan Kas' : 'Pengeluaran Kas')
         });
       }
       setAmount('');
       setNote('');
-      alert('Transaksi berhasil disimpan!');
+      alert('Transaksi berhasil disimpan dan disinkronkan ke dasbor Wali Murid!');
     } catch (error) {
       console.error(error);
       alert('Gagal menyimpan transaksi.');
@@ -132,14 +195,17 @@ export default function FinanceGuru() {
     }
   };
 
+
   const handleDeleteSaving = async (id: string) => {
-    
-    await deleteDoc(doc(db, 'savings', id));
+    if (window.confirm('Apakah Anda yakin ingin menghapus catatan transaksi tabungan ini?')) {
+      await deleteDoc(doc(db, 'savings', id));
+    }
   };
   
   const handleDeleteKas = async (id: string) => {
-    
-    await deleteDoc(doc(db, 'kas', id));
+    if (window.confirm('Apakah Anda yakin ingin menghapus catatan transaksi kas ini?')) {
+      await deleteDoc(doc(db, 'kas', id));
+    }
   };
 
   // Calculations

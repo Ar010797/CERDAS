@@ -93,7 +93,7 @@ export default function GuruDashboard() {
 
     // 5. Kas Kelas
     const qKas = query(
-      collection(db, 'kas_transactions'),
+      collection(db, 'kas'),
       where('classId', '==', assignedClass)
     );
     const unsubKas = onSnapshot(qKas, (snap) => {

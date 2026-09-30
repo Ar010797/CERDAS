@@ -274,16 +274,41 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
     const unsubAssignments = onSnapshot(
       qAssignments,
       (snap) => {
-        const list: Assignment[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as Assignment));
-        // Sort in-memory by dueDate ascending
-        list.sort((a, b) => new Date(`${a.dueDate}T${a.dueTime}`).getTime() - new Date(`${b.dueDate}T${b.dueTime}`).getTime());
-        setAssignments(list);
+        const rawList: Assignment[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as Assignment));
+        const now = Date.now();
+        const activeList: Assignment[] = [];
+
+        rawList.forEach((a) => {
+          let isExpired = false;
+          if (a.dueDate) {
+            try {
+              const dueDateTime = new Date(`${a.dueDate}T${a.dueTime || '23:59'}:00`).getTime();
+              if (!isNaN(dueDateTime) && dueDateTime < now) {
+                isExpired = true;
+              }
+            } catch {}
+          }
+
+          if (isExpired) {
+            // Sesuai permintaan: Soal yang kedaluwarsa dihapus otomatis dari sistem tanpa menghapus nilai/pengumpulan siswa
+            if (isGuru || isAdmin) {
+              deleteDoc(doc(db, 'tugas', a.id)).catch(e => console.warn('Auto cleanup expired assignment doc notice:', e));
+            }
+          } else {
+            activeList.push(a);
+          }
+        });
+
+        // Santri / Wali murid hanya melihat tugas yang belum kedaluwarsa
+        const listToDisplay = isWaliMurid ? activeList : rawList;
+        listToDisplay.sort((a, b) => new Date(`${a.dueDate}T${a.dueTime || '23:59'}`).getTime() - new Date(`${b.dueDate}T${b.dueTime || '23:59'}`).getTime());
+        setAssignments(listToDisplay);
         setIsUsingOfflineData(false);
         setLoading(false);
 
         // Cache freshly retrieved assignments into IndexedDB for offline viewing
         // and purge any assignments deleted by teacher/admin from the local store
-        syncOfflineAssignments(selectedClass, list).catch((err) => console.warn('Cache assignments error:', err));
+        syncOfflineAssignments(selectedClass, listToDisplay).catch((err) => console.warn('Cache assignments error:', err));
       },
       (err) => {
         console.warn('Network error fetching assignments from Firestore, falling back to IndexedDB:', err);
@@ -679,6 +704,34 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
       setSavingGrade(false);
     }
   };
+
+  // Guru: Hapus / Reset Nilai Siswa (Hanya Guru yang dapat menghapus nilai)
+  const handleDeleteStudentGrade = async () => {
+    if (!selectedAssignmentForGrading || !activeSubmissionStudent) return;
+    const studentName = activeSubmissionStudent.student.name;
+    if (!confirm(`Apakah Anda yakin ingin menghapus nilai tugas siswa "${studentName}"? Tindakan ini hanya dapat dilakukan oleh Guru/Wali Kelas.`)) {
+      return;
+    }
+
+    setSavingGrade(true);
+    try {
+      const subId = activeSubmissionStudent.submission?.id || `${selectedAssignmentForGrading.id}_${activeSubmissionStudent.student.id}`;
+      await deleteDoc(doc(db, 'pengumpulan_tugas', subId));
+
+      setSubmissions(prev => prev.filter(s => s.id !== subId));
+      setActiveSubmissionStudent(prev => prev ? { ...prev, submission: undefined } : null);
+      setGradeInput('');
+      setFeedbackInput('');
+
+      showToast(`Nilai untuk ${studentName} berhasil dihapus oleh Guru.`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal menghapus nilai siswa.', 'error');
+    } finally {
+      setSavingGrade(false);
+    }
+  };
+
 
   // Student / Wali Murid: Submit Assignment
   const handleStudentSubmit = async (e: React.FormEvent) => {
@@ -1891,17 +1944,32 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                             />
                           </div>
 
-                          <div className="flex justify-end pt-2">
-                            <button
-                              type="button"
-                              onClick={handleSaveGradeAndFeedback}
-                              disabled={savingGrade}
-                              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                            >
-                              <Check className="w-4 h-4" />
-                              <span>{savingGrade ? 'Menyimpan...' : 'Kirim Nilai & Feedback'}</span>
-                            </button>
+                          <div className="flex items-center justify-between pt-2">
+                            {activeSubmissionStudent.submission?.score !== undefined && (
+                              <button
+                                type="button"
+                                onClick={handleDeleteStudentGrade}
+                                disabled={savingGrade}
+                                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 rounded-xl text-xs font-bold border border-rose-200 dark:border-rose-800 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Hapus Nilai</span>
+                              </button>
+                            )}
+
+                            <div className="ml-auto">
+                              <button
+                                type="button"
+                                onClick={handleSaveGradeAndFeedback}
+                                disabled={savingGrade}
+                                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                              >
+                                <Check className="w-4 h-4" />
+                                <span>{savingGrade ? 'Menyimpan...' : 'Kirim Nilai & Feedback'}</span>
+                              </button>
+                            </div>
                           </div>
+
                         </div>
                       </div>
                     ) : (

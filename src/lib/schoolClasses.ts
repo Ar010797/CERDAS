@@ -194,42 +194,80 @@ export function normalizeClassName(raw?: string): string {
 /**
  * Cek apakah kelas siswa cocok dengan target kelas pengumuman/pemberitahuan
  * Mendukung multiple class, array, maupun string 'Semua Kelas'
+ * - Jika target adalah 'Semua Kelas', 'Semua', 'Umum' -> Semua kelas cocok
+ * - Jika target adalah kelas tertentu (misal 'Kelas 3 A') -> HANYA kelas sasaran tersebut yang cocok
+ * - Jika studentClass kosong dan target spesifik -> TIDAK cocok (mencegah salah sasaran)
  */
 export function isClassTargetMatching(
   targetClasses: string | string[] | undefined,
   studentClass: string | undefined
 ): boolean {
   if (!targetClasses) return true;
-  if (!studentClass) return true;
 
-  const currentClassNorm = studentClass.trim().toLowerCase();
+  // Helper untuk membersihkan & menstandarkan nama kelas (contoh: "kelas 1a" -> "1-a", "kelas 1" -> "1")
+  const normalize = (c: string): { grade: string; section: string; raw: string } => {
+    const raw = c.trim().toLowerCase();
+    const clean = raw.replace(/^kelas\s*/i, '').trim();
+    const match = clean.match(/^(\d+)(?:\s*([a-zA-Z]))?$/);
+    if (match) {
+      return {
+        grade: match[1],
+        section: (match[2] || '').toLowerCase(),
+        raw
+      };
+    }
+    return { grade: clean, section: '', raw };
+  };
 
-  // Jika targetClasses berupa array
+  const isAllTarget = (str: string) => {
+    const s = str.trim().toLowerCase();
+    return s === '' || s === 'semua' || s === 'semua kelas' || s === 'umum' || s === 'all';
+  };
+
+  // 1. Jika targetClasses berupa array
   if (Array.isArray(targetClasses)) {
-    if (targetClasses.length === 0 || targetClasses.includes('Semua Kelas')) return true;
+    if (targetClasses.length === 0 || targetClasses.some(isAllTarget)) return true;
+    if (!studentClass || !studentClass.trim()) return false;
+
+    const currentNorm = normalize(studentClass);
     return targetClasses.some((tc) => {
-      const tcNorm = tc.trim().toLowerCase();
-      return (
-        tcNorm === 'semua kelas' ||
-        tcNorm === currentClassNorm ||
-        currentClassNorm.startsWith(tcNorm) ||
-        tcNorm.startsWith(currentClassNorm)
-      );
+      if (isAllTarget(tc)) return true;
+      const targetNorm = normalize(tc);
+
+      // Jika target menentukan seksi tertentu (misal Kelas 1 A)
+      if (targetNorm.section) {
+        return (
+          targetNorm.grade === currentNorm.grade &&
+          targetNorm.section === currentNorm.section
+        );
+      }
+
+      // Jika target menentukan tingkat kelas secara umum (misal Kelas 1 tanpa A/B)
+      return targetNorm.grade === currentNorm.grade;
     });
   }
 
-  // Jika targetClasses berupa string tunggal atau koma
+  // 2. Jika targetClasses berupa string tunggal atau daftar dipisah koma
   const str = targetClasses.trim();
-  if (str === 'Semua Kelas' || !str) return true;
+  if (isAllTarget(str)) return true;
+  if (!studentClass || !studentClass.trim()) return false;
 
-  const parts = str.split(',').map((p) => p.trim().toLowerCase());
-  if (parts.includes('semua kelas')) return true;
+  const parts = str.split(',').map((p) => p.trim());
+  if (parts.some(isAllTarget)) return true;
 
+  const currentNorm = normalize(studentClass);
   return parts.some((p) => {
-    return (
-      p === currentClassNorm ||
-      currentClassNorm.startsWith(p) ||
-      p.startsWith(currentClassNorm)
-    );
+    if (isAllTarget(p)) return true;
+    const targetNorm = normalize(p);
+
+    if (targetNorm.section) {
+      return (
+        targetNorm.grade === currentNorm.grade &&
+        targetNorm.section === currentNorm.section
+      );
+    }
+
+    return targetNorm.grade === currentNorm.grade;
   });
 }
+

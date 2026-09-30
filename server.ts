@@ -4,6 +4,7 @@ import multer from "multer";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { PDFParse } from "pdf-parse";
+import mammoth from "mammoth";
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -47,13 +48,12 @@ async function startServer() {
 
   // Helper for Gemini retry with multi-model fallback to survive 503/429 spikes or model transitions
   const callGeminiWithRetry = async (ai: GoogleGenAI, params: any) => {
-    // Model fallback sequence:
-    // 1. gemini-3.8-flash: primary recommended model for standard text & multimodal tasks
-    // 2. gemini-3.1-flash-lite: ultra-fast lightweight model
-    // 3. gemini-flash-latest: high throughput alias
-    // 4. gemini-2.5-flash: robust fallback for rate limit & quota relief
-    const requestedModel = params.model || "gemini-3.8-flash";
-    const defaultCandidates = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+    // Model fallback sequence prioritized for quota resilience:
+    // 1. gemini-2.5-flash: high-rate limit standard model
+    // 2. gemini-2.5-flash-lite: lightweight ultra-fast model with maximum quota availability
+    // 3. gemini-flash-latest / gemini-3.1-flash-lite
+    const requestedModel = params.model || "gemini-2.5-flash";
+    const defaultCandidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-3.1-flash-lite"];
     const modelCandidates: string[] = [
       requestedModel,
       ...defaultCandidates.filter((m) => m !== requestedModel)
@@ -80,9 +80,9 @@ async function startServer() {
         const errMsg = (error?.message || "").toLowerCase();
         console.log(`[AI Fallback] Candidate ${currentModel} encountered transient condition (${error?.status || error?.code || 'switching'}), testing next candidate...`);
         
-        // If it's a 503 Service Unavailable (high demand spike), brief 300ms pause before trying next candidate
-        if (errMsg.includes("503") || errMsg.includes("demand") || errMsg.includes("unavailable")) {
-          await new Promise((r) => setTimeout(r, 300));
+        // If it's a 503 Service Unavailable or 429 quota, brief 200ms pause before trying next candidate
+        if (errMsg.includes("503") || errMsg.includes("demand") || errMsg.includes("unavailable") || errMsg.includes("quota")) {
+          await new Promise((r) => setTimeout(r, 200));
         }
         continue;
       }
@@ -90,6 +90,7 @@ async function startServer() {
 
     throw lastError || new Error("Layanan AI sedang mengalami lonjakan permintaan. Sistem beralih ke engine cadangan.");
   };
+
 
   /**
    * Helper cerdas untuk menyusun penjabaran isi materi pembelajaran yang lengkap,
@@ -1282,31 +1283,46 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }
   });
 
-  // Helper parser naskah soal berbasis teks universal (Mendukung semua mata pelajaran: Matematika, B. Indonesia, B. Inggris, IPA, IPS, PAI, dll)
+  // Helper parser naskah soal berbasis teks universal (Mendukung semua mata pelajaran: Matematika, B. Indonesia, B. Inggris, IPA, IPS, PAI / Bahasa Arab, dll)
   const parseQuestionsFromRawText = (rawText: string): any[] => {
     if (!rawText || rawText.trim().length === 0) return [];
 
+    const normalizeArabicNumerals = (str: string): string => {
+      return str.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    };
+
+    const mapOptionId = (idStr: string): string => {
+      const clean = idStr.trim();
+      if (['أ', 'إ', 'ا'].includes(clean)) return 'A';
+      if (clean === 'ب') return 'B';
+      if (clean === 'ج') return 'C';
+      if (clean === 'د') return 'D';
+      if (clean === 'ه' || clean === 'هـ') return 'E';
+      return clean.toUpperCase();
+    };
+
     // 1. Standalone Answer Key Table di akhir naskah (Hanya jika berbentuk tabel/daftar 3+ butir dengan nomor dan kunci di akhir)
     const answerKeyMap = new Map<number, string>();
-    const bottomKeyMatch = rawText.match(/(?:^|\n)\s*(?:TABEL\s+)?(?:KUNCI\s+JAWABAN|ANSWER\s+KEY)[:\s\n]+([\s\S]+?)$/i);
+    const bottomKeyMatch = rawText.match(/(?:^|\n)\s*(?:TABEL\s+)?(?:KUNCI\s+JAWABAN|ANSWER\s+KEY|مفتاح\s+الإجابة)[:\s\n]+([\s\S]+?)$/i);
     let cleanText = rawText;
     if (bottomKeyMatch && bottomKeyMatch[1]) {
-      const keyPairs = [...bottomKeyMatch[1].matchAll(/(\d+)[\.\):\s]+([A-Ea-e])/g)];
+      const keyPairs = [...bottomKeyMatch[1].matchAll(/([0-9٠-٩]+)[\.\):\s]+([A-Ea-e]|[أإابجد])/gu)];
       if (keyPairs.length >= 3) {
         for (const kp of keyPairs) {
-          answerKeyMap.set(parseInt(kp[1], 10), kp[2].toUpperCase());
+          const westernNum = parseInt(normalizeArabicNumerals(kp[1]), 10);
+          answerKeyMap.set(westernNum, mapOptionId(kp[2]));
         }
         cleanText = rawText.slice(0, bottomKeyMatch.index);
       }
     }
 
-    // Pisahkan teks per baris dan bersihkan watermark/nomor halaman PDF
+    // Pisahkan teks per baris dan bersihkan watermark/nomor halaman PDF/Word
     const rawLines = cleanText.split(/\r?\n/).map(l => l.trim());
     const lines: string[] = [];
 
     for (const line of rawLines) {
       if (!line) continue;
-      // Filter penomoran halaman PDF otomatis: '-- 1 of 5 --', 'Halaman 1 dari 5', 'Page 1'
+      // Filter penomoran halaman otomatis: '-- 1 of 5 --', 'Halaman 1 dari 5', 'Page 1'
       if (/^--\s*\d+\s+(?:of|\/)\s+\d+\s*--$/i.test(line)) continue;
       if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(line)) continue;
       if (/^[-=_*~]{3,}$/.test(line)) continue;
@@ -1326,25 +1342,33 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }> = [];
 
     let current: typeof items[0] | null = null;
+    let autoQuestionCounter = 1;
     let currentTarget: 'question' | 'option' | 'explanation' | 'after_answer' | 'after_points' = 'question';
     let currentOptionId: string | null = null;
 
-    const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?(\d+)[\.\)\]]\s*(.*)$/i;
-    const singleOptRegex = /^(?:\()?([A-Ea-e])[\.\)]\s*(.*)$/;
-    const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban|answer(?:\s*key)?)\s*[:=]\s*([A-Ea-e]|\S.*)$/i;
-    const pointRegex = /^(?:poin|bobot|skor|score|points)\s*[:=]?\s*(\d+)?$/i;
+    // Regex penomoran soal (mendukung Latin 1, 2, 3 dan Arab ١, ٢, ٣)
+    const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?([0-9٠-٩]+)[\.\)\]]\s*(.*)$/iu;
+    // Regex opsi tunggal (A, B, C, D, E atau أ, ب, ج, د, ه)
+    const singleOptRegex = /^(?:\()?([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s+(.*)$/u;
+    // Regex kunci jawaban (Indonesia, Inggris, atau Arab)
+    const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban(?:\s*benar)?|answer(?:\s*key)?|مفتاح|الإجابة|الجواب|حل)\s*[:=]\s*([A-Ea-e]|[أإابجد]|\S.*)$/iu;
+    // Regex poin (Poin: 10, Nilai: 10, dll)
+    const pointRegex = /^(?:poin|bobot|skor|score|points|nilai)\s*[:=]?\s*(\d+)?$/i;
+    // Regex pembahasan opsional (tidak wajib)
     const expRegex = /^(?:pembahasan|penjelasan|alasan|explanation)\s*[:=]\s*(.*)$/i;
 
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+      const rawLine = lines[i];
+      const lineWithNormNums = normalizeArabicNumerals(rawLine);
 
-      // Deteksi awal soal baru (nomor soal di awal baris: 1., 1), No. 1, dll)
-      const numMatch = line.match(qNumRegex);
+      // 1. Deteksi awal soal baru BERNOMOR (1., 1), No. 1, ١., dll)
+      const numMatch = lineWithNormNums.match(qNumRegex);
       if (numMatch) {
         const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete;
         if (isActuallyNewQ) {
           if (current) items.push(current);
           const qNum = parseInt(numMatch[1], 10);
+          autoQuestionCounter = Math.max(autoQuestionCounter, qNum + 1);
           const rawQ = numMatch[2].trim();
           const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(rawQ) ||
                           /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(rawQ);
@@ -1366,27 +1390,62 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         }
       }
 
-      if (!current) {
-        // Teks header sebelum soal nomor 1 (misal judul latihan / kop sekolah) - lewati
+      const isSingleOpt = singleOptRegex.test(rawLine);
+      const isAns = ansRegex.test(rawLine);
+      const isPoint = pointRegex.test(rawLine);
+      const isExp = expRegex.test(rawLine);
+
+      // 2. Deteksi awal soal baru TANPA NOMOR (Otomatis beri nomor 1, 2, 3...)
+      if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp) {
+        items.push(current);
+        current = {
+          number: autoQuestionCounter++,
+          questionText: rawLine,
+          options: [],
+          type: 'multiple_choice',
+          correctAnswer: '',
+          points: 10,
+          explanation: '',
+          hasAnswer: false,
+          isComplete: false
+        };
+        currentTarget = 'question';
+        currentOptionId = null;
         continue;
       }
 
-      // Deteksi Kunci Jawaban per butir: 'Kunci: B' atau 'Jawaban: D'
-      const ansMatch = line.match(ansRegex);
+      // Jika belum ada soal dan baris bukan opsi/kunci, mulai soal nomor 1
+      if (!current && !isSingleOpt && !isAns && !isPoint && !isExp) {
+        current = {
+          number: autoQuestionCounter++,
+          questionText: rawLine,
+          options: [],
+          type: 'multiple_choice',
+          correctAnswer: '',
+          points: 10,
+          explanation: '',
+          hasAnswer: false,
+          isComplete: false
+        };
+        currentTarget = 'question';
+        currentOptionId = null;
+        continue;
+      }
+
+      if (!current) continue;
+
+      // 3. Deteksi Kunci Jawaban per butir: 'Kunci: B' atau 'Jawaban: D'
+      const ansMatch = rawLine.match(ansRegex);
       if (ansMatch) {
         const val = ansMatch[1].trim();
-        if (/^[A-Ea-e]$/.test(val)) {
-          current.correctAnswer = val.toUpperCase();
-        } else {
-          current.correctAnswer = val;
-        }
+        current.correctAnswer = mapOptionId(val);
         current.hasAnswer = true;
         currentTarget = 'after_answer';
         continue;
       }
 
-      // Deteksi Bobot/Poin: 'Poin:' atau 'Poin: 10'
-      const ptMatch = line.match(pointRegex);
+      // 4. Deteksi Bobot/Poin: 'Poin:' atau 'Poin: 10'
+      const ptMatch = rawLine.match(pointRegex);
       if (ptMatch) {
         if (ptMatch[1]) {
           current.points = parseInt(ptMatch[1], 10) || current.points;
@@ -1395,20 +1454,20 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         continue;
       }
 
-      // Deteksi Pembahasan: 'Pembahasan: 81 dikurangi 40 menghasilkan 41.'
-      const expMatch = line.match(expRegex);
+      // 5. Deteksi Pembahasan (opsional): 'Pembahasan: ...'
+      const expMatch = rawLine.match(expRegex);
       if (expMatch) {
         current.explanation = expMatch[1].trim();
         currentTarget = 'explanation';
         continue;
       }
 
-      // Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
-      const horizOpts = [...line.matchAll(/(?:^|\s+)([A-Ea-e])[\.\)]\s*([^\s][^A-E\n]*?)(?=(?:\s+[A-Ea-e][\.\)]|$))/g)];
+      // 6. Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
+      const horizOpts = [...rawLine.matchAll(/(?:^|\s+)([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s*([^\s][^A-Ea-eأإابجد\n]*?)(?=(?:\s+[A-Ea-e]|[أإابجد][\.\)\]:\-]|$))/gu)];
       if (horizOpts.length >= 2) {
         for (const m of horizOpts) {
           current.options.push({
-            id: m[1].toUpperCase(),
+            id: mapOptionId(m[1]),
             text: m[2].trim()
           });
         }
@@ -1417,10 +1476,10 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         continue;
       }
 
-      // Deteksi Opsi Vertikal: 'A. 40', 'B. 41'
-      const singleOpt = line.match(singleOptRegex);
-      if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]$/.test(singleOpt[1]))) {
-        const optId = singleOpt[1].toUpperCase();
+      // 7. Deteksi Opsi Vertikal: 'A. 40', 'B. 41'
+      const singleOpt = rawLine.match(singleOptRegex);
+      if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]|[أإابجد]$/u.test(singleOpt[1]))) {
+        const optId = mapOptionId(singleOpt[1]);
         const optText = singleOpt[2].trim();
         current.options.push({
           id: optId,
@@ -1432,14 +1491,14 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         continue;
       }
 
-      // Penanganan Teks Panjang Multi-Baris (Paragraf bacaan, cerita, puisi, dialog, opsi panjang)
+      // 8. Penanganan Teks Panjang Multi-Baris (Paragraf bacaan, teks Arab, cerita, persamaan matematika, opsi panjang)
       if (currentTarget === 'explanation') {
-        current.explanation += ' ' + line;
+        current.explanation += ' ' + rawLine;
       } else if (currentTarget === 'option' && currentOptionId) {
         const opt = current.options.find(o => o.id === currentOptionId);
-        if (opt) opt.text += ' ' + line;
+        if (opt) opt.text += ' ' + rawLine;
       } else if (currentTarget === 'question' && current.options.length === 0) {
-        current.questionText += ' ' + line;
+        current.questionText += ' ' + rawLine;
       }
     }
 
@@ -1449,15 +1508,27 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
       const isEssay = item.type === 'essay' || item.options.length < 2;
       const finalAnswer = item.correctAnswer || (isEssay ? '' : (item.options[0]?.id || 'A'));
       return {
-        id: `q_pdf_${Date.now()}_${idx + 1}`,
+        id: `q_doc_${Date.now()}_${idx + 1}`,
         type: isEssay ? 'essay' : 'multiple_choice',
-        questionText: item.questionText || `Soal ${idx + 1}`,
+        questionText: item.questionText || `Soal ${item.number || idx + 1}`,
         points: item.points || (isEssay ? 20 : 10),
         options: isEssay ? undefined : item.options,
         correctAnswer: finalAnswer,
-        explanation: item.explanation || (isEssay ? 'Jawaban esai' : `Kunci jawaban: ${finalAnswer}`)
+        explanation: item.explanation || ''
       };
     });
+  };
+
+  // Helper untuk mengekstrak teks langsung dari buffer berkas Word (.docx) dengan mammoth
+  const extractTextFromWordBuffer = async (buffer: Buffer): Promise<string> => {
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      const text = (result?.value || "").trim();
+      if (text.length > 5) return text;
+    } catch (err) {
+      console.warn("[Mammoth Word extract notice]:", err);
+    }
+    return "";
   };
 
   // Helper untuk mengekstrak teks langsung dari buffer berkas PDF dengan PDFParse & Fallback
@@ -1495,7 +1566,7 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
           const matches = block.match(/\(([^)]+)\)/g);
           if (matches) {
             const line = matches.map(x => x.slice(1, -1).replace(/\\[rntbf\\]/g, ' ')).join(' ').trim();
-            if (line.length > 2 && /[a-zA-Z0-9]/.test(line)) {
+            if (line.length > 2 && /[a-zA-Z0-9\u0600-\u06FF]/.test(line)) {
               textPieces.push(line);
             }
           }
@@ -1503,7 +1574,7 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
       }
 
       // Ekstrak dari teks di dalam tanda kurung ( ... )
-      const parenMatches = raw.match(/\(([a-zA-Z0-9\s.,?!:;'"()/-]{3,})\)/g);
+      const parenMatches = raw.match(/\(([a-zA-Z0-9\u0600-\u06FF\s.,?!:;'"()/-]{3,})\)/g);
       if (parenMatches) {
         for (const m of parenMatches) {
           const clean = m.slice(1, -1).trim();
@@ -1520,93 +1591,121 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }
   };
 
-  // API 2b: Import & Extract Online Quiz Questions from PDF document (Super Cepat untuk Median APK & Android WebView)
-  app.post(["/api/quiz/import-pdf", "/api/extract-questions-from-pdf"], upload.single("file"), async (req, res) => {
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    try {
-      let fileBuffer: Buffer | null = null;
-      let mimeType = "application/pdf";
-      let originalName = "dokumen_soal.pdf";
+  // API 2b: Import & Extract Online Quiz Questions from Word (.docx/.doc) or PDF documents
+  app.post(
+    ["/api/quiz/import-document", "/api/quiz/import-word", "/api/quiz/import-pdf", "/api/extract-questions-from-pdf"],
+    upload.single("file"),
+    async (req, res) => {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      try {
+        let fileBuffer: Buffer | null = null;
+        let mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        let originalName = "dokumen_soal.docx";
 
-      if (req.file) {
-        fileBuffer = req.file.buffer;
-        originalName = req.file.originalname || "dokumen_soal.pdf";
-        mimeType = req.file.mimetype || "application/pdf";
-        if (!mimeType || mimeType === 'application/octet-stream') {
-          mimeType = 'application/pdf';
+        if (req.file) {
+          fileBuffer = req.file.buffer;
+          originalName = req.file.originalname || "dokumen_soal.docx";
+          mimeType = req.file.mimetype || "application/octet-stream";
+        } else if (req.body && (req.body.fileBase64 || req.body.pdfBase64 || req.body.docBase64)) {
+          let cleanBase64 = String(req.body.fileBase64 || req.body.docBase64 || req.body.pdfBase64);
+          if (cleanBase64.includes('base64,')) {
+            cleanBase64 = cleanBase64.split('base64,')[1];
+          }
+          fileBuffer = Buffer.from(cleanBase64.trim(), "base64");
+          originalName = req.body.filename || "dokumen_soal.docx";
+          mimeType = req.body.mimeType || "application/octet-stream";
         }
-      } else if (req.body && req.body.pdfBase64) {
-        let cleanBase64 = String(req.body.pdfBase64);
-        if (cleanBase64.includes('base64,')) {
-          cleanBase64 = cleanBase64.split('base64,')[1];
+
+        if (!fileBuffer || fileBuffer.length === 0) {
+          return res.status(200).json({ 
+            success: false, 
+            error: "Tidak ada data berkas yang diterima. Pastikan berkas Word (.docx) atau PDF dapat dibuka." 
+          });
         }
-        fileBuffer = Buffer.from(cleanBase64.trim(), "base64");
-        originalName = req.body.filename || "dokumen_soal.pdf";
-        mimeType = req.body.mimeType || "application/pdf";
-      }
 
-      if (!fileBuffer || fileBuffer.length === 0) {
-        return res.status(200).json({ 
-          success: false, 
-          error: "Tidak ada data berkas PDF yang diterima. Pastikan berkas dapat dibuka." 
-        });
-      }
+        let parsedQuestions: any[] = [];
+        let extractionSource = "word_fast_parser";
 
-      let parsedQuestions: any[] = [];
-      let extractionSource = "text_fast_ai";
+        const lowerName = originalName.toLowerCase();
+        const isWord = 
+          lowerName.endsWith('.docx') || 
+          lowerName.endsWith('.doc') || 
+          mimeType.includes('word') || 
+          mimeType.includes('officedocument') ||
+          mimeType.includes('msword');
 
-      // 1. Ekstrak Teks dari PDF Secara Cepat (Selesai dalam 30ms)
-      const extractedText = await extractTextFromPdfBuffer(fileBuffer);
+        const isText = lowerName.endsWith('.txt') || mimeType.includes('text/plain');
 
-      if (extractedText && extractedText.length > 20) {
-        // Coba parser lokal cerdas universal terlebih dahulu (Selesai ~1ms, 100% deterministik & akurat tanpa risiko limit kuota AI)
-        const localParsed = parseQuestionsFromRawText(extractedText);
-        
-        if (Array.isArray(localParsed) && localParsed.length > 0) {
-          parsedQuestions = localParsed;
-          extractionSource = "universal_local_parser";
+        let extractedText = "";
+
+        // Ekstraksi teks sesuai jenis berkas
+        if (isWord) {
+          extractedText = await extractTextFromWordBuffer(fileBuffer);
+          // Jika format .doc biner lama dan mammoth kosong, bersihkan teks biner
+          if (!extractedText || extractedText.length < 10) {
+            extractedText = fileBuffer.toString("utf-8").replace(/[^\x20-\x7E\u0600-\u06FF\n\r\t]/g, " ");
+          }
+        } else if (isText) {
+          extractedText = fileBuffer.toString("utf-8");
         } else {
-          // Jika format naskah tidak menggunakan penomoran standar, gunakan bantuan Gemini AI teks
-          try {
-            const ai = getAi();
-            const textResponse = await callGeminiWithRetry(ai, {
-              model: "gemini-3.8-flash",
-              timeoutMs: 7000,
-              contents: `Anda adalah pakar pembuat naskah soal sekolah (SD/SMP/SMA).
-Tugas Anda adalah membaca teks hasil pemindaian berkas PDF berikut dan mengekstrak SEMUA butir soal ke dalam array JSON terstruktur:
+          // PDF
+          extractedText = await extractTextFromPdfBuffer(fileBuffer);
+          // Jika PDF kosong, coba mammoth jika berkas aslinya docx tapi dinamai pdf
+          if (!extractedText || extractedText.length < 10) {
+            const wordTry = await extractTextFromWordBuffer(fileBuffer);
+            if (wordTry && wordTry.length > 20) extractedText = wordTry;
+          }
+        }
+
+        if (extractedText && extractedText.length > 15) {
+          // 1. Coba parser universal lokal (Selesai dalam ~1ms, 100% akurat tanpa limit kuota AI, mendukung Arab & Matematika)
+          const localParsed = parseQuestionsFromRawText(extractedText);
+          
+          if (Array.isArray(localParsed) && localParsed.length > 0) {
+            parsedQuestions = localParsed;
+            extractionSource = isWord ? "universal_word_parser" : "universal_local_parser";
+          } else {
+            // 2. Jika format naskah sangat tidak biasa, minta bantuan Gemini AI
+            try {
+              const ai = getAi();
+              const textResponse = await callGeminiWithRetry(ai, {
+                model: "gemini-3.8-flash",
+                timeoutMs: 7000,
+                contents: `Anda adalah pakar pembuat naskah soal sekolah (SD/SMP/SMA/Madrasah).
+Tugas Anda adalah membaca teks naskah soal berikut (bisa berupa Matematika, Bahasa Arab, PAI, IPA, dll) dan mengekstrak SEMUA butir soal ke dalam array JSON terstruktur:
 
 ${extractedText.slice(0, 10000)}
 
 Aturan Format JSON:
-1. 'questionText': Kalimat pertanyaan lengkap tanpa nomor soal di awal (hilangkan '1.', '2.', dst).
+1. 'questionText': Kalimat pertanyaan lengkap tanpa nomor soal di awal. Teks Arab dan rumus matematika harus tetap utuh.
 2. 'type': 'multiple_choice' atau 'essay'.
 3. 'options': Untuk 'multiple_choice': array objek: [{"id": "A", "text": "opsi A"}, {"id": "B", "text": "opsi B"}, {"id": "C", "text": "opsi C"}, {"id": "D", "text": "opsi D"}]. Untuk 'essay': kosongkan [].
 4. 'correctAnswer': Huruf kapital 'A', 'B', 'C', atau 'D' untuk PG, atau kata kunci untuk esai.
 5. 'points': Bobot poin (10 untuk PG, 20 untuk esai).
-6. 'explanation': Pembahasan singkat (1 kalimat).
+6. 'explanation': Kunci jawaban dan pembahasan singkat.
 
 Kembalikan format JSON murni array of objects.`
-            });
+              });
 
-            const txt = (textResponse.text || "").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-            try {
-              parsedQuestions = JSON.parse(txt);
-            } catch {
-              const match = txt.match(/\[[\s\S]*\]/);
-              if (match) {
-                parsedQuestions = JSON.parse(match[0]);
+              const txt = (textResponse.text || "").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+              try {
+                parsedQuestions = JSON.parse(txt);
+              } catch {
+                const match = txt.match(/\[[\s\S]*\]/);
+                if (match) {
+                  parsedQuestions = JSON.parse(match[0]);
+                }
               }
+            } catch (textAiErr) {
+              console.warn("[Text AI parsing notice]:", textAiErr);
             }
-          } catch (textAiErr) {
-            console.warn("[Text AI parsing notice]:", textAiErr);
-          }
 
-          if ((!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) && localParsed && localParsed.length > 0) {
-            extractionSource = "heuristic_regex";
-            parsedQuestions = localParsed;
+            if ((!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) && localParsed && localParsed.length > 0) {
+              extractionSource = "heuristic_regex";
+              parsedQuestions = localParsed;
+            }
           }
         }
-      }
 
       // 2. Jika teks PDF tidak terbaca (misal PDF hasil scan murni gambar), gunakan Multimodal AI dengan timeout singkat (8 detik)
       if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {

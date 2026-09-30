@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { showDeviceNotification } from '../lib/pushNotification';
@@ -107,7 +107,7 @@ export function useAnnouncementsNotification(studentClassId?: string) {
       }
     });
 
-    const q = query(collection(db, 'announcements'), orderBy('date', 'desc'));
+    const q = query(collection(db, 'announcements'), orderBy('date', 'desc'), limit(35));
 
     const unsubscribe = onSnapshot(
       q,
@@ -115,27 +115,62 @@ export function useAnnouncementsNotification(studentClassId?: string) {
         const rawAll: AnnouncementItem[] = [];
         const items: AnnouncementItem[] = [];
 
+        const userRole = userData?.role || 'Wali Murid';
+        const userClass = (studentClassId || userData?.assigned_class || userData?.studentClass || '').trim();
+
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
           const item = { id: docSnap.id, ...data } as AnnouncementItem;
           rawAll.push(item);
 
-          const targetClass = data.targetClass || 'Semua Kelas';
+          const targetClassStr = (data.targetClass || 'Semua Kelas').trim();
+          const targetClassesArr: string[] = Array.isArray(data.targetClasses) && data.targetClasses.length > 0 
+            ? data.targetClasses 
+            : targetClassStr.split(',').map(s => s.trim());
           const targetRole = data.targetRole || 'Semua';
 
-          // For Wali Murid role, filter relevant announcements
-          if (userData?.role === 'Wali Murid') {
-            // Role filter: targetRole must be 'Semua' or 'Wali Murid'
-            const roleMatch = targetRole === 'Semua' || targetRole === 'Wali Murid';
-            // Class filter: either target is 'Semua Kelas', or matches student class
-            const currentClass = studentClassId || '';
-            const classMatch = isClassTargetMatching(data.targetClasses || data.targetClass, currentClass);
+          // 1. Admin selalu dapat memantau seluruh pengumuman sekolah
+          if (userRole === 'Admin') {
+            items.push(item);
+            return;
+          }
 
-            if (roleMatch && classMatch) {
+          // 2. Pemeriksaan Peran Sasaran (Target Role)
+          // Jika ditujukan khusus Guru, Wali Murid tidak mendapatkan notifikasi
+          // Jika ditujukan khusus Wali Murid, Guru yang bukan penulis tidak mendapatkan notifikasi
+          let isRoleTarget = false;
+          if (targetRole === 'Semua') {
+            isRoleTarget = true;
+          } else if (targetRole === 'Wali Murid' && userRole === 'Wali Murid') {
+            isRoleTarget = true;
+          } else if (targetRole === 'Guru' && userRole === 'Guru') {
+            isRoleTarget = true;
+          } else if (item.authorId && item.authorId === userData?.uid) {
+            isRoleTarget = true; // Penulis pengumuman selalu dapat melihat
+          }
+
+          if (!isRoleTarget) return;
+
+          // 3. Pemeriksaan Kelas Sasaran (Target Class)
+          // Jika ditujukan 'Semua' atau 'Semua Kelas', maka semua kelas sasaran mendapatkan notifikasi
+          const isTargetAllClasses = 
+            targetClassStr.toLowerCase() === 'semua' || 
+            targetClassStr.toLowerCase() === 'semua kelas' ||
+            targetClassesArr.some(c => c.toLowerCase() === 'semua' || c.toLowerCase() === 'semua kelas');
+
+          if (isTargetAllClasses) {
+            items.push(item);
+            return;
+          }
+
+          // Jika sasaran adalah kelas tertentu, HANYA kelas sasaran tersebut yang menerima
+          // Guru dan wali murid yang bukan sasaran TIDAK mendapat notifikasi!
+          if (userClass) {
+            const isMatch = isClassTargetMatching(targetClassesArr, userClass);
+            if (isMatch || (item.authorId && item.authorId === userData?.uid)) {
               items.push(item);
             }
-          } else {
-            // Admin and Guru see all or their relevant scope
+          } else if (item.authorId && item.authorId === userData?.uid) {
             items.push(item);
           }
         });
@@ -180,7 +215,7 @@ export function useAnnouncementsNotification(studentClassId?: string) {
     );
 
     return () => unsubscribe();
-  }, [userData?.role, studentClassId, soundEnabled]);
+  }, [userData?.role, userData?.assigned_class, userData?.studentClass, userData?.uid, studentClassId, soundEnabled]);
 
   const markAsRead = useCallback((id: string) => {
     setReadIds((prev) => {

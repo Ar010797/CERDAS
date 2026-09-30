@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { playNotificationSound, unlockAudioContext } from '../lib/audioNotifier';
 import { extractQuestionsDirectlyFromPdf } from '../lib/pdfQuestionExtractor';
+import { extractQuestionsFromWord } from '../lib/wordExtractor';
 
 interface QuizQuestionEditorProps {
   questions: QuizQuestion[];
@@ -125,32 +126,48 @@ export default function QuizQuestionEditor({
   };
 
   const handleLoadSampleText = () => {
-    setImportText(`1. Siapakah presiden pertama Republik Indonesia yang membacakan teks proklamasi?
-A. Mohammad Hatta
-B. Ir. Soekarno
-C. Sutan Sjahrir
-D. Ki Hajar Dewantara
+    setImportText(`Berapakah hasil dari 81 - 40?
+A. 40
+B. 41
+C. 56
+D. 47
 Kunci: B
 Poin: 10
-Pembahasan: Ir. Soekarno bersama Moh. Hatta memproklamasikan kemerdekaan RI pada 17 Agustus 1945.
 
-2. [Esai] Jelaskan makna penting persatuan dan kesatuan dalam keberagaman bangsa Indonesia!
-Kunci: toleransi, kebersamaan, bhinneka tunggal ika, kekuatan bangsa
-Poin: 20
-Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, dan budaya.`);
+كَمْ رَكْعَةً فِي صَلَاةِ الصُّبْحِ؟
+أ. رَكْعَتَانِ
+ب. ثَلَاثُ رَكَعَاتٍ
+ج. أَرْبَعُ رَكَعَاتٍ
+د. رَكْعَةٌ وَاحِدَةٌ
+Kunci: أ
+Poin: 10
+
+Jelaskan fungsi utama organ jantung pada sistem peredaran darah manusia!
+Kunci: memompa darah, oksigen, seluruh tubuh
+Poin: 20`);
     setImportError(null);
   };
 
-  // Handler Pilih Berkas PDF
+  // Handler Pilih Berkas Dokumen (Word .docx / .doc, Text .txt, atau PDF .pdf)
   const handleFileSelect = async (file: File) => {
     if (!file) return;
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf') || file.type.includes('pdf') || !file.type;
-    if (!isPdf && !file.name.toLowerCase().includes('.pdf')) {
-      setImportError('Format berkas harus berupa dokumen PDF (.pdf).');
+    const lowerName = file.name.toLowerCase();
+    const isSupported = 
+      lowerName.endsWith('.docx') ||
+      lowerName.endsWith('.doc') ||
+      lowerName.endsWith('.txt') ||
+      lowerName.endsWith('.pdf') ||
+      file.type.includes('word') ||
+      file.type.includes('officedocument') ||
+      file.type.includes('text') ||
+      file.type.includes('pdf');
+
+    if (!isSupported) {
+      setImportError('Format berkas harus berupa Dokumen Word (.docx, .doc), Teks (.txt), atau PDF (.pdf).');
       return;
     }
-    if (file.size > 25 * 1024 * 1024) {
-      setImportError('Ukuran berkas PDF terlalu besar (maksimal 25 MB).');
+    if (file.size > 30 * 1024 * 1024) {
+      setImportError('Ukuran berkas terlalu besar (maksimal 30 MB).');
       return;
     }
     setSelectedPdfFile(file);
@@ -236,6 +253,27 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
     };
 
     try {
+      const lowerName = selectedPdfFile.name.toLowerCase();
+      const isWordOrText = lowerName.endsWith('.docx') || lowerName.endsWith('.doc') || lowerName.endsWith('.txt');
+
+      // 1. Ekstraksi Instan di Klien untuk Dokumen Word (.docx / .doc) & Teks (.txt)
+      if (isWordOrText) {
+        try {
+          const wordRes = await extractQuestionsFromWord(selectedPdfFile);
+          if (wordRes.success && wordRes.questions.length > 0) {
+            processQuestionsData({
+              success: true,
+              fileName: selectedPdfFile.name,
+              totalDetected: wordRes.questions.length,
+              questions: wordRes.questions
+            });
+            return;
+          }
+        } catch (wordErr) {
+          console.warn('[Word Client Extract notice, falling back to server]:', wordErr);
+        }
+      }
+
       // Dapatkan base64 string yang aman lewat FileReader
       let base64String = selectedPdfBase64;
       if (!base64String) {
@@ -252,21 +290,22 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
 
       let extracted = false;
 
-      // 1. Percobaan Utama: Kirim ke server API /api/quiz/import-pdf (JSON Base64)
+      // 2. Percobaan Server API /api/quiz/import-document (Mendukung Word .docx & PDF)
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 35000);
 
-        const response = await fetch('/api/quiz/import-pdf', {
+        const response = await fetch('/api/quiz/import-document', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'Accept': 'application/json'
           },
           body: JSON.stringify({
+            fileBase64: base64String,
             pdfBase64: base64String,
             filename: selectedPdfFile.name,
-            mimeType: selectedPdfFile.type || 'application/pdf'
+            mimeType: selectedPdfFile.type || 'application/octet-stream'
           }),
           signal: controller.signal
         });
@@ -283,7 +322,7 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
         console.warn('JSON Base64 attempt notice, trying FormData fallback:', jsonErr);
       }
 
-      // 2. Percobaan Cadangan: FormData multipart ke server
+      // 3. Percobaan Cadangan: FormData multipart ke server
       if (!extracted) {
         try {
           const formData = new FormData();
@@ -292,7 +331,7 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 35000);
 
-          const response = await fetch('/api/quiz/import-pdf', {
+          const response = await fetch('/api/quiz/import-document', {
             method: 'POST',
             body: formData,
             signal: controller.signal
@@ -309,8 +348,8 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
         }
       }
 
-      // 3. PERCOBAAN TAHAN BANTING: Ekstraksi Cerdas Langsung di Perangkat Klien (Offline & Universal untuk Semua HP / Median APK)
-      if (!extracted) {
+      // 4. PERCOBAAN TAHAN BANTING PDF: Ekstraksi Cerdas Langsung di Perangkat Klien (Offline & Universal untuk Semua HP / Median APK)
+      if (!extracted && !isWordOrText) {
         try {
           console.log('[Client Extractor] Menjalankan pemindai soal PDF langsung di perangkat klien...');
           const localResult = await extractQuestionsDirectlyFromPdf(base64String || selectedPdfFile);
@@ -350,7 +389,7 @@ Pembahasan: Persatuan menjaga keutuhan negara di tengah perbedaan suku, agama, d
       }
 
       if (!extracted) {
-        throw new Error('Tidak dapat mengekstrak butir soal secara otomatis dari berkas PDF ini. Pastikan berkas PDF memuat teks naskah soal yang dapat dibaca.');
+        throw new Error('Tidak dapat mengekstrak butir soal secara otomatis dari berkas ini. Pastikan dokumen Word (.docx) atau berkas memuat teks naskah soal yang dapat dibaca.');
       }
 
     } catch (err: any) {
@@ -708,7 +747,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                   <span>Impor Cepat Soal Ujian Online</span>
                 </h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Ekstrak soal secara otomatis dari berkas dokumen PDF atau tempel teks dari naskah soal.
+                  Mendukung berkas Word (.docx, .doc), Teks (.txt), PDF, atau tempel teks langsung. Format praktis tanpa perlu pembahasan!
                 </p>
               </div>
               <button
@@ -722,7 +761,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
               </button>
             </div>
 
-            {/* Tab Navigasi: PDF vs Teks */}
+            {/* Tab Navigasi: Dokumen vs Teks */}
             <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-4">
               <button
                 type="button"
@@ -732,12 +771,12 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                 }}
                 className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeImportTab === 'pdf'
-                    ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-2xs'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                 }`}
               >
-                <FileUp className="w-3.5 h-3.5 text-rose-500" />
-                <span>Unggah Berkas PDF (AI Otomatis)</span>
+                <FileUp className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Unggah Dokumen (Word .docx / Teks / PDF)</span>
               </button>
 
               <button
@@ -753,7 +792,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                 }`}
               >
                 <FileText className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Tempel Format Teks Manual</span>
+                <span>Tempel Teks Bebas</span>
               </button>
             </div>
 
@@ -777,13 +816,13 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
               </div>
             )}
 
-            {/* KONTEN TAB 1: IMPOR BERKAS PDF */}
+            {/* KONTEN TAB 1: IMPOR BERKAS WORD / PDF */}
             {activeImportTab === 'pdf' && (
               <div className="flex-1 overflow-y-auto space-y-4">
                 {/* 1. Belum ada soal yang diekstrak */}
                 {extractedPdfQuestions.length === 0 ? (
                   <div className="space-y-4">
-                    {/* Area Drag & Drop Berkas PDF */}
+                    {/* Area Drag & Drop Berkas Dokumen */}
                     <div
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={handleDrop}
@@ -797,7 +836,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                       <input
                         type="file"
                         ref={fileInputRef}
-                        accept=".pdf,application/pdf,application/octet-stream,*/*"
+                        accept=".docx,.doc,.txt,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/pdf"
                         className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
                         onChange={(e) => {
                           if (e.target.files && e.target.files.length > 0) {
@@ -806,18 +845,18 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                         }}
                       />
 
-                      <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shadow-xs">
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-xs">
                         <FileUp className="w-7 h-7" />
                       </div>
 
                       <h5 className="text-sm font-bold text-slate-800 dark:text-white">
-                        {selectedPdfFile ? selectedPdfFile.name : 'Pilih / Sentuh Berkas PDF Naskah Soal'}
+                        {selectedPdfFile ? selectedPdfFile.name : 'Pilih Berkas Word (.docx), Teks (.txt), atau PDF'}
                       </h5>
 
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
                         {selectedPdfFile
-                          ? `Ukuran berkas: ${(selectedPdfFile.size / (1024 * 1024)).toFixed(2)} MB • Berkas siap dipindai AI`
-                          : 'Sentuh area ini atau gunakan tombol di bawah untuk memilih naskah soal PDF dari HP (Median / Browser) atau Komputer Anda.'}
+                          ? `Ukuran berkas: ${(selectedPdfFile.size / (1024 * 1024)).toFixed(2)} MB • Berkas siap diekstrak`
+                          : 'Pilih naskah soal dari HP (Median APK / Browser) atau Komputer. Format cukup Soal, Kunci/Jawaban, dan Poin.'}
                       </p>
 
                       {/* Tombol Aksi Nyata yang Dapat Disentuh di HP */}
@@ -828,10 +867,10 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                             e.stopPropagation();
                             fileInputRef.current?.click();
                           }}
-                          className="px-4 py-2 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-bold shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
                         >
-                          <FileUp className="w-3.5 h-3.5 text-rose-400" />
-                          <span>{selectedPdfFile ? 'Ganti Berkas PDF' : 'Pilih Berkas PDF'}</span>
+                          <FileUp className="w-3.5 h-3.5 text-white" />
+                          <span>{selectedPdfFile ? 'Ganti Berkas Dokumen' : 'Pilih Dokumen Word / PDF'}</span>
                         </button>
 
                         {selectedPdfFile && (
@@ -842,7 +881,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                               e.stopPropagation();
                               handleExtractFromPdf();
                             }}
-                            className="px-5 py-2 bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md inline-flex items-center gap-1.5 cursor-pointer"
+                            className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md inline-flex items-center gap-1.5 cursor-pointer"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                             <span>Ekstrak Soal Sekarang</span>
@@ -850,15 +889,21 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
                         )}
                       </div>
 
-                      <div className="mt-4 flex items-center justify-center gap-2">
-                        <span className="px-2.5 py-1 bg-white dark:bg-slate-750 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold border border-slate-200 dark:border-slate-700">
-                          Format: .PDF
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                        <span className="px-2.5 py-1 bg-white dark:bg-slate-750 text-indigo-700 dark:text-indigo-300 rounded-lg text-[10px] font-bold border border-slate-200 dark:border-slate-700">
+                          Format: Word (.docx / .doc)
                         </span>
                         <span className="px-2.5 py-1 bg-white dark:bg-slate-750 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold border border-slate-200 dark:border-slate-700">
-                          Maks 25 MB
+                          Teks (.txt) & PDF
                         </span>
-                        <span className="px-2.5 py-1 bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 rounded-lg text-[10px] font-bold">
-                          Koreksi AI Otomatis
+                        <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 rounded-lg text-[10px] font-bold">
+                          Tanpa Perlu Pembahasan
+                        </span>
+                        <span className="px-2.5 py-1 bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded-lg text-[10px] font-bold">
+                          Arab & Matematika
+                        </span>
+                        <span className="px-2.5 py-1 bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 rounded-lg text-[10px] font-bold">
+                          Nomor Otomatis
                         </span>
                       </div>
                     </div>

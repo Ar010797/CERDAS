@@ -172,6 +172,26 @@ export function calculateQuizScore(
  * Kunci: kata kunci 1, kata kunci 2
  * Poin: 20
  */
+function normalizeArabicNumerals(str: string): string {
+  return str.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+}
+
+function mapOptionId(idStr: string): string {
+  const clean = idStr.trim();
+  if (['أ', 'إ', 'ا'].includes(clean)) return 'A';
+  if (clean === 'ب') return 'B';
+  if (clean === 'ج') return 'C';
+  if (clean === 'د') return 'D';
+  if (clean === 'ه' || clean === 'هـ') return 'E';
+  return clean.toUpperCase();
+}
+
+/**
+ * Universal Intelligent Question Parser.
+ * Mendukung format ringkas & praktis tanpa perlu pembahasan (cukup soal, jawaban, poin).
+ * Mendukung Bahasa Arab (huruf أ ب ج د & angka Arab), Matematika (+, -, ×, ÷, =, ^, √), dan semua mapel.
+ * Otomatis memberikan penomoran (1, 2, 3...) jika naskah tidak memiliki nomor.
+ */
 export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   if (!inputText || !inputText.trim()) return [];
 
@@ -198,13 +218,14 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
 
   // 1. Standalone Answer Key Table di akhir teks (jika berbentuk tabel/daftar 3+ butir dengan nomor dan kunci di akhir)
   const answerKeyMap = new Map<number, string>();
-  const bottomKeyMatch = inputText.match(/(?:^|\n)\s*(?:TABEL\s+)?(?:KUNCI\s+JAWABAN|ANSWER\s+KEY)[:\s\n]+([\s\S]+?)$/i);
+  const bottomKeyMatch = inputText.match(/(?:^|\n)\s*(?:TABEL\s+)?(?:KUNCI\s+JAWABAN|ANSWER\s+KEY|مفتاح\s+الإجابة)[:\s\n]+([\s\S]+?)$/i);
   let cleanText = inputText;
   if (bottomKeyMatch && bottomKeyMatch[1]) {
-    const keyPairs = [...bottomKeyMatch[1].matchAll(/(\d+)[\.\):\s]+([A-Ea-e])/g)];
+    const keyPairs = [...bottomKeyMatch[1].matchAll(/([0-9٠-٩]+)[\.\):\s]+([A-Ea-e]|[أإابجد])/gu)];
     if (keyPairs.length >= 3) {
       for (const kp of keyPairs) {
-        answerKeyMap.set(parseInt(kp[1], 10), kp[2].toUpperCase());
+        const westernNum = parseInt(normalizeArabicNumerals(kp[1]), 10);
+        answerKeyMap.set(westernNum, mapOptionId(kp[2]));
       }
       cleanText = inputText.slice(0, bottomKeyMatch.index);
     }
@@ -235,25 +256,33 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   }> = [];
 
   let current: typeof items[0] | null = null;
+  let autoQuestionCounter = 1;
   let currentTarget: 'question' | 'option' | 'explanation' | 'after_answer' | 'after_points' = 'question';
   let currentOptionId: string | null = null;
 
-  const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?(\d+)[\.\)\]]\s*(.*)$/i;
-  const singleOptRegex = /^(?:\()?([A-Ea-e])[\.\)]\s*(.*)$/;
-  const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban|answer(?:\s*key)?)\s*[:=]\s*([A-Ea-e]|\S.*)$/i;
-  const pointRegex = /^(?:poin|bobot|skor|score|points)\s*[:=]?\s*(\d+)?$/i;
+  // Regex penomoran soal (mendukung Latin 1, 2, 3 dan Arab ١, ٢, ٣)
+  const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?([0-9٠-٩]+)[\.\)\]]\s*(.*)$/iu;
+  // Regex opsi tunggal (A, B, C, D, E atau أ, ب, ج, د, ه)
+  const singleOptRegex = /^(?:\()?([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s+(.*)$/u;
+  // Regex kunci jawaban (Indonesia, Inggris, atau Arab)
+  const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban(?:\s*benar)?|answer(?:\s*key)?|مفتاح|الإجابة|الجواب|حل)\s*[:=]\s*([A-Ea-e]|[أإابجد]|\S.*)$/iu;
+  // Regex poin (Poin: 10, Nilai: 10, dll)
+  const pointRegex = /^(?:poin|bobot|skor|score|points|nilai)\s*[:=]?\s*(\d+)?$/i;
+  // Regex pembahasan opsional (tidak wajib)
   const expRegex = /^(?:pembahasan|penjelasan|alasan|explanation)\s*[:=]\s*(.*)$/i;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const rawLine = lines[i];
+    const lineWithNormNums = normalizeArabicNumerals(rawLine);
 
-    // Deteksi awal soal baru (misal: "1.", "1)", "No. 1", dll)
-    const numMatch = line.match(qNumRegex);
+    // 1. Deteksi awal soal baru BERNOMOR (misal: "1.", "1)", "No. 1", "١.", dll)
+    const numMatch = lineWithNormNums.match(qNumRegex);
     if (numMatch) {
       const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete;
       if (isActuallyNewQ) {
         if (current) items.push(current);
         const qNum = parseInt(numMatch[1], 10);
+        autoQuestionCounter = Math.max(autoQuestionCounter, qNum + 1);
         const rawQ = numMatch[2].trim();
         const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(rawQ) ||
                         /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(rawQ);
@@ -275,27 +304,65 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       }
     }
 
-    if (!current) {
-      // Judul/Kop sebelum nomor soal 1 (e.g. 'Penilaian Akhir Semester', 'Mata Pelajaran: ...') - lewati
+    const isSingleOpt = singleOptRegex.test(rawLine);
+    const isAns = ansRegex.test(rawLine);
+    const isPoint = pointRegex.test(rawLine);
+    const isExp = expRegex.test(rawLine);
+
+    // 2. Deteksi awal soal baru TANPA NOMOR (Otomatis beri nomor 1, 2, 3...)
+    if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp) {
+      items.push(current);
+      current = {
+        number: autoQuestionCounter++,
+        questionText: rawLine,
+        options: [],
+        type: 'multiple_choice',
+        correctAnswer: '',
+        points: 10,
+        explanation: '',
+        hasAnswer: false,
+        isComplete: false
+      };
+      currentTarget = 'question';
+      currentOptionId = null;
       continue;
     }
 
-    // Deteksi Kunci Jawaban: 'Kunci: B' atau 'Jawaban: D'
-    const ansMatch = line.match(ansRegex);
+    // Jika belum ada soal sama sekali dan baris bukan opsi/kunci, mulai soal pertama nomor 1
+    if (!current && !isSingleOpt && !isAns && !isPoint && !isExp) {
+      current = {
+        number: autoQuestionCounter++,
+        questionText: rawLine,
+        options: [],
+        type: 'multiple_choice',
+        correctAnswer: '',
+        points: 10,
+        explanation: '',
+        hasAnswer: false,
+        isComplete: false
+      };
+      currentTarget = 'question';
+      currentOptionId = null;
+      continue;
+    }
+
+    if (!current) {
+      // Judul/Kop sebelum nomor soal 1 - lewati
+      continue;
+    }
+
+    // 3. Deteksi Kunci Jawaban (Kunci: B / Jawaban: A / مفتاح: أ)
+    const ansMatch = rawLine.match(ansRegex);
     if (ansMatch) {
       const val = ansMatch[1].trim();
-      if (/^[A-Ea-e]$/.test(val)) {
-        current.correctAnswer = val.toUpperCase();
-      } else {
-        current.correctAnswer = val;
-      }
+      current.correctAnswer = mapOptionId(val);
       current.hasAnswer = true;
       currentTarget = 'after_answer';
       continue;
     }
 
-    // Deteksi Poin: 'Poin:' atau 'Poin: 10'
-    const ptMatch = line.match(pointRegex);
+    // 4. Deteksi Poin (Poin: 10 / Nilai: 10)
+    const ptMatch = rawLine.match(pointRegex);
     if (ptMatch) {
       if (ptMatch[1]) {
         current.points = parseInt(ptMatch[1], 10) || current.points;
@@ -304,20 +371,20 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       continue;
     }
 
-    // Deteksi Pembahasan: 'Pembahasan: ...'
-    const expMatch = line.match(expRegex);
+    // 5. Deteksi Pembahasan (Opsional, jika tidak ada tidak apa-apa)
+    const expMatch = rawLine.match(expRegex);
     if (expMatch) {
       current.explanation = expMatch[1].trim();
       currentTarget = 'explanation';
       continue;
     }
 
-    // Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
-    const horizOpts = [...line.matchAll(/(?:^|\s+)([A-Ea-e])[\.\)]\s*([^\s][^A-E\n]*?)(?=(?:\s+[A-Ea-e][\.\)]|$))/g)];
+    // 6. Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
+    const horizOpts = [...rawLine.matchAll(/(?:^|\s+)([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s*([^\s][^A-Ea-eأإابجد\n]*?)(?=(?:\s+[A-Ea-e]|[أإابجد][\.\)\]:\-]|$))/gu)];
     if (horizOpts.length >= 2) {
       for (const m of horizOpts) {
         current.options.push({
-          id: m[1].toUpperCase(),
+          id: mapOptionId(m[1]),
           text: m[2].trim()
         });
       }
@@ -326,10 +393,10 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       continue;
     }
 
-    // Deteksi Opsi Vertikal: 'A. Opsi teks', 'B. Opsi teks'
-    const singleOpt = line.match(singleOptRegex);
-    if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]$/.test(singleOpt[1]))) {
-      const optId = singleOpt[1].toUpperCase();
+    // 7. Deteksi Opsi Vertikal (A. Opsi teks / أ. خيار)
+    const singleOpt = rawLine.match(singleOptRegex);
+    if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]|[أإابجد]$/u.test(singleOpt[1]))) {
+      const optId = mapOptionId(singleOpt[1]);
       const optText = singleOpt[2].trim();
       current.options.push({
         id: optId,
@@ -341,14 +408,14 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       continue;
     }
 
-    // Penanganan Teks Multi-Baris (Paragraf bacaan, cerita, puisi, dialog, opsi panjang)
+    // 8. Penanganan Teks Multi-Baris (Paragraf bacaan, dialog, matematika bertingkat)
     if (currentTarget === 'explanation') {
-      current.explanation += ' ' + line;
+      current.explanation += ' ' + rawLine;
     } else if (currentTarget === 'option' && currentOptionId) {
       const opt = current.options.find(o => o.id === currentOptionId);
-      if (opt) opt.text += ' ' + line;
+      if (opt) opt.text += ' ' + rawLine;
     } else if (currentTarget === 'question' && current.options.length === 0) {
-      current.questionText += ' ' + line;
+      current.questionText += ' ' + rawLine;
     }
   }
 
@@ -364,7 +431,7 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       points: item.points || (isEssay ? 20 : 10),
       options: isEssay ? undefined : item.options,
       correctAnswer: finalAnswer,
-      explanation: item.explanation || (isEssay ? 'Jawaban esai' : `Kunci jawaban: ${finalAnswer}`)
+      explanation: item.explanation || ''
     };
   });
 }
