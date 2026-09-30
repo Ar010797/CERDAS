@@ -480,7 +480,7 @@ export default function QuestionBank() {
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Pilihan Jawaban</label>
                   <div className="space-y-3">
                     {['A', 'B', 'C', 'D'].map((label, index) => (
-                      <div key={label} className="flex items-center gap-3">
+                      <div key={`qb-label-opt-${label}-${index}`} className="flex items-center gap-3">
                         <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold text-sm shrink-0">
                           {label}
                         </div>

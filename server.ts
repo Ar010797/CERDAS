@@ -49,11 +49,11 @@ async function startServer() {
   // Helper for Gemini retry with multi-model fallback to survive 503/429 spikes or model transitions
   const callGeminiWithRetry = async (ai: GoogleGenAI, params: any) => {
     // Model fallback sequence prioritized for quota resilience:
-    // 1. gemini-2.5-flash: high-rate limit standard model
-    // 2. gemini-2.5-flash-lite: lightweight ultra-fast model with maximum quota availability
-    // 3. gemini-flash-latest / gemini-3.1-flash-lite
-    const requestedModel = params.model || "gemini-2.5-flash";
-    const defaultCandidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+    // 1. gemini-3.1-flash-lite: lightweight ultra-fast model with maximum quota availability
+    // 2. gemini-flash-latest: high-capacity standard flash model
+    // 3. gemini-3.8-flash: deep reasoning model
+    const requestedModel = params.model || "gemini-3.1-flash-lite";
+    const defaultCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
     const modelCandidates: string[] = [
       requestedModel,
       ...defaultCandidates.filter((m) => m !== requestedModel)
@@ -67,7 +67,6 @@ async function startServer() {
         const timeoutLimit = Number(params?.timeoutMs) || 15000;
         const currentParams = { ...params, model: currentModel };
         delete currentParams.timeoutMs;
-        // per-candidate timeout allows deep reasoning/PDF processing while preventing gateway timeouts
         const result = await Promise.race([
           ai.models.generateContent(currentParams),
           new Promise<never>((_, reject) => 
@@ -78,11 +77,11 @@ async function startServer() {
       } catch (error: any) {
         lastError = error;
         const errMsg = (error?.message || "").toLowerCase();
-        console.log(`[AI Fallback] Candidate ${currentModel} encountered transient condition (${error?.status || error?.code || 'switching'}), testing next candidate...`);
+        console.log(`[AI Fallback] Candidate ${currentModel} encountered condition (${error?.status || error?.code || 'switching'}), testing next candidate...`);
         
-        // If it's a 503 Service Unavailable or 429 quota, brief 200ms pause before trying next candidate
-        if (errMsg.includes("503") || errMsg.includes("demand") || errMsg.includes("unavailable") || errMsg.includes("quota")) {
-          await new Promise((r) => setTimeout(r, 200));
+        // If quota exhausted or transient 503, brief pause then proceed to next candidate
+        if (errMsg.includes("503") || errMsg.includes("demand") || errMsg.includes("unavailable") || errMsg.includes("quota") || errMsg.includes("resource_exhausted")) {
+          await new Promise((r) => setTimeout(r, 100));
         }
         continue;
       }
@@ -1193,7 +1192,12 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
                 }
               },
               {
-                text: `Ekstrak soal-soal dari dokumen ini. Kategorikan apakah itu 'Pilihan Ganda' atau 'Uraian'. Untuk Pilihan Ganda, ambil opsi (A,B,C,D) dan jawaban benarnya jika ada. Kembalikan dalam format JSON array.`
+                text: `Ekstrak butir-butir soal ujian dari dokumen ini ke dalam format JSON array.
+PERINGATAN SANGAT PENTING:
+- HANYA ekstrak butir soal yang sesungguhnya (pertanyaan ujian/kuis).
+- DILARANG KERAS memasukkan judul dokumen, kop dinas/sekolah/madrasah/yayasan, informasi ujian (Nama Sekolah, Mata Pelajaran, Kelas, Semester, Hari/Tanggal, Waktu), atau petunjuk umum/khusus ('1. Berdoalah...', '2. Isilah identitas...') ke dalam butir soal atau nomor soal pertama!
+- Mulai ekstraksi tepat dari pertanyaan soal nomor 1 yang sebenarnya.
+- Nilai 'text' HANYA kalimat pertanyaan tanpa nomor urut di awal.`
               }
             ]
           },
@@ -1204,7 +1208,7 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  text: { type: Type.STRING, description: "Pertanyaan soal" },
+                  text: { type: Type.STRING, description: "Pertanyaan soal tanpa nomor dan tanpa judul dokumen" },
                   type: { type: Type.STRING, description: "Hanya gunakan salah satu dari: 'Pilihan Ganda' atau 'Uraian'" },
                   options: { 
                     type: Type.ARRAY, 
@@ -1236,39 +1240,35 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         console.warn("[Extract Questions AI Notice]:", aiErr?.message || aiErr);
       }
 
-      // Fallback jika AI gagal / timeout
+      // Fallback jika AI gagal / timeout: gunakan parser universal lokal
       if (!Array.isArray(json) || json.length === 0) {
         const rawText = await extractTextFromPdfBuffer(fileBuffer);
-        if (rawText) {
-          const lines = rawText.split('\n').filter(l => l.trim().length > 0);
-          const fallbackQs: any[] = [];
-          let cur: any = null;
-          for (const line of lines) {
-            const m = line.match(/^(\d+)[\.\)]\s*(.+)/);
-            if (m) {
-              if (cur) fallbackQs.push(cur);
-              cur = {
-                text: m[2].trim(),
-                type: 'Pilihan Ganda',
-                options: [],
-                correctAnswer: ''
-              };
-              continue;
-            }
-            const optM = line.match(/^([A-D])[\.\)]\s*(.+)/i);
-            if (optM && cur) {
-              cur.options.push(optM[2].trim());
-              continue;
-            }
-            if (cur && cur.options.length === 0) {
-              cur.text += ' ' + line.trim();
-            }
-          }
-          if (cur) fallbackQs.push(cur);
-          if (fallbackQs.length > 0) {
-            json = fallbackQs;
+        if (rawText && rawText.length > 20) {
+          const localQs = parseQuestionsFromRawText(rawText);
+          if (Array.isArray(localQs) && localQs.length > 0) {
+            json = localQs.map(q => ({
+              text: q.questionText,
+              type: q.type === 'essay' ? 'Uraian' : 'Pilihan Ganda',
+              options: q.options ? q.options.map((o: any) => o.text || '') : [],
+              correctAnswer: q.correctAnswer || ''
+            }));
           }
         }
+      }
+
+      // Bersihkan hasil ekstraksi agar tidak ada judul/kop yang tersisa
+      if (Array.isArray(json)) {
+        json = json
+          .filter(item => {
+            const t = (item.text || '').trim();
+            if (isExamHeaderOrInstruction(t)) return false;
+            if ((!item.options || item.options.length === 0) && item.type !== 'Uraian' && t.length < 15) return false;
+            return true;
+          })
+          .map(item => ({
+            ...item,
+            text: cleanQuestionTitlePrefix(item.text)
+          }));
       }
 
       if (!Array.isArray(json) || json.length === 0) {
@@ -1283,7 +1283,64 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
     }
   });
 
+  // Helper deteksi judul/kop/petunjuk di server
+  const isExamHeaderOrInstruction = (line: string): boolean => {
+    const clean = (line || '').trim();
+    if (!clean || clean.length < 2) return true;
+
+    // Watermarks, batas halaman, garis pembatas
+    if (/^--\s*\d+\s*(?:of|\/)\s*\d+\s*--$/i.test(clean)) return true;
+    if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(clean)) return true;
+    if (/^[-=_*~—–#]{3,}$/.test(clean)) return true;
+
+    // Kop institusi, sekolah, dinas, kementerian, yayasan
+    if (/^(?:pemerintah|pemprov|pemkab|pemkot|dinas|kementerian|kemenag|yayasan|sekolah|madrasah|pesantren|institut|universitas)\b/i.test(clean)) return true;
+    if (/^(?:sd|smp|sma|smk|ma|mts|mi)\s+(?:negeri|swasta|\d+|al-|darul|islam|plus)/i.test(clean)) return true;
+
+    // Nama kegiatan ujian / asesmen / evaluasi
+    if (/^(?:penilaian|ujian|asesmen|ulangan|evaluasi|try\s*out|mid\s*semester|tes|latihan|soal\s*latihan)\b/i.test(clean)) return true;
+    if (/\b(?:pas|pat|pts|sts|sas|asas|asts|usbk|usbn|akm|anbk)\b/i.test(clean) && !/\b(?:adalah|merupakan|karena|mengapa|apa|sebutkan|jelaskan)\b/i.test(clean)) return true;
+    if (/^(?:semester|tahun\s*(?:ajaran|pelajaran)|ta\b|tp\b)\s*[:\d]/i.test(clean)) return true;
+    if (/^(?:tahun\s*(?:ajaran|pelajaran)\s*\d{4}\s*[\/-]\s*\d{4})/i.test(clean)) return true;
+
+    // Metadata ujian: Mapel, Kelas, Waktu, Hari/Tanggal, Guru, Pengawas
+    if (/^(?:mata\s*pelajaran|mapel|bidang\s*studi|kelas|semester|program|jurusan|peminatan|hari\s*[\/,]\s*tanggal|hari|tanggal|waktu|alokasi\s*waktu|durasi|ruang|kode\s*(?:soal|paket)|paket\s*(?:soal|\w+)|naskah\s*soal|lembar\s*soal|nama\s*peserta|no(?:\.|\s)*peserta|nomor\s*peserta|kurikulum)\s*[:=]/i.test(clean)) return true;
+
+    // Judul Bagian Soal (Pilihan Ganda / Uraian)
+    if (/^(?:bagian|bab|part|section)\s+[0-9a-zivx]+/i.test(clean)) return true;
+    if (/^(?:[a-e]|[ivx]+)[\.\)]\s*(?:pilihan\s*ganda|soal\s*pilihan\s*ganda|multiple\s*choice|uraian|esai|essay|soal\s*uraian|menjodohkan|isian)/i.test(clean)) return true;
+    if (/^(?:pilihan\s*ganda|soal\s*pilihan\s*ganda|soal\s*uraian|soal\s*esai|soal\s*menjodohkan)$/i.test(clean)) return true;
+
+    // Petunjuk Umum, Petunjuk Khusus, Instruksi Pengerjaan
+    if (/^(?:petunjuk\s*(?:umum|khusus|pengerjaan|soal)?|instruksi|aturan\s*ujian)\s*:?/i.test(clean)) return true;
+    if (/^(?:pilihlah|berilah|lingkarilah|silanglah|centanglah|hitamkan)\s+(?:salah\s+satu\s+)?(?:jawaban|huruf|tanda|bulatan)/i.test(clean)) return true;
+    if (/^(?:jawablah|kerjakan|bacalah|perhatikan)\s+(?:pertanyaan|soal-soal|dengan\s+teliti|dengan\s+tepat|petunjuk)/i.test(clean)) return true;
+    if (/^(?:selamat\s+mengerjakan|semoga\s+sukses|semoga\s+berhasil|good\s+luck|barakallah)/i.test(clean)) return true;
+
+    // Nomor butir instruksi umum (misal: "1. Berdoalah...", "2. Isikan identitas...", "3. Laporkan...")
+    if (/^\(?\d+[\.\)]\s*(?:berdoa|isi\b|isikan|tulislah|tulis\b|periksa|bacalah\s+petunjuk|laporkan|dahulukan|hitamkan|silanglah|jangan|dilarang|gunakan|waktu\s+yang|periksalah)/i.test(clean)) return true;
+
+    return false;
+  };
+
+  const cleanQuestionTitlePrefix = (text: string): string => {
+    let cleaned = (text || '').trim();
+    cleaned = cleaned.replace(/^(?:(?:soal|nomor|no\.?)\s*)?\(?[0-9٠-٩]+[\.\)\]:\-]\s*/iu, '').trim();
+
+    const headerPrefixRegex = /^(?:pemerintah|pemprov|pemkab|pemkot|dinas|kementerian|kemenag|yayasan|smp|sma|smk|sd|mi|mts|penilaian|ujian|asesmen|ulangan|mata\s*pelajaran|mapel|kelas|semester|petunjuk\s*(?:umum|khusus|pengerjaan)|pilihlah\s+salah\s+satu)[\s\S]+?(?=(?:(?:\b\d+[\.\)]\s+)|(?:(?:apakah|apa\s+yang|siapakah|mengapa|bagaimana|bagaimanakah|manakah|sebutkan|jelaskan|berikut\s+ini|di\s+bawah\s+ini|perhatikan|organ\s+|fungsi\s+|hasil\s+dari|hitunglah|pada\s+tahun|tokoh\s+|seorang\s+|sebuah\s+|dalam\s+proses|kandungan\s+|faktor\s+|gerakan\s+|sikap\s+|hukum\s+|bunyi\s+|makna\s+|arti\s+|surah\s+|ayat\s+|bacaan\s+|teks\s+|dialog\s+)\b)))/i;
+
+    if (headerPrefixRegex.test(cleaned)) {
+      const afterHeader = cleaned.replace(headerPrefixRegex, '').trim();
+      if (afterHeader.length >= 10) {
+        cleaned = afterHeader.replace(/^(?:(?:soal|nomor|no\.?)\s*)?\(?[0-9٠-٩]+[\.\)\]:\-]\s*/iu, '').trim();
+      }
+    }
+
+    return cleaned;
+  };
+
   // Helper parser naskah soal berbasis teks universal (Mendukung semua mata pelajaran: Matematika, B. Indonesia, B. Inggris, IPA, IPS, PAI / Bahasa Arab, dll)
+  // Menjamin judul, kop dokumen, dan petunjuk umum TIDAK masuk ke dalam nomor soal
   const parseQuestionsFromRawText = (rawText: string): any[] => {
     if (!rawText || rawText.trim().length === 0) return [];
 
@@ -1361,21 +1418,35 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
       const rawLine = lines[i];
       const lineWithNormNums = normalizeArabicNumerals(rawLine);
 
+      // Cek apakah baris ini adalah header, judul, atau petunjuk umum
+      const isHeaderLine = isExamHeaderOrInstruction(rawLine);
+
       // 1. Deteksi awal soal baru BERNOMOR (1., 1), No. 1, ١., dll)
       const numMatch = lineWithNormNums.match(qNumRegex);
       if (numMatch) {
-        const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete;
+        const qNum = parseInt(numMatch[1], 10);
+        const rawQ = numMatch[2].trim();
+
+        // Jika nomor ini merupakan instruksi petunjuk (misal: "1. Berdoalah...", "2. Isikan identitas..."), LEWATI!
+        if (isExamHeaderOrInstruction(rawQ) || /^(?:berdoa|isi\b|isikan|tulislah|tulis\b|periksa|laporkan|dahulukan|hitamkan|silanglah|jangan|dilarang|gunakan)/i.test(rawQ)) {
+          continue;
+        }
+
+        const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete || current.questionText.length > 25;
         if (isActuallyNewQ) {
-          if (current) items.push(current);
-          const qNum = parseInt(numMatch[1], 10);
+          if (current) {
+            if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+              items.push(current);
+            }
+          }
           autoQuestionCounter = Math.max(autoQuestionCounter, qNum + 1);
-          const rawQ = numMatch[2].trim();
-          const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(rawQ) ||
-                          /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(rawQ);
+          const cleanQ = cleanQuestionTitlePrefix(rawQ);
+          const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(cleanQ) ||
+                          /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(cleanQ);
 
           current = {
             number: qNum,
-            questionText: rawQ.replace(/^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\))\s*/i, '').trim(),
+            questionText: cleanQ.replace(/^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\))\s*/i, '').trim(),
             options: [],
             type: isEssay ? 'essay' : 'multiple_choice',
             correctAnswer: answerKeyMap.get(qNum) || '',
@@ -1396,11 +1467,13 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
       const isExp = expRegex.test(rawLine);
 
       // 2. Deteksi awal soal baru TANPA NOMOR (Otomatis beri nomor 1, 2, 3...)
-      if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp) {
-        items.push(current);
+      if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp && !isHeaderLine) {
+        if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+          items.push(current);
+        }
         current = {
           number: autoQuestionCounter++,
-          questionText: rawLine,
+          questionText: cleanQuestionTitlePrefix(rawLine),
           options: [],
           type: 'multiple_choice',
           correctAnswer: '',
@@ -1414,25 +1487,41 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         continue;
       }
 
-      // Jika belum ada soal dan baris bukan opsi/kunci, mulai soal nomor 1
-      if (!current && !isSingleOpt && !isAns && !isPoint && !isExp) {
-        current = {
-          number: autoQuestionCounter++,
-          questionText: rawLine,
-          options: [],
-          type: 'multiple_choice',
-          correctAnswer: '',
-          points: 10,
-          explanation: '',
-          hasAnswer: false,
-          isComplete: false
-        };
-        currentTarget = 'question';
-        currentOptionId = null;
+      // Jika belum ada soal sama sekali dan baris adalah header/kop/petunjuk, LEWATI!
+      if (!current) {
+        if (isHeaderLine) {
+          continue;
+        }
+
+        const nextLineIsOpt = i + 1 < lines.length && (singleOptRegex.test(lines[i + 1]) || /(?:^|\s+)[A-D][\.\)]/i.test(lines[i + 1]));
+        const looksLikeQuestion = /\?|:|\.{3}$/.test(rawLine) ||
+          /^(?:apakah|apa|siapakah|siapa|mengapa|bagaimana|bagaimanakah|manakah|sebutkan|jelaskan|uraikan|berikut|di\s+bawah|perhatikan)/i.test(rawLine) ||
+          nextLineIsOpt;
+
+        if (looksLikeQuestion && !isSingleOpt && !isAns && !isPoint && !isExp) {
+          current = {
+            number: autoQuestionCounter++,
+            questionText: cleanQuestionTitlePrefix(rawLine),
+            options: [],
+            type: 'multiple_choice',
+            correctAnswer: '',
+            points: 10,
+            explanation: '',
+            hasAnswer: false,
+            isComplete: false
+          };
+          currentTarget = 'question';
+          currentOptionId = null;
+          continue;
+        }
+
+        // Teks pengantar / judul / KOP diabaikan
         continue;
       }
 
-      if (!current) continue;
+      if (isHeaderLine && currentTarget === 'question' && current.options.length === 0) {
+        continue;
+      }
 
       // 3. Deteksi Kunci Jawaban per butir: 'Kunci: B' atau 'Jawaban: D'
       const ansMatch = rawLine.match(ansRegex);
@@ -1498,43 +1587,57 @@ Struktur Wajib (Tuliskan dengan nomor urut dan enter ganda yang rapi):
         const opt = current.options.find(o => o.id === currentOptionId);
         if (opt) opt.text += ' ' + rawLine;
       } else if (currentTarget === 'question' && current.options.length === 0) {
-        current.questionText += ' ' + rawLine;
+        if (!isHeaderLine) {
+          current.questionText += ' ' + rawLine;
+        }
       }
     }
 
-    if (current) items.push(current);
+    if (current && current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+      items.push(current);
+    }
 
-    return items.map((item, idx) => {
-      // Pastikan ID opsi unik (A, B, C, D) dan tidak ada duplikasi kunci ID seperti dua 'B' atau dua 'D'
-      const cleanOptions: any[] = [];
-      const usedIds = new Set<string>();
-      const defaultOptionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
-
-      (item.options || []).forEach((opt: any, optIndex: number) => {
-        let candidateId = opt.id || defaultOptionLetters[optIndex] || `opt_${optIndex + 1}`;
-        if (usedIds.has(candidateId)) {
-          const nextAvailable = defaultOptionLetters.find(l => !usedIds.has(l));
-          candidateId = nextAvailable || `${candidateId}_${optIndex + 1}`;
+    return items
+      .filter(item => {
+        if (isExamHeaderOrInstruction(item.questionText)) return false;
+        if (item.options.length === 0 && !item.hasAnswer && item.type !== 'essay' && item.questionText.length < 15) {
+          return false;
         }
-        usedIds.add(candidateId);
-        cleanOptions.push({
-          id: candidateId,
-          text: opt.text || ''
-        });
-      });
+        return true;
+      })
+      .map((item, idx) => {
+        // Pastikan ID opsi unik (A, B, C, D) dan tidak ada duplikasi kunci ID seperti dua 'B' atau dua 'D'
+        const cleanOptions: any[] = [];
+        const usedIds = new Set<string>();
+        const defaultOptionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
 
-      const isEssay = item.type === 'essay' || cleanOptions.length < 2;
-      const finalAnswer = item.correctAnswer || (isEssay ? '' : (cleanOptions[0]?.id || 'A'));
-      return {
-        id: `q_doc_${Date.now()}_${idx + 1}`,
-        type: isEssay ? 'essay' : 'multiple_choice',
-        questionText: item.questionText || `Soal ${item.number || idx + 1}`,
-        points: item.points || (isEssay ? 20 : 10),
-        options: isEssay ? undefined : cleanOptions,
-        correctAnswer: finalAnswer,
-        explanation: item.explanation || ''
-      };
-    });
+        (item.options || []).forEach((opt: any, optIndex: number) => {
+          let candidateId = opt.id || defaultOptionLetters[optIndex] || `opt_${optIndex + 1}`;
+          if (usedIds.has(candidateId)) {
+            const nextAvailable = defaultOptionLetters.find(l => !usedIds.has(l));
+            candidateId = nextAvailable || `${candidateId}_${optIndex + 1}`;
+          }
+          usedIds.add(candidateId);
+          cleanOptions.push({
+            id: candidateId,
+            text: opt.text || ''
+          });
+        });
+
+        const isEssay = item.type === 'essay' || cleanOptions.length < 2;
+        const finalAnswer = item.correctAnswer || (isEssay ? '' : (cleanOptions[0]?.id || 'A'));
+        const cleanQ = cleanQuestionTitlePrefix(item.questionText) || `Soal ${item.number || idx + 1}`;
+
+        return {
+          id: `q_doc_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+          type: isEssay ? 'essay' : 'multiple_choice',
+          questionText: cleanQ,
+          points: item.points || (isEssay ? 20 : 10),
+          options: isEssay ? undefined : cleanOptions,
+          correctAnswer: finalAnswer,
+          explanation: item.explanation || ''
+        };
+      });
 
   };
 
@@ -1695,13 +1798,16 @@ Tugas Anda adalah membaca teks naskah soal berikut (bisa berupa Matematika, Baha
 
 ${extractedText.slice(0, 10000)}
 
-Aturan Format JSON:
-1. 'questionText': Kalimat pertanyaan lengkap tanpa nomor soal di awal. Teks Arab dan rumus matematika harus tetap utuh.
-2. 'type': 'multiple_choice' atau 'essay'.
-3. 'options': Untuk 'multiple_choice': array objek: [{"id": "A", "text": "opsi A"}, {"id": "B", "text": "opsi B"}, {"id": "C", "text": "opsi C"}, {"id": "D", "text": "opsi D"}]. Untuk 'essay': kosongkan [].
-4. 'correctAnswer': Huruf kapital 'A', 'B', 'C', atau 'D' untuk PG, atau kata kunci untuk esai.
-5. 'points': Bobot poin (10 untuk PG, 20 untuk esai).
-6. 'explanation': Kunci jawaban dan pembahasan singkat.
+ATURAN PALING PENTING (DILARANG DILANGGAR):
+1. HANYA ekstrak butir-butir soal yang sesungguhnya (pertanyaan ujian/kuis).
+2. DILARANG KERAS memasukkan judul naskah, kop dinas/sekolah/madrasah/yayasan, identitas ujian (mata pelajaran, kelas, semester, hari/tanggal, waktu), petunjuk umum, petunjuk khusus, atau nomor butir instruksi ('1. Berdoalah...', '2. Isilah lembar jawaban...') ke dalam butir soal ataupun sebagai nomor soal pertama!
+3. Mulailah butir soal dari pertanyaan nomor 1 yang sebenarnya.
+4. 'questionText': Kalimat pertanyaan lengkap tanpa nomor urut soal dan tanpa judul di awal. Teks Arab dan rumus matematika harus tetap utuh.
+5. 'type': 'multiple_choice' atau 'essay'.
+6. 'options': Untuk 'multiple_choice': array objek: [{"id": "A", "text": "opsi A"}, {"id": "B", "text": "opsi B"}, {"id": "C", "text": "opsi C"}, {"id": "D", "text": "opsi D"}]. Untuk 'essay': kosongkan [].
+7. 'correctAnswer': Huruf kapital 'A', 'B', 'C', atau 'D' untuk PG, atau kata kunci untuk esai.
+8. 'points': Bobot poin (10 untuk PG, 20 untuk esai).
+9. 'explanation': Kunci jawaban dan pembahasan singkat.
 
 Kembalikan format JSON murni array of objects.`
               });
@@ -1755,6 +1861,10 @@ Kembalikan format JSON murni array of objects.`
     "explanation": "Pembahasan"
   }
 ]
+PERINGATAN SANGAT PENTING:
+- HANYA ambil butir soal pertanyaan kuis/ujian yang sesungguhnya.
+- JANGAN memasukkan judul dokumen, kop sekolah/dinas, atau petunjuk umum/khusus ('1. Berdoalah...', '2. Isilah...') sebagai butir soal!
+- Mulai dari pertanyaan soal pertama.
 Kembalikan JSON murni array of objects.`
                 }
               ]
@@ -1793,57 +1903,73 @@ Kembalikan JSON murni array of objects.`
 
 
       // Format and sanitize items to match QuizQuestion interface
-      const sanitized = parsedQuestions.map((q, idx) => {
-        const rawType = (q.type || "").toLowerCase();
-        const qType = rawType.includes("essay") || rawType.includes("uraian") || rawType.includes("esai") ? 'essay' : 'multiple_choice';
-        
-        let opts: any[] | undefined = q.options;
-        if (qType === 'multiple_choice') {
-          if (Array.isArray(opts) && opts.length > 0) {
-            opts = opts.map((opt: any, optIdx: number) => {
-              if (typeof opt === 'string') {
-                const letter = String.fromCharCode(65 + optIdx);
-                const cleanTxt = opt.replace(/^[A-Ea-e][\.\)]\s*/, '').trim();
-                return { id: letter, text: cleanTxt || opt };
-              }
-              const letter = (opt.id || String.fromCharCode(65 + optIdx)).toString().trim().toUpperCase();
-              let txt = (opt.text || "").toString().trim();
-              txt = txt.replace(/^[A-Ea-e][\.\)]\s*/, '').trim();
-              return {
-                id: letter,
-                text: txt || `Pilihan ${letter}`
-              };
-            });
+      // Pastikan menyaring habis KOP, judul dokumen, petunjuk umum, dan nomor aturan
+      const sanitized = parsedQuestions
+        .filter((q) => {
+          const rawQ = (q.questionText || q.text || "").trim();
+          if (isExamHeaderOrInstruction(rawQ)) return false;
+          const isEssay = (q.type || "").toLowerCase().includes("essay") || (q.type || "").toLowerCase().includes("uraian");
+          const optCount = Array.isArray(q.options) ? q.options.length : 0;
+          if (optCount === 0 && !isEssay && !q.correctAnswer && rawQ.length < 15) return false;
+          return true;
+        })
+        .map((q, idx) => {
+          const rawType = (q.type || "").toLowerCase();
+          const qType = rawType.includes("essay") || rawType.includes("uraian") || rawType.includes("esai") ? 'essay' : 'multiple_choice';
+          
+          let opts: any[] | undefined = q.options;
+          if (qType === 'multiple_choice') {
+            if (Array.isArray(opts) && opts.length > 0) {
+              const usedIds = new Set<string>();
+              const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+              opts = opts.map((opt: any, optIdx: number) => {
+                if (typeof opt === 'string') {
+                  const letter = letters[optIdx] || `opt_${optIdx + 1}`;
+                  const cleanTxt = opt.replace(/^[A-Ea-e][\.\)]\s*/, '').trim();
+                  return { id: letter, text: cleanTxt || opt };
+                }
+                let letter = (opt.id || letters[optIdx] || `opt_${optIdx + 1}`).toString().trim().toUpperCase();
+                if (usedIds.has(letter)) {
+                  letter = letters.find(l => !usedIds.has(l)) || `${letter}_${optIdx + 1}`;
+                }
+                usedIds.add(letter);
+                let txt = (opt.text || "").toString().trim();
+                txt = txt.replace(/^[A-Ea-e][\.\)]\s*/, '').trim();
+                return {
+                  id: letter,
+                  text: txt || `Pilihan ${letter}`
+                };
+              });
+            } else {
+              opts = [
+                { id: 'A', text: 'Pilihan A' },
+                { id: 'B', text: 'Pilihan B' },
+                { id: 'C', text: 'Pilihan C' },
+                { id: 'D', text: 'Pilihan D' }
+              ];
+            }
           } else {
-            opts = [
-              { id: 'A', text: 'Pilihan A' },
-              { id: 'B', text: 'Pilihan B' },
-              { id: 'C', text: 'Pilihan C' },
-              { id: 'D', text: 'Pilihan D' }
-            ];
+            opts = undefined;
           }
-        } else {
-          opts = undefined;
-        }
 
-        let key = (q.correctAnswer || "").toString().trim();
-        if (qType === 'multiple_choice') {
-          key = key.slice(0, 1).toUpperCase() || 'A';
-        }
+          let key = (q.correctAnswer || "").toString().trim();
+          if (qType === 'multiple_choice') {
+            key = key.slice(0, 1).toUpperCase() || 'A';
+          }
 
-        let cleanText = (q.questionText || q.text || `Soal Nomor ${idx + 1}`).trim();
-        cleanText = cleanText.replace(/^\d+[\.\)]\s*/, '').trim();
+          let cleanText = (q.questionText || q.text || `Soal Nomor ${idx + 1}`).trim();
+          cleanText = cleanQuestionTitlePrefix(cleanText);
 
-        return {
-          id: `q_pdf_${Date.now()}_${idx + 1}`,
-          type: qType,
-          questionText: cleanText,
-          points: Number(q.points) > 0 ? Number(q.points) : (qType === 'essay' ? 20 : 10),
-          options: opts,
-          correctAnswer: key,
-          explanation: (q.explanation || "").trim()
-        };
-      });
+          return {
+            id: `q_pdf_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+            type: qType,
+            questionText: cleanText,
+            points: Number(q.points) > 0 ? Number(q.points) : (qType === 'essay' ? 20 : 10),
+            options: opts,
+            correctAnswer: key,
+            explanation: (q.explanation || "").trim()
+          };
+        });
 
       const mcqCount = sanitized.filter(q => q.type === 'multiple_choice').length;
       const essayCount = sanitized.filter(q => q.type === 'essay').length;

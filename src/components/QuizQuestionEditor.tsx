@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { QuizQuestion, QuizOption, parseImportedQuestions } from '../types/quiz';
+import { QuizQuestion, QuizOption, parseImportedQuestions, isExamHeaderOrInstruction, cleanQuestionTitlePrefix } from '../types/quiz';
 import { 
   Plus, 
   Trash2, 
@@ -231,19 +231,43 @@ Poin: 20`);
     const stepTimer2 = setTimeout(() => setExtractionProgressStep(3), 2500);
 
     const processQuestionsData = (data: any) => {
-      const receivedQuestions: QuizQuestion[] = Array.isArray(data.questions) ? data.questions : [];
+      const rawQuestions: QuizQuestion[] = Array.isArray(data.questions) ? data.questions : [];
+      if (rawQuestions.length === 0) {
+        throw new Error('Tidak ditemukan butir soal yang terbaca dari berkas ini. Pastikan berkas memuat teks soal yang jelas.');
+      }
+
+      // Saring habis KOP sekolah, judul dokumen, petunjuk umum yang mungkin terselip
+      const receivedQuestions: QuizQuestion[] = rawQuestions
+        .filter(q => {
+          const text = (q.questionText || '').trim();
+          if (isExamHeaderOrInstruction(text)) return false;
+          const isEssay = q.type === 'essay';
+          const optCount = q.options?.length || 0;
+          if (optCount === 0 && !isEssay && !q.correctAnswer && text.length < 15) return false;
+          return true;
+        })
+        .map((q, idx) => {
+          // Bersihkan teks pertanyaan dari kop atau nomor berlebih di depan
+          const cleanedText = cleanQuestionTitlePrefix(q.questionText);
+          return {
+            ...q,
+            id: `q_ext_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+            questionText: cleanedText || `Soal ${idx + 1}`
+          };
+        });
+
       if (receivedQuestions.length === 0) {
-        throw new Error('Tidak ditemukan butir soal yang terbaca dari PDF ini. Pastikan PDF memuat teks soal yang jelas.');
+        throw new Error('Hanya terdeteksi kop dokumen atau petunjuk umum tanpa butir soal. Pastikan berkas memuat pertanyaan soal.');
       }
 
       setExtractedPdfQuestions(receivedQuestions);
       setSelectedExtractedIndices(receivedQuestions.map((_, i) => i));
       setPdfStats({
         fileName: data.fileName || selectedPdfFile.name,
-        totalDetected: data.totalDetected || receivedQuestions.length,
-        mcqCount: data.mcqCount || receivedQuestions.filter(q => q.type === 'multiple_choice').length,
-        essayCount: data.essayCount || receivedQuestions.filter(q => q.type === 'essay').length,
-        totalPoints: data.totalPoints || receivedQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
+        totalDetected: receivedQuestions.length,
+        mcqCount: receivedQuestions.filter(q => q.type === 'multiple_choice').length,
+        essayCount: receivedQuestions.filter(q => q.type === 'essay').length,
+        totalPoints: receivedQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
       });
 
       try {
@@ -597,7 +621,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
         <div className="space-y-4">
           {questions.map((q, qIdx) => (
             <div
-              key={q.id}
+              key={`editor-q-${q.id || qIdx}-${qIdx}`}
               className="p-4 sm:p-5 bg-white dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3"
             >
               {/* Question Header */}
@@ -1028,7 +1052,7 @@ Pembahasan: Makhluk hidup bernapas, membutuhkan nutrisi, bergerak, dan berkemban
 
                         return (
                           <div
-                            key={idx}
+                            key={`extracted-preview-${q.id || originalIndex}-${originalIndex}`}
                             onClick={() => handleToggleExtractedIndex(originalIndex)}
                             className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
                               isSelected

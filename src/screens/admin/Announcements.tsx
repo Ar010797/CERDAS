@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -178,6 +178,7 @@ export default function Announcements() {
   };
 
   const [schoolProfile, setSchoolProfile] = useState<any>({});
+  const [registeredWaliClasses, setRegisteredWaliClasses] = useState<{ className: string; teacherName: string }[]>([]);
 
   const isOnline = useOnlineStatus();
   const [isUsingOfflineData, setIsUsingOfflineData] = useState(false);
@@ -189,6 +190,65 @@ export default function Announcements() {
       }
     });
     return () => unsubSchool();
+  }, []);
+
+  // Sinkronisasi kelas wali kelas yang sudah masuk input di aplikasi (Guru & Siswa)
+  useEffect(() => {
+    const teacherMap = new Map<string, string>();
+    const studentClasses = new Set<string>();
+
+    const updateCombined = () => {
+      const combined = new Map<string, string>();
+      // 1. Prioritaskan kelas dari guru/wali kelas
+      teacherMap.forEach((teacherName, cls) => {
+        combined.set(cls, teacherName);
+      });
+      // 2. Tambahkan kelas dari data siswa jika belum tercakup
+      studentClasses.forEach((cls) => {
+        if (!combined.has(cls)) {
+          combined.set(cls, 'Kelas Siswa');
+        }
+      });
+
+      const list = Array.from(combined.entries()).map(([className, teacherName]) => ({
+        className,
+        teacherName
+      })).sort((a, b) => a.className.localeCompare(b.className, undefined, { numeric: true }));
+
+      setRegisteredWaliClasses(list);
+    };
+
+    const qTeachers = query(collection(db, 'users'), where('role', '==', 'Guru'));
+    const unsubTeachers = onSnapshot(qTeachers, (snap) => {
+      teacherMap.clear();
+      snap.forEach((d) => {
+        const u = d.data();
+        const cls = (u.assigned_class || u.classId || '').trim();
+        if (cls) {
+          if (!teacherMap.has(cls)) {
+            teacherMap.set(cls, u.name || 'Wali Kelas');
+          }
+        }
+      });
+      updateCombined();
+    }, (err) => console.warn('Fetch wali classes error:', err));
+
+    const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
+      studentClasses.clear();
+      snap.forEach((d) => {
+        const s = d.data();
+        const cls = (s.classId || '').trim();
+        if (cls) {
+          studentClasses.add(cls);
+        }
+      });
+      updateCombined();
+    }, (err) => console.warn('Fetch student classes error:', err));
+
+    return () => {
+      unsubTeachers();
+      unsubStudents();
+    };
   }, []);
 
   useEffect(() => {
@@ -513,6 +573,15 @@ export default function Announcements() {
             >
               <option value="Semua">Semua Sasaran</option>
               <option value="Semua Kelas">📢 Semua Kelas (SD & MTs)</option>
+              {registeredWaliClasses.length > 0 && (
+                <optgroup label="🌟 Kelas Wali Kelas Terdaftar (Sinkron)">
+                  {registeredWaliClasses.map((item) => (
+                    <option key={`filter-wali-${item.className}`} value={item.className}>
+                      {item.className} ({item.teacherName})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               <optgroup label="🏫 Tingkat SD / MI (Kelas 1 - 6)">
                 {SD_CLASSES.map((cls) => (
                   <option key={cls} value={cls}>
@@ -914,6 +983,17 @@ export default function Announcements() {
                     >
                       📢 Semua Kelas
                     </button>
+                    {registeredWaliClasses.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTargetClasses(registeredWaliClasses.map(r => r.className))}
+                        className="px-2.5 py-0.5 rounded-lg font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-900 dark:text-amber-200 hover:bg-amber-200 border border-amber-300 dark:border-amber-800 transition-all cursor-pointer flex items-center gap-1"
+                        title="Pilih semua kelas yang telah diinput oleh wali kelas aktif"
+                      >
+                        <span>🌟</span>
+                        <span>Semua Kelas Wali ({registeredWaliClasses.length})</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -944,7 +1024,64 @@ export default function Announcements() {
                   </div>
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-3 max-h-48 overflow-y-auto">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-3 max-h-56 overflow-y-auto">
+                  {/* SINKRONISASI KELAS WALI KELAS YANG SUDAH MASUK INPUT */}
+                  <div className="p-2.5 bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/80 rounded-xl space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-black text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                        <span>🌟</span>
+                        <span>Kelas Wali Kelas Terdaftar (Sinkron Otomatis):</span>
+                      </div>
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                        {registeredWaliClasses.length} Kelas Terinput
+                      </span>
+                    </div>
+
+                    {registeredWaliClasses.length === 0 ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 italic py-0.5">
+                        Belum ada kelas yang diinput oleh wali kelas. Pilihan kelas standar dapat dipilih di bawah.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {registeredWaliClasses.map((item) => {
+                          const cls = item.className;
+                          const isSelected = targetClasses.includes(cls);
+                          const isAll = targetClasses.includes('Semua Kelas');
+                          return (
+                            <button
+                              key={`reg-wali-${cls}`}
+                              type="button"
+                              onClick={() => {
+                                if (isAll) {
+                                  setTargetClasses([cls]);
+                                } else if (isSelected) {
+                                  const next = targetClasses.filter((c) => c !== cls);
+                                  setTargetClasses(next.length === 0 ? ['Semua Kelas'] : next);
+                                } else {
+                                  setTargetClasses([...targetClasses.filter((c) => c !== 'Semua Kelas'), cls]);
+                                }
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                                isSelected && !isAll
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                                  : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-indigo-200 dark:border-indigo-800 hover:border-indigo-400 hover:shadow-2xs'
+                              }`}
+                            >
+                              <span>{cls}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                                isSelected && !isAll
+                                  ? 'bg-indigo-700 text-indigo-100'
+                                  : 'bg-indigo-50 dark:bg-slate-700 text-indigo-700 dark:text-indigo-300'
+                              }`}>
+                                {item.teacherName}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                   {/* SD / MI Classes */}
                   <div>
                     <div className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">

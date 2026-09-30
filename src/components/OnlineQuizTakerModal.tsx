@@ -296,7 +296,7 @@ export default function OnlineQuizTakerModal({
 
                 return (
                   <div
-                    key={q.id}
+                    key={`eval-q-${q.id || idx}-${idx}`}
                     className={`p-4 rounded-2xl border transition-all text-xs ${
                       isCorrect
                         ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
@@ -430,7 +430,7 @@ export default function OnlineQuizTakerModal({
 
               return (
                 <button
-                  key={q.id}
+                  key={`palette-btn-${q.id || idx}-${idx}`}
                   onClick={() => setCurrentIndex(idx)}
                   className={`w-8 h-8 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center justify-center cursor-pointer ${
                     isCurrent

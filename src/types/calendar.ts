@@ -295,10 +295,35 @@ export function isDateInRange(targetDateStr: string, startDateStr: string, endDa
 }
 
 // Format date to Indonesian human friendly string (e.g., "Senin, 28 September 2026")
-export function formatIndonesianDate(dateStr: string): string {
-  if (!dateStr) return '-';
+export function formatIndonesianDate(dateInput: any): string {
+  if (!dateInput) return '-';
   try {
-    const [year, month, day] = dateStr.split('-').map(Number);
+    let dateStr = '';
+    if (typeof dateInput === 'string') {
+      dateStr = dateInput;
+    } else if (typeof dateInput?.toDate === 'function') {
+      const d = dateInput.toDate();
+      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const monthNames = [
+        'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+      ];
+      return `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    } else if (dateInput?.seconds && typeof dateInput.seconds === 'number') {
+      const d = new Date(dateInput.seconds * 1000);
+      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const monthNames = [
+        'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+      ];
+      return `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    } else {
+      return '-';
+    }
+
+    const parts = dateStr.split('-');
+    if (parts.length < 3) return dateStr;
+    const [year, month, day] = parts.map(Number);
     if (!year || !month || !day) return dateStr;
     const date = new Date(year, month - 1, day);
     const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -308,6 +333,6 @@ export function formatIndonesianDate(dateStr: string): string {
     ];
     return `${dayNames[date.getDay()]}, ${day} ${monthNames[month - 1]} ${year}`;
   } catch {
-    return dateStr;
+    return '-';
   }
 }

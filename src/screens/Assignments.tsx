@@ -290,9 +290,18 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
           }
 
           if (isExpired) {
-            // Sesuai permintaan: Soal yang kedaluwarsa dihapus otomatis dari sistem tanpa menghapus nilai/pengumpulan siswa
+            // Sesuai permintaan: Soal yang kedaluwarsa dihapus otomatis dari sistem dan pemberitahuan feedback tereset
             if (isGuru || isAdmin) {
               deleteDoc(doc(db, 'tugas', a.id)).catch(e => console.warn('Auto cleanup expired assignment doc notice:', e));
+              // Bersihkan submisi yang menunggu penilaian untuk soal kedaluwarsa agar notifikasi feedback bersih
+              const qExpSubs = query(
+                collection(db, 'pengumpulan_tugas'),
+                where('assignmentId', '==', a.id),
+                where('status', '==', 'submitted')
+              );
+              getDocs(qExpSubs).then(sSnap => {
+                sSnap.forEach(sd => deleteDoc(doc(db, 'pengumpulan_tugas', sd.id)).catch(() => {}));
+              }).catch(() => {});
             }
           } else {
             activeList.push(a);
@@ -830,8 +839,22 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
         }
       });
     } else {
-      submittedCount = submissions.length;
-      submissions.forEach(s => {
+      // Guru / Admin: hanya hitung submisi yang tugasnya MASIH ADA dan BELUM KEDALUWARSA
+      const validAssignmentMap = new Map(assignments.map(a => [a.id, a]));
+      const validSubmissions = submissions.filter(s => {
+        const a = validAssignmentMap.get(s.assignmentId);
+        if (!a) return false;
+        if (a.dueDate) {
+          try {
+            const dt = new Date(`${a.dueDate}T${a.dueTime || '23:59'}:00`).getTime();
+            if (!isNaN(dt) && dt < Date.now()) return false;
+          } catch {}
+        }
+        return true;
+      });
+
+      submittedCount = validSubmissions.length;
+      validSubmissions.forEach(s => {
         if (s.status === 'graded') gradedCount++;
         else pendingCount++;
       });

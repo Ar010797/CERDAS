@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, doc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
@@ -71,14 +71,70 @@ export default function GuruDashboard() {
       setAttendanceBreakdown({ hadir, izin, sakit, alpa, total: snap.size });
     }, (err) => console.warn('unsubAtt error:', err));
 
-    // 3. Tugas Aktif
+    // 3. Tugas Aktif & Submisi Lembar Jawaban Terkirim (Sinkronisasi Real-Time)
+    // Sesuai aturan: jika soal sudah kedaluwarsa atau dihapus, semua pemberitahuan Feedback tereset seperti semula (0)
+    let activeAssignmentIds = new Set<string>();
+    let latestSubmissionsSnap: any = null;
+
+    const recomputeFeedbackAndSubmissions = () => {
+      if (!latestSubmissionsSnap) {
+        setPendingGradingCount(0);
+        return;
+      }
+      let pendingCount = 0;
+      latestSubmissionsSnap.forEach((d: any) => {
+        const sub = d.data();
+        // HANYA hitung jika tugasnya MASIH ADA, TIDAK KEDALUWARSA, dan statusnya 'submitted'
+        if (sub.assignmentId && activeAssignmentIds.has(sub.assignmentId) && sub.status === 'submitted') {
+          pendingCount++;
+        }
+      });
+      setPendingGradingCount(pendingCount);
+    };
+
     const qAssign = query(
       collection(db, 'tugas'),
-      where('classId', '==', assignedClass),
-      where('status', '==', 'active')
+      where('classId', '==', assignedClass)
     );
+
     const unsubAssign = onSnapshot(qAssign, (snap) => {
-      setActiveAssignmentsCount(snap.size);
+      const now = Date.now();
+      const validActiveIds = new Set<string>();
+      let activeCount = 0;
+
+      snap.forEach(d => {
+        const item = d.data();
+        let isExpired = false;
+        if (item.dueDate) {
+          try {
+            const dueTime = new Date(`${item.dueDate}T${item.dueTime || '23:59'}:00`).getTime();
+            if (!isNaN(dueTime) && dueTime < now) {
+              isExpired = true;
+            }
+          } catch {}
+        }
+
+        if (isExpired) {
+          // Otomatis bersihkan soal yang kedaluwarsa dari Firestore
+          deleteDoc(doc(db, 'tugas', d.id)).catch(e => console.warn('Clean expired tugas error:', e));
+          // Bersihkan juga submisi yang menunggu penilaian untuk soal kedaluwarsa agar notifikasi feedback bersih
+          const qOrphan = query(
+            collection(db, 'pengumpulan_tugas'),
+            where('assignmentId', '==', d.id),
+            where('status', '==', 'submitted')
+          );
+          getDocs(qOrphan).then(orphanSnap => {
+            orphanSnap.forEach(os => deleteDoc(doc(db, 'pengumpulan_tugas', os.id)).catch(() => {}));
+          }).catch(() => {});
+        } else if (item.status === 'active') {
+          validActiveIds.add(d.id);
+          activeCount++;
+        }
+      });
+
+      activeAssignmentIds = validActiveIds;
+      setActiveAssignmentsCount(activeCount);
+      recomputeFeedbackAndSubmissions();
     }, (err) => console.warn('unsubAssign error:', err));
 
     // 4. Submisi Tugas yang Belum Dinilai (Pending Grading)
@@ -88,7 +144,8 @@ export default function GuruDashboard() {
       where('status', '==', 'submitted')
     );
     const unsubSubmissions = onSnapshot(qSubmissions, (snap) => {
-      setPendingGradingCount(snap.size);
+      latestSubmissionsSnap = snap;
+      recomputeFeedbackAndSubmissions();
     }, (err) => console.warn('unsubSubmissions error:', err));
 
     // 5. Kas Kelas
@@ -130,6 +187,31 @@ export default function GuruDashboard() {
   const attendanceRate = studentCount > 0 
     ? Math.round((attendanceBreakdown.hadir / studentCount) * 100) 
     : 0;
+
+  const formatAnnouncementDate = (dateVal: any): string => {
+    if (!dateVal) return 'Baru saja';
+    try {
+      if (typeof dateVal?.toDate === 'function') {
+        return format(dateVal.toDate(), 'dd MMM yyyy, HH:mm', { locale: id });
+      }
+      if (dateVal?.seconds && typeof dateVal.seconds === 'number') {
+        return format(new Date(dateVal.seconds * 1000), 'dd MMM yyyy, HH:mm', { locale: id });
+      }
+      if (typeof dateVal === 'string') {
+        const d = new Date(dateVal);
+        if (!isNaN(d.getTime())) {
+          return format(d, 'dd MMM yyyy, HH:mm', { locale: id });
+        }
+        return dateVal;
+      }
+      if (typeof dateVal === 'number') {
+        return format(new Date(dateVal), 'dd MMM yyyy, HH:mm', { locale: id });
+      }
+    } catch {
+      return 'Baru saja';
+    }
+    return typeof dateVal === 'string' ? dateVal : 'Baru saja';
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
@@ -370,17 +452,17 @@ export default function GuruDashboard() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                      {item.category || 'Informasi'}
+                      {typeof item.category === 'string' ? item.category : 'Informasi'}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      {item.date}
+                      {formatAnnouncementDate(item.date)}
                     </span>
                   </div>
                   <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 line-clamp-1">
-                    {item.title}
+                    {typeof item.title === 'string' ? item.title : ''}
                   </h4>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                    {item.content}
+                    {typeof item.content === 'string' ? item.content : ''}
                   </p>
                 </div>
               ))

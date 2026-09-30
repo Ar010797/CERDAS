@@ -23,9 +23,15 @@ export default function CalendarWidget({
 
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const getRelativeDays = (dateStr: string) => {
+  const getRelativeDays = (dateVal: any) => {
+    let dateStr = '';
+    if (typeof dateVal === 'string') dateStr = dateVal;
+    else if (typeof dateVal?.toDate === 'function') dateStr = dateVal.toDate().toISOString().split('T')[0];
+    else if (dateVal?.seconds && typeof dateVal.seconds === 'number') dateStr = new Date(dateVal.seconds * 1000).toISOString().split('T')[0];
+    if (!dateStr) return '';
     if (dateStr === todayStr) return 'Hari Ini';
     const diffTime = new Date(dateStr).getTime() - new Date(todayStr).getTime();
+    if (isNaN(diffTime)) return '';
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     if (diffDays === 1) return 'Besok';
     if (diffDays < 0) return 'Sedang Berlangsung';
@@ -93,16 +99,16 @@ export default function CalendarWidget({
                         </span>
                         {item.targetClass && item.targetClass !== 'Semua Kelas' && (
                           <span className="text-[10px] font-bold text-slate-500 bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-                            {item.targetClass}
+                            {typeof item.targetClass === 'string' ? item.targetClass : ''}
                           </span>
                         )}
                       </div>
                       <h4 className="text-xs sm:text-sm font-bold text-slate-800 dark:text-white truncate mt-1">
-                        {item.title}
+                        {typeof item.title === 'string' ? item.title : ''}
                       </h4>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2">
                         <span>{formatIndonesianDate(item.startDate)}</span>
-                        {item.time && <span>• {item.time}</span>}
+                        {item.time && <span>• {typeof item.time === 'string' ? item.time : ''}</span>}
                       </p>
                     </div>
                   </div>

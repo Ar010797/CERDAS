@@ -187,10 +187,75 @@ function mapOptionId(idStr: string): string {
 }
 
 /**
+ * Mendeteksi apakah suatu baris teks merupakan judul dokumen, kop sekolah/dinas,
+ * informasi ujian (kelas, semester, waktu), atau petunjuk umum/khusus.
+ * Baris-baris ini BUKAN butir soal dan dilarang keras diikutkan sebagai soal atau nomor soal.
+ */
+export function isExamHeaderOrInstruction(line: string): boolean {
+  const clean = (line || '').trim();
+  if (!clean || clean.length < 2) return true;
+
+  // Watermarks, batas halaman, garis pembatas
+  if (/^--\s*\d+\s*(?:of|\/)\s*\d+\s*--$/i.test(clean)) return true;
+  if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(clean)) return true;
+  if (/^[-=_*~—–#]{3,}$/.test(clean)) return true;
+
+  // Kop institusi, sekolah, dinas, kementerian, yayasan
+  if (/^(?:pemerintah|pemprov|pemkab|pemkot|dinas|kementerian|kemenag|yayasan|sekolah|madrasah|pesantren|institut|universitas)\b/i.test(clean)) return true;
+  if (/^(?:sd|smp|sma|smk|ma|mts|mi)\s+(?:negeri|swasta|\d+|al-|darul|islam|plus)/i.test(clean)) return true;
+
+  // Nama kegiatan ujian / asesmen / evaluasi
+  if (/^(?:penilaian|ujian|asesmen|ulangan|evaluasi|try\s*out|mid\s*semester|tes|latihan|soal\s*latihan)\b/i.test(clean)) return true;
+  if (/\b(?:pas|pat|pts|sts|sas|asas|asts|usbk|usbn|akm|anbk)\b/i.test(clean) && !/\b(?:adalah|merupakan|karena|mengapa|apa|sebutkan|jelaskan)\b/i.test(clean)) return true;
+  if (/^(?:semester|tahun\s*(?:ajaran|pelajaran)|ta\b|tp\b)\s*[:\d]/i.test(clean)) return true;
+  if (/^(?:tahun\s*(?:ajaran|pelajaran)\s*\d{4}\s*[\/-]\s*\d{4})/i.test(clean)) return true;
+
+  // Metadata ujian: Mapel, Kelas, Waktu, Hari/Tanggal, Guru, Pengawas
+  if (/^(?:mata\s*pelajaran|mapel|bidang\s*studi|kelas|semester|program|jurusan|peminatan|hari\s*[\/,]\s*tanggal|hari|tanggal|waktu|alokasi\s*waktu|durasi|ruang|kode\s*(?:soal|paket)|paket\s*(?:soal|\w+)|naskah\s*soal|lembar\s*soal|nama\s*peserta|no(?:\.|\s)*peserta|nomor\s*peserta|kurikulum)\s*[:=]/i.test(clean)) return true;
+
+  // Judul Bagian Soal (Pilihan Ganda / Uraian)
+  if (/^(?:bagian|bab|part|section)\s+[0-9a-zivx]+/i.test(clean)) return true;
+  if (/^(?:[a-e]|[ivx]+)[\.\)]\s*(?:pilihan\s*ganda|soal\s*pilihan\s*ganda|multiple\s*choice|uraian|esai|essay|soal\s*uraian|menjodohkan|isian)/i.test(clean)) return true;
+  if (/^(?:pilihan\s*ganda|soal\s*pilihan\s*ganda|soal\s*uraian|soal\s*esai|soal\s*menjodohkan)$/i.test(clean)) return true;
+
+  // Petunjuk Umum, Petunjuk Khusus, Instruksi Pengerjaan
+  if (/^(?:petunjuk\s*(?:umum|khusus|pengerjaan|soal)?|instruksi|aturan\s*ujian)\s*:?/i.test(clean)) return true;
+  if (/^(?:pilihlah|berilah|lingkarilah|silanglah|centanglah|hitamkan)\s+(?:salah\s+satu\s+)?(?:jawaban|huruf|tanda|bulatan)/i.test(clean)) return true;
+  if (/^(?:jawablah|kerjakan|bacalah|perhatikan)\s+(?:pertanyaan|soal-soal|dengan\s+teliti|dengan\s+tepat|petunjuk)/i.test(clean)) return true;
+  if (/^(?:selamat\s+mengerjakan|semoga\s+sukses|semoga\s+berhasil|good\s+luck|barakallah)/i.test(clean)) return true;
+
+  // Nomor butir instruksi umum (misal: "1. Berdoalah...", "2. Isikan identitas...", "3. Laporkan...")
+  if (/^\(?\d+[\.\)]\s*(?:berdoa|isi\b|isikan|tulislah|tulis\b|periksa|bacalah\s+petunjuk|laporkan|dahulukan|hitamkan|silanglah|jangan|dilarang|gunakan|waktu\s+yang|periksalah)/i.test(clean)) return true;
+
+  return false;
+}
+
+/**
+ * Membersihkan judul/kop yang mungkin menempel di awal pertanyaan soal pertama hasil OCR/Word
+ */
+export function cleanQuestionTitlePrefix(text: string): string {
+  let cleaned = (text || '').trim();
+  // Buang awalan nomor soal seperti "1. ", "1) ", "No. 1. ", "Soal 1: ", "١. "
+  cleaned = cleaned.replace(/^(?:(?:soal|nomor|no\.?)\s*)?\(?[0-9٠-٩]+[\.\)\]:\-]\s*/iu, '').trim();
+
+  // Jika teks masih diawali kop / judul / petunjuk yang menyatu dengan pertanyaan pertama
+  const headerPrefixRegex = /^(?:pemerintah|pemprov|pemkab|pemkot|dinas|kementerian|kemenag|yayasan|smp|sma|smk|sd|mi|mts|penilaian|ujian|asesmen|ulangan|mata\s*pelajaran|mapel|kelas|semester|petunjuk\s*(?:umum|khusus|pengerjaan)|pilihlah\s+salah\s+satu)[\s\S]+?(?=(?:(?:\b\d+[\.\)]\s+)|(?:(?:apakah|apa\s+yang|siapakah|mengapa|bagaimana|bagaimanakah|manakah|sebutkan|jelaskan|berikut\s+ini|di\s+bawah\s+ini|perhatikan|organ\s+|fungsi\s+|hasil\s+dari|hitunglah|pada\s+tahun|tokoh\s+|seorang\s+|sebuah\s+|dalam\s+proses|kandungan\s+|faktor\s+|gerakan\s+|sikap\s+|hukum\s+|bunyi\s+|makna\s+|arti\s+|surah\s+|ayat\s+|bacaan\s+|teks\s+|dialog\s+)\b)))/i;
+
+  if (headerPrefixRegex.test(cleaned)) {
+    const afterHeader = cleaned.replace(headerPrefixRegex, '').trim();
+    if (afterHeader.length >= 10) {
+      cleaned = afterHeader.replace(/^(?:(?:soal|nomor|no\.?)\s*)?\(?[0-9٠-٩]+[\.\)\]:\-]\s*/iu, '').trim();
+    }
+  }
+
+  return cleaned;
+}
+
+/**
  * Universal Intelligent Question Parser.
  * Mendukung format ringkas & praktis tanpa perlu pembahasan (cukup soal, jawaban, poin).
  * Mendukung Bahasa Arab (huruf أ ب ج د & angka Arab), Matematika (+, -, ×, ÷, =, ^, √), dan semua mapel.
- * Otomatis memberikan penomoran (1, 2, 3...) jika naskah tidak memiliki nomor.
+ * Otomatis memfilter KOP, judul dokumen, petunjuk umum, dan nomor aturan agar TIDAK masuk ke dalam nomor soal.
  */
 export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   if (!inputText || !inputText.trim()) return [];
@@ -198,21 +263,49 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   // Cek apakah format JSON murni
   try {
     const parsed = JSON.parse(inputText);
-    if (Array.isArray(parsed) && parsed.length > 0 && (parsed[0].questionText || parsed[0].question)) {
-      return parsed.map((item, idx) => ({
-        id: item.id || `q_${Date.now()}_${idx + 1}`,
-        type: item.type === 'essay' ? 'essay' : 'multiple_choice',
-        questionText: item.questionText || item.question || `Soal ${idx + 1}`,
-        points: Number(item.points) || (item.type === 'essay' ? 20 : 10),
-        options: item.options || (item.type === 'essay' ? undefined : [
-          { id: 'A', text: item.optionA || 'Pilihan A' },
-          { id: 'B', text: item.optionB || 'Pilihan B' },
-          { id: 'C', text: item.optionC || 'Pilihan C' },
-          { id: 'D', text: item.optionD || 'Pilihan D' }
-        ]),
-        correctAnswer: (item.correctAnswer || item.answerKey || (item.type === 'essay' ? '' : 'A')).toString().trim().toUpperCase(),
-        explanation: item.explanation || item.pembahasan || ''
-      }));
+    if (Array.isArray(parsed) && parsed.length > 0 && (parsed[0].questionText || parsed[0].question || parsed[0].text)) {
+      return parsed
+        .filter(item => {
+          const rawQ = item.questionText || item.question || item.text || '';
+          return !isExamHeaderOrInstruction(rawQ);
+        })
+        .map((item, idx) => {
+          const rawQ = item.questionText || item.question || item.text || `Soal ${idx + 1}`;
+          const cleanQ = cleanQuestionTitlePrefix(rawQ);
+          const isEssay = item.type === 'essay' || item.type === 'Uraian';
+          const defaultOpts = [
+            { id: 'A', text: item.optionA || 'Pilihan A' },
+            { id: 'B', text: item.optionB || 'Pilihan B' },
+            { id: 'C', text: item.optionC || 'Pilihan C' },
+            { id: 'D', text: item.optionD || 'Pilihan D' }
+          ];
+          const rawOpts = item.options || (isEssay ? undefined : defaultOpts);
+          let cleanOpts: QuizOption[] | undefined = undefined;
+
+          if (Array.isArray(rawOpts) && rawOpts.length > 0) {
+            const usedKeys = new Set<string>();
+            const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+            cleanOpts = rawOpts.map((opt: any, oIdx: number) => {
+              const optText = typeof opt === 'string' ? opt : (opt.text || '');
+              let optId = typeof opt === 'object' && opt.id ? opt.id.toUpperCase() : letters[oIdx] || `opt_${oIdx + 1}`;
+              if (usedKeys.has(optId)) {
+                optId = letters.find(l => !usedKeys.has(l)) || `${optId}_${oIdx + 1}`;
+              }
+              usedKeys.add(optId);
+              return { id: optId, text: optText };
+            });
+          }
+
+          return {
+            id: `q_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+            type: isEssay ? 'essay' : 'multiple_choice',
+            questionText: cleanQ || `Soal ${idx + 1}`,
+            points: Number(item.points) || (isEssay ? 20 : 10),
+            options: isEssay ? undefined : cleanOpts,
+            correctAnswer: (item.correctAnswer || item.answerKey || (isEssay ? '' : 'A')).toString().trim().toUpperCase(),
+            explanation: item.explanation || item.pembahasan || ''
+          };
+        });
     }
   } catch {}
 
@@ -275,21 +368,37 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
     const rawLine = lines[i];
     const lineWithNormNums = normalizeArabicNumerals(rawLine);
 
+    // Filter baris yang merupakan KOP, judul dokumen, petunjuk umum/khusus
+    const isHeaderLine = isExamHeaderOrInstruction(rawLine);
+
     // 1. Deteksi awal soal baru BERNOMOR (misal: "1.", "1)", "No. 1", "١.", dll)
     const numMatch = lineWithNormNums.match(qNumRegex);
     if (numMatch) {
-      const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete;
+      const qNum = parseInt(numMatch[1], 10);
+      const rawQ = numMatch[2].trim();
+
+      // Jika teks nomor ini merupakan instruksi petunjuk (misal: "1. Berdoalah...", "2. Isikan identitas..."), LEWATI!
+      if (isExamHeaderOrInstruction(rawQ) || /^(?:berdoa|isi\b|isikan|tulislah|tulis\b|periksa|laporkan|dahulukan|hitamkan|silanglah|jangan|dilarang|gunakan)/i.test(rawQ)) {
+        continue;
+      }
+
+      // Validasi apakah ini memang soal baru
+      const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete || current.questionText.length > 25;
       if (isActuallyNewQ) {
-        if (current) items.push(current);
-        const qNum = parseInt(numMatch[1], 10);
+        if (current) {
+          // Hanya simpan jika current memiliki teks soal dan bukan header
+          if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+            items.push(current);
+          }
+        }
         autoQuestionCounter = Math.max(autoQuestionCounter, qNum + 1);
-        const rawQ = numMatch[2].trim();
-        const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(rawQ) ||
-                        /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(rawQ);
+        const cleanQ = cleanQuestionTitlePrefix(rawQ);
+        const isEssay = /^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\)|esai|uraian)/i.test(cleanQ) ||
+                        /^(?:jelaskan|sebutkan|uraikan|bagaimanakah|mengapa|apa\s+yang\s+dimaksud)/i.test(cleanQ);
 
         current = {
           number: qNum,
-          questionText: rawQ.replace(/^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\))\s*/i, '').trim(),
+          questionText: cleanQ.replace(/^(?:\[(?:esai|uraian)\]|\((?:esai|uraian)\))\s*/i, '').trim(),
           options: [],
           type: isEssay ? 'essay' : 'multiple_choice',
           correctAnswer: answerKeyMap.get(qNum) || '',
@@ -309,12 +418,14 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
     const isPoint = pointRegex.test(rawLine);
     const isExp = expRegex.test(rawLine);
 
-    // 2. Deteksi awal soal baru TANPA NOMOR (Otomatis beri nomor 1, 2, 3...)
-    if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp) {
-      items.push(current);
+    // 2. Deteksi awal soal baru TANPA NOMOR (hanya jika soal sebelumnya sudah selesai atau baris berikutnya adalah opsi)
+    if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp && !isHeaderLine) {
+      if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+        items.push(current);
+      }
       current = {
         number: autoQuestionCounter++,
-        questionText: rawLine,
+        questionText: cleanQuestionTitlePrefix(rawLine),
         options: [],
         type: 'multiple_choice',
         correctAnswer: '',
@@ -328,26 +439,43 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       continue;
     }
 
-    // Jika belum ada soal sama sekali dan baris bukan opsi/kunci, mulai soal pertama nomor 1
-    if (!current && !isSingleOpt && !isAns && !isPoint && !isExp) {
-      current = {
-        number: autoQuestionCounter++,
-        questionText: rawLine,
-        options: [],
-        type: 'multiple_choice',
-        correctAnswer: '',
-        points: 10,
-        explanation: '',
-        hasAnswer: false,
-        isComplete: false
-      };
-      currentTarget = 'question';
-      currentOptionId = null;
-      continue;
-    }
-
+    // Jika belum ada soal sama sekali:
+    // HANYA buat soal baru jika BUKAN header/kop/petunjuk dan tampak seperti pertanyaan atau diikuti opsi
     if (!current) {
-      // Judul/Kop sebelum nomor soal 1 - lewati
+      if (isHeaderLine) {
+        // Lewati judul, kop, dan petunjuk di awal berkas
+        continue;
+      }
+
+      // Cek apakah baris ini adalah pertanyaan valid (ada tanda tanya, titik dua, kata tanya, atau esai)
+      const nextLineIsOpt = i + 1 < lines.length && (singleOptRegex.test(lines[i + 1]) || /(?:^|\s+)[A-D][\.\)]/i.test(lines[i + 1]));
+      const looksLikeQuestion = /\?|:|\.{3}$/.test(rawLine) ||
+        /^(?:apakah|apa|siapakah|siapa|mengapa|bagaimana|bagaimanakah|manakah|sebutkan|jelaskan|uraikan|berikut|di\s+bawah|perhatikan)/i.test(rawLine) ||
+        nextLineIsOpt;
+
+      if (looksLikeQuestion && !isSingleOpt && !isAns && !isPoint && !isExp) {
+        current = {
+          number: autoQuestionCounter++,
+          questionText: cleanQuestionTitlePrefix(rawLine),
+          options: [],
+          type: 'multiple_choice',
+          correctAnswer: '',
+          points: 10,
+          explanation: '',
+          hasAnswer: false,
+          isComplete: false
+        };
+        currentTarget = 'question';
+        currentOptionId = null;
+        continue;
+      }
+
+      // Jika bukan pertanyaan yang valid sebelum ada soal pertama, abaikan sebagai teks pengantar/kop
+      continue;
+    }
+
+    // Jika baris adalah judul/petunjuk di tengah dokumen, lewati jangan sambung ke pertanyaan
+    if (isHeaderLine && currentTarget === 'question' && current.options.length === 0) {
       continue;
     }
 
@@ -415,44 +543,59 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       const opt = current.options.find(o => o.id === currentOptionId);
       if (opt) opt.text += ' ' + rawLine;
     } else if (currentTarget === 'question' && current.options.length === 0) {
-      current.questionText += ' ' + rawLine;
+      // Pastikan bukan baris petunjuk yang ikut tersambung
+      if (!isHeaderLine) {
+        current.questionText += ' ' + rawLine;
+      }
     }
   }
 
-  if (current) items.push(current);
+  if (current && current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+    items.push(current);
+  }
 
-  return items.map((item, idx) => {
-    // Pastikan ID opsi unik (A, B, C, D) dan tidak ada duplikasi kunci ID seperti dua 'B' atau dua 'D'
-    const cleanOptions: QuizOption[] = [];
-    const usedIds = new Set<string>();
-    const defaultOptionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
-
-    (item.options || []).forEach((opt, optIndex) => {
-      let candidateId = opt.id || defaultOptionLetters[optIndex] || `opt_${optIndex + 1}`;
-      if (usedIds.has(candidateId)) {
-        const nextAvailable = defaultOptionLetters.find(l => !usedIds.has(l));
-        candidateId = nextAvailable || `${candidateId}_${optIndex + 1}`;
+  return items
+    .filter(item => {
+      // Buang item palsu yang berupa judul kop atau petunjuk
+      if (isExamHeaderOrInstruction(item.questionText)) return false;
+      if (item.options.length === 0 && !item.hasAnswer && item.type !== 'essay' && item.questionText.length < 15) {
+        return false;
       }
-      usedIds.add(candidateId);
-      cleanOptions.push({
-        id: candidateId,
-        text: opt.text || ''
+      return true;
+    })
+    .map((item, idx) => {
+      // Pastikan ID opsi unik (A, B, C, D) dan tidak ada duplikasi kunci ID
+      const cleanOptions: QuizOption[] = [];
+      const usedIds = new Set<string>();
+      const defaultOptionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+      (item.options || []).forEach((opt, optIndex) => {
+        let candidateId = opt.id || defaultOptionLetters[optIndex] || `opt_${optIndex + 1}`;
+        if (usedIds.has(candidateId)) {
+          const nextAvailable = defaultOptionLetters.find(l => !usedIds.has(l));
+          candidateId = nextAvailable || `${candidateId}_${optIndex + 1}`;
+        }
+        usedIds.add(candidateId);
+        cleanOptions.push({
+          id: candidateId,
+          text: opt.text || ''
+        });
       });
+
+      const isEssay = item.type === 'essay' || cleanOptions.length < 2;
+      const finalAnswer = item.correctAnswer || (isEssay ? '' : (cleanOptions[0]?.id || 'A'));
+      const finalQuestionText = cleanQuestionTitlePrefix(item.questionText) || `Soal ${idx + 1}`;
+
+      return {
+        id: `q_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+        type: isEssay ? 'essay' : 'multiple_choice',
+        questionText: finalQuestionText,
+        points: item.points || (isEssay ? 20 : 10),
+        options: isEssay ? undefined : cleanOptions,
+        correctAnswer: finalAnswer,
+        explanation: item.explanation || ''
+      };
     });
-
-    const isEssay = item.type === 'essay' || cleanOptions.length < 2;
-    const finalAnswer = item.correctAnswer || (isEssay ? '' : (cleanOptions[0]?.id || 'A'));
-    return {
-      id: `q_${Date.now()}_${idx + 1}`,
-      type: isEssay ? 'essay' : 'multiple_choice',
-      questionText: item.questionText || `Soal ${idx + 1}`,
-      points: item.points || (isEssay ? 20 : 10),
-      options: isEssay ? undefined : cleanOptions,
-      correctAnswer: finalAnswer,
-      explanation: item.explanation || ''
-    };
-  });
-
 }
 
 // ----------------------------------------------------

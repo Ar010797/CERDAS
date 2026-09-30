@@ -3,6 +3,21 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch, 
 import { db } from '../lib/firebase';
 import { CalendarEvent, DEFAULT_ACADEMIC_EVENTS, CalendarCategory, isDateInRange } from '../types/calendar';
 
+const normalizeDateStr = (val: any): string => {
+  if (!val) return '';
+  if (typeof val === 'string') return val.trim();
+  if (typeof val?.toDate === 'function') {
+    return val.toDate().toISOString().split('T')[0];
+  }
+  if (val?.seconds && typeof val.seconds === 'number') {
+    return new Date(val.seconds * 1000).toISOString().split('T')[0];
+  }
+  if (val instanceof Date) {
+    return val.toISOString().split('T')[0];
+  }
+  return '';
+};
+
 export function useAcademicCalendar(selectedClassFilter: string = 'Semua Kelas') {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [scheduleExams, setScheduleExams] = useState<CalendarEvent[]>([]);
@@ -18,27 +33,29 @@ export function useAcademicCalendar(selectedClassFilter: string = 'Semua Kelas')
         const items: CalendarEvent[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
+          const sDate = normalizeDateStr(data.startDate);
+          const eDate = normalizeDateStr(data.endDate) || sDate;
           items.push({
             id: docSnap.id,
-            title: data.title || '',
-            category: data.category || 'kegiatan',
-            startDate: data.startDate || '',
-            endDate: data.endDate || data.startDate || '',
-            description: data.description || '',
-            targetClass: data.targetClass || 'Semua Kelas',
+            title: typeof data.title === 'string' ? data.title : '',
+            category: (data.category as CalendarCategory) || 'kegiatan',
+            startDate: sDate,
+            endDate: eDate,
+            description: typeof data.description === 'string' ? data.description : '',
+            targetClass: typeof data.targetClass === 'string' ? data.targetClass : 'Semua Kelas',
             isHoliday: Boolean(data.isHoliday),
-            color: data.color || '',
-            time: data.time || '',
-            ruangan: data.ruangan || '',
-            pengajar: data.pengajar || '',
+            color: typeof data.color === 'string' ? data.color : '',
+            time: typeof data.time === 'string' ? data.time : '',
+            ruangan: typeof data.ruangan === 'string' ? data.ruangan : '',
+            pengajar: typeof data.pengajar === 'string' ? data.pengajar : '',
             source: data.source || 'manual',
-            createdBy: data.createdBy || '',
-            createdAt: data.createdAt || ''
+            createdBy: typeof data.createdBy === 'string' ? data.createdBy : '',
+            createdAt: typeof data.createdAt === 'string' ? data.createdAt : ''
           });
         });
 
         // Sort by startDate ascending
-        items.sort((a, b) => a.startDate.localeCompare(b.startDate));
+        items.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
         setEvents(items);
         setLoading(false);
       },
