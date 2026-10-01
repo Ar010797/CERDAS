@@ -35,6 +35,7 @@ export interface RaporPreviewModalProps {
   subjects: string[];
   gradesData: Record<string, any>;
   kkmMap?: Record<string, number>;
+  classKkmGlobal?: number | null;
   academicYear?: string;
   teacherName?: string;
   isAdmin?: boolean;
@@ -48,6 +49,7 @@ export default function RaporPreviewModal({
   subjects,
   gradesData,
   kkmMap = {},
+  classKkmGlobal,
   academicYear,
   teacherName,
   isAdmin = false
@@ -61,12 +63,19 @@ export default function RaporPreviewModal({
   const resolvedTeacherName = teacherName || (isAdmin ? 'Guru Wali Kelas' : 'Wali Kelas');
 
   const getSubjectKKM = (subj: string): number => {
+    // 1. Prioritas Utama: KKM per-mapel yang diinput Guru di mata_pelajaran/{classId}
     if (kkmMap && kkmMap[subj] !== undefined && Number(kkmMap[subj]) > 0) {
       return Number(kkmMap[subj]);
     }
+    // 2. KKM seragam kelas yang diinput Guru di modal KKM
+    if (classKkmGlobal !== undefined && classKkmGlobal !== null && Number(classKkmGlobal) > 0) {
+      return Number(classKkmGlobal);
+    }
+    // 3. KKM mapel dari sekolah jika ada
     if (schoolSettings?.kkmMap?.[subj] !== undefined && Number(schoolSettings.kkmMap[subj]) > 0) {
       return Number(schoolSettings.kkmMap[subj]);
     }
+    // 4. Default global sekolah
     return Number(schoolSettings?.kkmGlobal) || 75;
   };
 
@@ -133,7 +142,7 @@ export default function RaporPreviewModal({
         isPassed
       };
     });
-  }, [subjects, gradesData, kkmMap, schoolSettings]);
+  }, [subjects, gradesData, kkmMap, classKkmGlobal, schoolSettings]);
 
   // Statistik nilai rapor
   const summaryStats = useMemo(() => {

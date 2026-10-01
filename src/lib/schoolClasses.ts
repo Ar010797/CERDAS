@@ -152,15 +152,35 @@ export const ALL_AVAILABLE_CLASSES = [
 
 /**
  * Normalisasi string nama kelas dari input pengguna atau file Excel
- * Contoh: "1 a" -> "Kelas 1 A", "7 mts" -> "Kelas 7 MTs", "9B" -> "Kelas 9 B"
+ * Contoh: "1 a" -> "Kelas 1 A", "7 mts" -> "Kelas 7 MTs", "9B" -> "Kelas 9 B", "VII A" -> "Kelas 7 MTs A"
  */
 export function normalizeClassName(raw?: string): string {
   if (!raw || typeof raw !== 'string') return 'Kelas 1 A';
-  const clean = raw.trim();
+  let clean = raw.trim();
   if (!clean) return 'Kelas 1 A';
 
-  // Jika sudah dimulai dengan kata 'kelas'
-  const matchWithKelas = clean.match(/^kelas\s*([0-9]{1,2})\s*(?:mts|smp)?\s*([a-z])?$/i);
+  // Hapus prefiks umum seperti "data ", "sheet ", "daftar siswa ", kurung buka/tutup
+  clean = clean.replace(/^(?:data|sheet|daftar\s*(?:siswa)?|kelas\s*siswa)\s*[:\-_]?\s*/i, '').trim();
+  clean = clean.replace(/^[\(\[]|[\)\]]$/g, '').trim();
+
+  // Konversi Angka Romawi (I, II, III, IV, V, VI, VII, VIII, IX)
+  const romanMap: Record<string, string> = {
+    'i': '1', 'ii': '2', 'iii': '3', 'iv': '4', 'v': '5', 'vi': '6',
+    'vii': '7', 'viii': '8', 'ix': '9'
+  };
+  const romanMatch = clean.match(/^(?:kelas\s*)?(vii|viii|ix|vi|iv|v|iii|ii|i)\s*(?:mts|smp)?\s*([a-z])?$/i);
+  if (romanMatch) {
+    const numStr = romanMap[romanMatch[1].toLowerCase()];
+    const sub = romanMatch[2] ? romanMatch[2].toUpperCase() : '';
+    const numInt = parseInt(numStr, 10);
+    if (numInt >= 7 && numInt <= 9) {
+      return sub ? `Kelas ${numInt} MTs ${sub}` : `Kelas ${numInt} MTs`;
+    }
+    return sub ? `Kelas ${numInt} ${sub}` : `Kelas ${numInt}`;
+  }
+
+  // Jika sudah dimulai dengan kata 'kelas' (contoh: "Kelas 1 A", "Kelas 1A", "Kelas 1-A", "Kelas 7 MTs A")
+  const matchWithKelas = clean.match(/^kelas\s*([0-9]{1,2})\s*[\-_]?\s*(?:mts|smp)?\s*([a-z])?$/i);
   if (matchWithKelas) {
     const num = parseInt(matchWithKelas[1], 10);
     const sub = matchWithKelas[2] ? matchWithKelas[2].toUpperCase() : '';
@@ -170,8 +190,8 @@ export function normalizeClassName(raw?: string): string {
     return sub ? `Kelas ${num} ${sub}` : `Kelas ${num}`;
   }
 
-  // Jika berupa angka & huruf (misal: "1 A", "1A", "7 MTs A", "9 B", "7mts")
-  const matchShort = clean.match(/^([0-9]{1,2})\s*(?:mts|smp)?\s*([a-z])?$/i);
+  // Jika berupa angka & huruf (misal: "1 A", "1A", "1-A", "7 MTs A", "9 B", "7mts")
+  const matchShort = clean.match(/^([0-9]{1,2})\s*[\-_]?\s*(?:mts|smp)?\s*([a-z])?$/i);
   if (matchShort) {
     const num = parseInt(matchShort[1], 10);
     const sub = matchShort[2] ? matchShort[2].toUpperCase() : '';

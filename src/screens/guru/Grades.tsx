@@ -39,6 +39,7 @@ export default function GradesGuru() {
   const [grades, setGrades] = useState<Record<string, Record<string, GradeSubject>>>({});
   const [subjects, setSubjects] = useState<string[]>([]);
   const [kkmMap, setKkmMap] = useState<Record<string, number>>({});
+  const [classKkmGlobal, setClassKkmGlobal] = useState<number | null>(null);
   const [isKkmModalOpen, setIsKkmModalOpen] = useState(false);
   const [savingKkm, setSavingKkm] = useState(false);
   const [schoolSettings, setSchoolSettings] = useState<any>({ namaSekolah: 'CERDAS', namaKepalaSekolah: '', nipKepalaSekolah: '', kkmGlobal: '75' });
@@ -47,12 +48,19 @@ export default function GradesGuru() {
   const [loading, setLoading] = useState(true);
 
   const getSubjectKKM = (subj: string): number => {
+    // 1. Prioritas utama: KKM spesifik mata pelajaran yang diinput guru
     if (kkmMap && kkmMap[subj] !== undefined && Number(kkmMap[subj]) > 0) {
       return Number(kkmMap[subj]);
     }
+    // 2. KKM seragam kelas dari guru jika ada
+    if (classKkmGlobal !== null && classKkmGlobal > 0) {
+      return classKkmGlobal;
+    }
+    // 3. KKM mapel dari sekolah jika ada
     if (schoolSettings?.kkmMap?.[subj] !== undefined && Number(schoolSettings.kkmMap[subj]) > 0) {
       return Number(schoolSettings.kkmMap[subj]);
     }
+    // 4. Fallback global sekolah
     return Number(schoolSettings?.kkmGlobal) || 75;
   };
   
@@ -127,9 +135,15 @@ export default function GradesGuru() {
         const data = docSnap.data();
         setSubjects(data.subjects || []);
         setKkmMap(data.kkmMap || {});
+        if (data.kkmGlobal !== undefined && data.kkmGlobal !== null && Number(data.kkmGlobal) > 0) {
+          setClassKkmGlobal(Number(data.kkmGlobal));
+        } else {
+          setClassKkmGlobal(null);
+        }
       } else {
         setSubjects([]);
         setKkmMap({});
+        setClassKkmGlobal(null);
       }
     });
 
@@ -836,7 +850,38 @@ export default function GradesGuru() {
               </button>
             </div>
 
-            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+              {/* Quick Uniform KKM Setter */}
+              <div className="p-3.5 bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-indigo-900 dark:text-indigo-200">Terapkan KKM Cepat ke Seluruh Mapel</p>
+                  <p className="text-[11px] text-indigo-600 dark:text-indigo-400">Atur nilai KKM standar seragam untuk semua mata pelajaran {selectedClass}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={50}
+                    max={100}
+                    defaultValue={schoolSettings?.kkmGlobal || 75}
+                    id="quickKkmInput"
+                    className="w-16 px-2.5 py-1.5 text-center text-xs font-bold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 rounded-xl text-indigo-700 dark:text-indigo-300 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const inputEl = document.getElementById('quickKkmInput') as HTMLInputElement;
+                      const val = Number(inputEl?.value) || 75;
+                      const updated: Record<string, number> = {};
+                      subjects.forEach(s => { updated[s] = val; });
+                      setKkmMap(updated);
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+                  >
+                    Terapkan Semua
+                  </button>
+                </div>
+              </div>
+
               {subjects.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-6">
                   Belum ada mata pelajaran untuk {selectedClass}. Silakan tambahkan pada menu Pengaturan Kelas.
@@ -877,7 +922,7 @@ export default function GradesGuru() {
               <button
                 type="button"
                 onClick={() => setIsKkmModalOpen(false)}
-                className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold"
+                className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold cursor-pointer"
               >
                 Tutup
               </button>
@@ -887,9 +932,14 @@ export default function GradesGuru() {
                 onClick={async () => {
                   setSavingKkm(true);
                   try {
+                    const inputEl = document.getElementById('quickKkmInput') as HTMLInputElement;
+                    const quickVal = Number(inputEl?.value) || 75;
                     await setDoc(
                       doc(db, 'mata_pelajaran', selectedClass),
-                      { kkmMap },
+                      { 
+                        kkmMap,
+                        kkmGlobal: quickVal
+                      },
                       { merge: true }
                     );
                     setIsKkmModalOpen(false);
@@ -899,7 +949,7 @@ export default function GradesGuru() {
                     setSavingKkm(false);
                   }
                 }}
-                className="flex items-center gap-1.5 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{savingKkm ? 'Menyimpan...' : 'Simpan KKM'}</span>
@@ -919,6 +969,7 @@ export default function GradesGuru() {
           subjects={subjects}
           gradesData={grades[previewStudent.id || ''] || {}}
           kkmMap={kkmMap}
+          classKkmGlobal={classKkmGlobal}
           academicYear={schoolSettings?.tahunAjaran || '2026/2027'}
           teacherName={userData?.name}
           isAdmin={isAdmin}

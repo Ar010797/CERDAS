@@ -45,8 +45,17 @@ export default function AnnouncementNotificationBell({ studentClassId, onOpenAnn
   const formatDate = (val: any) => {
     if (!val) return 'Baru saja';
     try {
-      const d = val.toDate ? val.toDate() : new Date(val);
-      return format(d, 'd MMM yyyy, HH:mm', { locale: idLocale });
+      if (typeof val?.toDate === 'function') {
+        return format(val.toDate(), 'd MMM yyyy, HH:mm', { locale: idLocale });
+      }
+      if (val?.seconds && typeof val.seconds === 'number') {
+        return format(new Date(val.seconds * 1000), 'd MMM yyyy, HH:mm', { locale: idLocale });
+      }
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) {
+        return format(d, 'd MMM yyyy, HH:mm', { locale: idLocale });
+      }
+      return 'Baru saja';
     } catch {
       return 'Baru saja';
     }

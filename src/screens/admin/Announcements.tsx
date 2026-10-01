@@ -737,9 +737,11 @@ export default function Announcements() {
                       <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mb-3 mt-1 flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5" />
                         {ann.date?.toDate
-                          ? format(ann.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm', {
-                              locale: id
-                            }) + ' WIB'
+                          ? format(ann.date.toDate(), 'EEEE, dd MMMM yyyy - HH:mm', { locale: id }) + ' WIB'
+                          : ann.date?.seconds && typeof ann.date.seconds === 'number'
+                          ? format(new Date(ann.date.seconds * 1000), 'EEEE, dd MMMM yyyy - HH:mm', { locale: id }) + ' WIB'
+                          : typeof ann.date === 'string' && !isNaN(new Date(ann.date).getTime())
+                          ? format(new Date(ann.date), 'EEEE, dd MMMM yyyy - HH:mm', { locale: id }) + ' WIB'
                           : 'Baru saja'}
                       </p>
 

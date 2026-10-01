@@ -46,6 +46,8 @@ export default function WaliMuridDashboard() {
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayDisplay = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id });
   const [subjects, setSubjects] = useState<string[]>([]);
+  const [kkmMap, setKkmMap] = useState<Record<string, number>>({});
+  const [classKkmGlobal, setClassKkmGlobal] = useState<number | null>(null);
   const [schoolSettings, setSchoolSettings] = useState<{ 
     namaSekolah: string; 
     namaKepalaSekolah: string; 
@@ -166,14 +168,21 @@ export default function WaliMuridDashboard() {
     const currentStudentName = (studentData?.name || userData?.username || '').trim();
     if (!classId && !currentStudentId && !currentStudentName) return;
 
-    // 1. Subjects
+    // 1. Subjects & KKM Kelas yang diinput oleh Guru
     let unsubSubjects = () => {};
     if (classId) {
       unsubSubjects = onSnapshot(doc(db, 'mata_pelajaran', classId), (docSnap) => {
         if (docSnap.exists()) {
-          setSubjects(docSnap.data().subjects || []);
+          const d = docSnap.data();
+          setSubjects(d.subjects || []);
+          setKkmMap(d.kkmMap || {});
+          if (d.kkmGlobal !== undefined && d.kkmGlobal !== null && Number(d.kkmGlobal) > 0) {
+            setClassKkmGlobal(Number(d.kkmGlobal));
+          }
         } else {
           setSubjects(['Matematika', 'Bahasa Indonesia', 'IPA', 'IPS', 'Pendidikan Agama Islam', 'Bahasa Inggris']);
+          setKkmMap({});
+          setClassKkmGlobal(null);
         }
       });
     }
@@ -266,6 +275,15 @@ export default function WaliMuridDashboard() {
   };
 
   const getSubjectKKM = (subj: string): number => {
+    // 1. Prioritaskan KKM yang diinput Guru di mata_pelajaran/{classId}
+    if (kkmMap && kkmMap[subj] !== undefined && Number(kkmMap[subj]) > 0) {
+      return Number(kkmMap[subj]);
+    }
+    // 2. KKM global kelas yang diinput Guru jika ada
+    if (classKkmGlobal !== null && classKkmGlobal > 0) {
+      return classKkmGlobal;
+    }
+    // 3. KKM dari schoolSettings
     if (schoolSettings?.kkmMap?.[subj] !== undefined && Number(schoolSettings.kkmMap[subj]) > 0) {
       return Number(schoolSettings.kkmMap[subj]);
     }
@@ -528,7 +546,7 @@ export default function WaliMuridDashboard() {
             </div>
           </div>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <span>Standar KKM: {schoolSettings?.kkmGlobal || 75}</span>
+            <span>Target KKM: {classKkmGlobal || (Object.keys(kkmMap).length > 0 ? 'Sesuai Mapel' : (schoolSettings?.kkmGlobal || 75))}</span>
             <span className="text-[10px] text-purple-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Buka Rapor →</span>
           </p>
         </div>
@@ -1005,7 +1023,8 @@ export default function WaliMuridDashboard() {
           schoolSettings={schoolSettings}
           subjects={subjects}
           gradesData={grades}
-          kkmMap={schoolSettings?.kkmMap || {}}
+          kkmMap={kkmMap}
+          classKkmGlobal={classKkmGlobal}
           academicYear={schoolSettings?.tahunAjaran || '2026/2027'}
           isAdmin={false}
         />

@@ -325,15 +325,37 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   }
 
   // Pisahkan teks per baris dan bersihkan watermark/nomor halaman/kop
-  const rawLines = cleanText.split(/\r?\n/).map(l => l.trim());
+  // 1. Standarkan pemisah opsi horisontal (A. ... B. ... atau sel tabel Word yang terpisah tab / 2+ spasi)
+  let preprocessedText = cleanText.replace(/([\t\s]{2,}|\t+)(?=[*]?[A-Ea-eأإابجد][.)\]:\-]\s*)/gu, '\n');
+  preprocessedText = preprocessedText.replace(/(?<=[^\s\t\n])[\s\t]+(?=[*]?[B-Eb-eبجد][.)\]:\-]\s*)/gu, '\n');
+  // Ubah tab (\t) yang mengawali nomor soal atau opsi menjadi baris baru
+  preprocessedText = preprocessedText.replace(/[\t]+(?=(?:[0-9٠-٩]+|[A-Ea-e]|[أإابجد])[.)\]:\-])/gu, '\n');
+
+  const rawLines = preprocessedText.split(/\r?\n/).map(l => l.trim());
   const lines: string[] = [];
 
-  for (const line of rawLines) {
-    if (!line) continue;
-    if (/^--\s*\d+\s+(?:of|\/)\s+\d+\s*--$/i.test(line)) continue;
-    if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(line)) continue;
-    if (/^[-=_*~]{3,}$/.test(line)) continue;
-    lines.push(line);
+  for (const rawLine of rawLines) {
+    if (!rawLine) continue;
+    if (/^--\s*\d+\s+(?:of|\/)\s+\d+\s*--$/i.test(rawLine)) continue;
+    if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(rawLine)) continue;
+    if (/^[-=_*~]{3,}$/.test(rawLine)) continue;
+
+    // Pisahkan opsi horisontal jika 1 baris memuat beberapa opsi (misal: "A. Opsi A   B. Opsi B")
+    const headerRegex = /(?:^|[\t\s]+)([*]?\s*[A-Ea-eأإابجد][\.\)\]\-]\s+)/gu;
+    const optMatches = [...rawLine.matchAll(headerRegex)];
+    if (optMatches.length >= 2) {
+      for (let mIdx = 0; mIdx < optMatches.length; mIdx++) {
+        const m = optMatches[mIdx];
+        const start = m.index! + (m[0].length - m[0].trimStart().length);
+        const end = (mIdx + 1 < optMatches.length)
+          ? optMatches[mIdx + 1].index!
+          : rawLine.length;
+        const subOpt = rawLine.slice(start, end).trim();
+        if (subOpt) lines.push(subOpt);
+      }
+    } else {
+      lines.push(rawLine);
+    }
   }
 
   const items: Array<{
@@ -353,12 +375,14 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
   let currentTarget: 'question' | 'option' | 'explanation' | 'after_answer' | 'after_points' = 'question';
   let currentOptionId: string | null = null;
 
-  // Regex penomoran soal (mendukung Latin 1, 2, 3 dan Arab ١, ٢, ٣)
-  const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?([0-9٠-٩]+)[\.\)\]]\s*(.*)$/iu;
-  // Regex opsi tunggal (A, B, C, D, E atau أ, ب, ج, د, ه)
-  const singleOptRegex = /^(?:\()?([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s+(.*)$/u;
+  // Regex penomoran soal utama (contoh: "1. ", "1) ", "Soal 1. ", "No. 1. ", "١. ")
+  const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?([0-9٠-٩]+)(?:[\.\)\]]|\t+)\s*(.*)$/iu;
+  // Deteksi poin/pernyataan bernomor di dalam badan soal seperti "(1) Membaca buku", "(2) Menulis"
+  const subStatementRegex = /^\([0-9٠-٩ivxIVX]+\)\s+/;
+  // Regex opsi tunggal (A, B, C, D, E atau أ, ب, ج, د, ه), mendukung tanda bintang (*) sebagai kunci
+  const singleOptRegex = /^(?:\()?([*]?\s*[A-Ea-eأإابجد][*]?)(?:[.)\]:\-]|\t+)\s*([*]?\s*.*)$/u;
   // Regex kunci jawaban (Indonesia, Inggris, atau Arab)
-  const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban(?:\s*benar)?|answer(?:\s*key)?|مفتاح|الإجابة|الجواب|حل)\s*[:=]\s*([A-Ea-e]|[أإابجد]|\S.*)$/iu;
+  const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban(?:\s*benar)?|answer(?:\s*key)?|kunci\s*:\s*|مفتاح|الإجابة|الجواب|حل)\s*[:=]?\s*([*]?\s*[A-Ea-eأإابجد]|\S.*)$/iu;
   // Regex poin (Poin: 10, Nilai: 10, dll)
   const pointRegex = /^(?:poin|bobot|skor|score|points|nilai)\s*[:=]?\s*(\d+)?$/i;
   // Regex pembahasan opsional (tidak wajib)
@@ -371,8 +395,11 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
     // Filter baris yang merupakan KOP, judul dokumen, petunjuk umum/khusus
     const isHeaderLine = isExamHeaderOrInstruction(rawLine);
 
+    // Cek apakah baris ini adalah pernyataan bernomor seperti "(1) ...", "(2) ..."
+    const isSubStatement = subStatementRegex.test(rawLine);
+
     // 1. Deteksi awal soal baru BERNOMOR (misal: "1.", "1)", "No. 1", "١.", dll)
-    const numMatch = lineWithNormNums.match(qNumRegex);
+    const numMatch = !isSubStatement ? lineWithNormNums.match(qNumRegex) : null;
     if (numMatch) {
       const qNum = parseInt(numMatch[1], 10);
       const rawQ = numMatch[2].trim();
@@ -382,12 +409,19 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
         continue;
       }
 
-      // Validasi apakah ini memang soal baru
-      const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete || current.questionText.length > 25;
+      // Validasi apakah ini memang soal baru:
+      // Harus sudah ada opsi di soal sebelumnya, ATAU soal sebelumnya sudah berjawaban/selesai,
+      // ATAU qNum adalah nomor berikutnya yang berurutan (misal soal 1 -> soal 2)
+      const isActuallyNewQ = !current ||
+        current.options.length >= 2 ||
+        current.hasAnswer ||
+        current.isComplete ||
+        (qNum > current.number && current.questionText.length > 15) ||
+        qNum === autoQuestionCounter;
+
       if (isActuallyNewQ) {
         if (current) {
-          // Hanya simpan jika current memiliki teks soal dan bukan header
-          if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+          if (current.questionText.length >= 3 && !isExamHeaderOrInstruction(current.questionText)) {
             items.push(current);
           }
         }
@@ -404,11 +438,15 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
           correctAnswer: answerKeyMap.get(qNum) || '',
           points: isEssay ? 20 : 10,
           explanation: '',
-          hasAnswer: false,
+          hasAnswer: Boolean(answerKeyMap.get(qNum)),
           isComplete: false
         };
         currentTarget = 'question';
         currentOptionId = null;
+        continue;
+      } else if (current && current.options.length === 0) {
+        // Jika qNum lebih kecil atau nomor sub-butir di dalam soal (misal daftar nomor 1, 2 di dalam teks bacaan)
+        current.questionText += '\n' + rawLine;
         continue;
       }
     }
@@ -418,9 +456,9 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
     const isPoint = pointRegex.test(rawLine);
     const isExp = expRegex.test(rawLine);
 
-    // 2. Deteksi awal soal baru TANPA NOMOR (hanya jika soal sebelumnya sudah selesai atau baris berikutnya adalah opsi)
+    // 2. Deteksi awal soal baru TANPA NOMOR (hanya jika soal sebelumnya sudah memiliki minimal 2 opsi atau kunci)
     if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp && !isHeaderLine) {
-      if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+      if (current.questionText.length >= 3 && !isExamHeaderOrInstruction(current.questionText)) {
         items.push(current);
       }
       current = {
@@ -440,14 +478,9 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
     }
 
     // Jika belum ada soal sama sekali:
-    // HANYA buat soal baru jika BUKAN header/kop/petunjuk dan tampak seperti pertanyaan atau diikuti opsi
     if (!current) {
-      if (isHeaderLine) {
-        // Lewati judul, kop, dan petunjuk di awal berkas
-        continue;
-      }
+      if (isHeaderLine) continue;
 
-      // Cek apakah baris ini adalah pertanyaan valid (ada tanda tanya, titik dua, kata tanya, atau esai)
       const nextLineIsOpt = i + 1 < lines.length && (singleOptRegex.test(lines[i + 1]) || /(?:^|\s+)[A-D][\.\)]/i.test(lines[i + 1]));
       const looksLikeQuestion = /\?|:|\.{3}$/.test(rawLine) ||
         /^(?:apakah|apa|siapakah|siapa|mengapa|bagaimana|bagaimanakah|manakah|sebutkan|jelaskan|uraikan|berikut|di\s+bawah|perhatikan)/i.test(rawLine) ||
@@ -469,12 +502,10 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
         currentOptionId = null;
         continue;
       }
-
-      // Jika bukan pertanyaan yang valid sebelum ada soal pertama, abaikan sebagai teks pengantar/kop
       continue;
     }
 
-    // Jika baris adalah judul/petunjuk di tengah dokumen, lewati jangan sambung ke pertanyaan
+    // Abaikan kop/petunjuk di tengah naskah
     if (isHeaderLine && currentTarget === 'question' && current.options.length === 0) {
       continue;
     }
@@ -482,7 +513,7 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
     // 3. Deteksi Kunci Jawaban (Kunci: B / Jawaban: A / مفتاح: أ)
     const ansMatch = rawLine.match(ansRegex);
     if (ansMatch) {
-      const val = ansMatch[1].trim();
+      const val = ansMatch[1].replace(/[*]/g, '').trim();
       current.correctAnswer = mapOptionId(val);
       current.hasAnswer = true;
       currentTarget = 'after_answer';
@@ -499,7 +530,7 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       continue;
     }
 
-    // 5. Deteksi Pembahasan (Opsional, jika tidak ada tidak apa-apa)
+    // 5. Deteksi Pembahasan (Opsional)
     const expMatch = rawLine.match(expRegex);
     if (expMatch) {
       current.explanation = expMatch[1].trim();
@@ -507,45 +538,43 @@ export function parseImportedQuestions(inputText: string): QuizQuestion[] {
       continue;
     }
 
-    // 6. Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
-    const horizOpts = [...rawLine.matchAll(/(?:^|\s+)([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s*([^\s][^A-Ea-eأإابجد\n]*?)(?=(?:\s+[A-Ea-e]|[أإابجد][\.\)\]:\-]|$))/gu)];
-    if (horizOpts.length >= 2) {
-      for (const m of horizOpts) {
-        current.options.push({
-          id: mapOptionId(m[1]),
-          text: m[2].trim()
-        });
-      }
-      current.type = 'multiple_choice';
-      currentTarget = 'after_points';
-      continue;
-    }
-
-    // 7. Deteksi Opsi Vertikal (A. Opsi teks / أ. خيار)
+    // 6. Deteksi Opsi Vertikal (A. Opsi teks / *A. Kunci / أ. خيار)
     const singleOpt = rawLine.match(singleOptRegex);
-    if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]|[أإابجد]$/u.test(singleOpt[1]))) {
-      const optId = mapOptionId(singleOpt[1]);
-      const optText = singleOpt[2].trim();
+    if (singleOpt) {
+      const rawOptId = singleOpt[1].trim();
+      const hasAsterisk = rawOptId.includes('*') || singleOpt[2].startsWith('*');
+      const cleanOptLetter = rawOptId.replace(/[*]/g, '').trim();
+      const optId = mapOptionId(cleanOptLetter);
+
+      let optText = singleOpt[2].replace(/^[*]\s*/, '').trim();
+      // Bersihkan jika masih ada prefix huruf ganda seperti "A. " di dalam teks opsi
+      optText = optText.replace(/^[A-Ea-eأإابجد][.)\]:\-]\s*/u, '').trim();
+
       current.options.push({
         id: optId,
         text: optText
       });
       current.type = 'multiple_choice';
+
+      if (hasAsterisk) {
+        current.correctAnswer = optId;
+        current.hasAnswer = true;
+      }
+
       currentTarget = 'option';
       currentOptionId = optId;
       continue;
     }
 
-    // 8. Penanganan Teks Multi-Baris (Paragraf bacaan, dialog, matematika bertingkat)
+    // 7. Penanganan Teks Multi-Baris (Paragraf bacaan, dialog, matematika bertingkat)
     if (currentTarget === 'explanation') {
       current.explanation += ' ' + rawLine;
     } else if (currentTarget === 'option' && currentOptionId) {
       const opt = current.options.find(o => o.id === currentOptionId);
       if (opt) opt.text += ' ' + rawLine;
     } else if (currentTarget === 'question' && current.options.length === 0) {
-      // Pastikan bukan baris petunjuk yang ikut tersambung
       if (!isHeaderLine) {
-        current.questionText += ' ' + rawLine;
+        current.questionText += (current.questionText ? '\n' : '') + rawLine;
       }
     }
   }

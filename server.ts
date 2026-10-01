@@ -1373,17 +1373,37 @@ PERINGATAN SANGAT PENTING:
       }
     }
 
-    // Pisahkan teks per baris dan bersihkan watermark/nomor halaman PDF/Word
-    const rawLines = cleanText.split(/\r?\n/).map(l => l.trim());
+    // 1. Standarkan pemisah opsi horisontal (A. ... B. ... atau sel tabel Word yang terpisah tab / 2+ spasi)
+    let preprocessedText = cleanText.replace(/([\t\s]{2,}|\t+)(?=[*]?[A-Ea-eأإابجد][.)\]:\-]\s*)/gu, '\n');
+    preprocessedText = preprocessedText.replace(/(?<=[^\s\t\n])[\s\t]+(?=[*]?[B-Eb-eبجد][.)\]:\-]\s*)/gu, '\n');
+    // Ubah tab (\t) yang mengawali butir soal atau opsi menjadi baris baru
+    preprocessedText = preprocessedText.replace(/[\t]+(?=(?:[0-9٠-٩]+|[A-Ea-e]|[أإابجد])[.)\]:\-])/gu, '\n');
+    const rawLines = preprocessedText.split(/\r?\n/).map(l => l.trim());
     const lines: string[] = [];
 
-    for (const line of rawLines) {
-      if (!line) continue;
+    for (const rawLine of rawLines) {
+      if (!rawLine) continue;
       // Filter penomoran halaman otomatis: '-- 1 of 5 --', 'Halaman 1 dari 5', 'Page 1'
-      if (/^--\s*\d+\s+(?:of|\/)\s+\d+\s*--$/i.test(line)) continue;
-      if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(line)) continue;
-      if (/^[-=_*~]{3,}$/.test(line)) continue;
-      lines.push(line);
+      if (/^--\s*\d+\s+(?:of|\/)\s+\d+\s*--$/i.test(rawLine)) continue;
+      if (/^(?:halaman|page|hal\.?)\s*\d+(?:\s*(?:dari|of|\/)\s*\d+)?$/i.test(rawLine)) continue;
+      if (/^[-=_*~]{3,}$/.test(rawLine)) continue;
+
+      // Pisahkan opsi horisontal jika 1 baris memuat beberapa opsi (misal: "A. Opsi A   B. Opsi B")
+      const headerRegex = /(?:^|[\t\s]+)([*]?\s*[A-Ea-eأإابجد][\.\)\]\-]\s+)/gu;
+      const optMatches = [...rawLine.matchAll(headerRegex)];
+      if (optMatches.length >= 2) {
+        for (let mIdx = 0; mIdx < optMatches.length; mIdx++) {
+          const m = optMatches[mIdx];
+          const start = m.index! + (m[0].length - m[0].trimStart().length);
+          const end = (mIdx + 1 < optMatches.length)
+            ? optMatches[mIdx + 1].index!
+            : rawLine.length;
+          const subOpt = rawLine.slice(start, end).trim();
+          if (subOpt) lines.push(subOpt);
+        }
+      } else {
+        lines.push(rawLine);
+      }
     }
 
     const items: Array<{
@@ -1403,12 +1423,14 @@ PERINGATAN SANGAT PENTING:
     let currentTarget: 'question' | 'option' | 'explanation' | 'after_answer' | 'after_points' = 'question';
     let currentOptionId: string | null = null;
 
-    // Regex penomoran soal (mendukung Latin 1, 2, 3 dan Arab ١, ٢, ٣)
-    const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?\(?([0-9٠-٩]+)[\.\)\]]\s*(.*)$/iu;
-    // Regex opsi tunggal (A, B, C, D, E atau أ, ب, ج, د, ه)
-    const singleOptRegex = /^(?:\()?([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s+(.*)$/u;
+    // Regex penomoran soal utama (mendukung Latin 1, 2, 3 dan Arab ١, ٢, ٣)
+    const qNumRegex = /^(?:(?:soal|nomor|no\.?)\s*)?([0-9٠-٩]+)(?:[\.\)\]]|\t+)\s*(.*)$/iu;
+    // Deteksi pernyataan bernomor di dalam badan soal seperti "(1) Membaca buku"
+    const subStatementRegex = /^\([0-9٠-٩ivxIVX]+\)\s+/;
+    // Regex opsi tunggal (A, B, C, D, E atau أ, ب, ج, د, ه), mendukung tanda bintang (*) sebagai kunci
+    const singleOptRegex = /^(?:\()?([*]?\s*[A-Ea-eأإابجد][*]?)(?:[\.\)\]:\-]|\t+)\s*([*]?\s*.*)$/u;
     // Regex kunci jawaban (Indonesia, Inggris, atau Arab)
-    const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban(?:\s*benar)?|answer(?:\s*key)?|مفتاح|الإجابة|الجواب|حل)\s*[:=]\s*([A-Ea-e]|[أإابجد]|\S.*)$/iu;
+    const ansRegex = /^(?:kunci(?:\s*jawaban)?|jawaban(?:\s*benar)?|answer(?:\s*key)?|kunci\s*:\s*|مفتاح|الإجابة|الجواب|حل)\s*[:=]?\s*([*]?\s*[A-Ea-eأإابجد]|\S.*)$/iu;
     // Regex poin (Poin: 10, Nilai: 10, dll)
     const pointRegex = /^(?:poin|bobot|skor|score|points|nilai)\s*[:=]?\s*(\d+)?$/i;
     // Regex pembahasan opsional (tidak wajib)
@@ -1420,9 +1442,10 @@ PERINGATAN SANGAT PENTING:
 
       // Cek apakah baris ini adalah header, judul, atau petunjuk umum
       const isHeaderLine = isExamHeaderOrInstruction(rawLine);
+      const isSubStatement = subStatementRegex.test(rawLine);
 
       // 1. Deteksi awal soal baru BERNOMOR (1., 1), No. 1, ١., dll)
-      const numMatch = lineWithNormNums.match(qNumRegex);
+      const numMatch = !isSubStatement ? lineWithNormNums.match(qNumRegex) : null;
       if (numMatch) {
         const qNum = parseInt(numMatch[1], 10);
         const rawQ = numMatch[2].trim();
@@ -1432,10 +1455,16 @@ PERINGATAN SANGAT PENTING:
           continue;
         }
 
-        const isActuallyNewQ = !current || current.options.length > 0 || current.hasAnswer || current.isComplete || current.questionText.length > 25;
+        const isActuallyNewQ = !current ||
+          current.options.length >= 2 ||
+          current.hasAnswer ||
+          current.isComplete ||
+          (qNum > current.number && current.questionText.length > 15) ||
+          qNum === autoQuestionCounter;
+
         if (isActuallyNewQ) {
           if (current) {
-            if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+            if (current.questionText.length >= 3 && !isExamHeaderOrInstruction(current.questionText)) {
               items.push(current);
             }
           }
@@ -1452,11 +1481,14 @@ PERINGATAN SANGAT PENTING:
             correctAnswer: answerKeyMap.get(qNum) || '',
             points: isEssay ? 20 : 10,
             explanation: '',
-            hasAnswer: false,
+            hasAnswer: Boolean(answerKeyMap.get(qNum)),
             isComplete: false
           };
           currentTarget = 'question';
           currentOptionId = null;
+          continue;
+        } else if (current && current.options.length === 0) {
+          current.questionText += '\n' + rawLine;
           continue;
         }
       }
@@ -1468,7 +1500,7 @@ PERINGATAN SANGAT PENTING:
 
       // 2. Deteksi awal soal baru TANPA NOMOR (Otomatis beri nomor 1, 2, 3...)
       if (current && (current.options.length >= 2 || current.hasAnswer) && !isSingleOpt && !isAns && !isPoint && !isExp && !isHeaderLine) {
-        if (current.questionText.length >= 5 && !isExamHeaderOrInstruction(current.questionText)) {
+        if (current.questionText.length >= 3 && !isExamHeaderOrInstruction(current.questionText)) {
           items.push(current);
         }
         current = {
@@ -1526,7 +1558,7 @@ PERINGATAN SANGAT PENTING:
       // 3. Deteksi Kunci Jawaban per butir: 'Kunci: B' atau 'Jawaban: D'
       const ansMatch = rawLine.match(ansRegex);
       if (ansMatch) {
-        const val = ansMatch[1].trim();
+        const val = ansMatch[1].replace(/[*]/g, '').trim();
         current.correctAnswer = mapOptionId(val);
         current.hasAnswer = true;
         currentTarget = 'after_answer';
@@ -1551,36 +1583,34 @@ PERINGATAN SANGAT PENTING:
         continue;
       }
 
-      // 6. Deteksi Opsi Horisontal dalam 1 baris: 'A. 40   B. 41   C. 56   D. 47'
-      const horizOpts = [...rawLine.matchAll(/(?:^|\s+)([A-Ea-e]|[أإابجد])[\.\)\]:\-]?\s*([^\s][^A-Ea-eأإابجد\n]*?)(?=(?:\s+[A-Ea-e]|[أإابجد][\.\)\]:\-]|$))/gu)];
-      if (horizOpts.length >= 2) {
-        for (const m of horizOpts) {
-          current.options.push({
-            id: mapOptionId(m[1]),
-            text: m[2].trim()
-          });
-        }
-        current.type = 'multiple_choice';
-        currentTarget = 'after_points';
-        continue;
-      }
-
-      // 7. Deteksi Opsi Vertikal: 'A. 40', 'B. 41'
+      // 6. Deteksi Opsi Vertikal: 'A. 40', 'B. 41', '*C. 42'
       const singleOpt = rawLine.match(singleOptRegex);
-      if (singleOpt && (current.options.length < 5 || /^[A-Ea-e]|[أإابجد]$/u.test(singleOpt[1]))) {
-        const optId = mapOptionId(singleOpt[1]);
-        const optText = singleOpt[2].trim();
+      if (singleOpt) {
+        const rawOptId = singleOpt[1].trim();
+        const hasAsterisk = rawOptId.includes('*') || singleOpt[2].startsWith('*');
+        const cleanOptLetter = rawOptId.replace(/[*]/g, '').trim();
+        const optId = mapOptionId(cleanOptLetter);
+
+        let optText = singleOpt[2].replace(/^[*]\s*/, '').trim();
+        optText = optText.replace(/^[A-Ea-eأإابجد][\.\)\]:\-]\s*/u, '').trim();
+
         current.options.push({
           id: optId,
           text: optText
         });
         current.type = 'multiple_choice';
+
+        if (hasAsterisk) {
+          current.correctAnswer = optId;
+          current.hasAnswer = true;
+        }
+
         currentTarget = 'option';
         currentOptionId = optId;
         continue;
       }
 
-      // 8. Penanganan Teks Panjang Multi-Baris (Paragraf bacaan, teks Arab, cerita, persamaan matematika, opsi panjang)
+      // 7. Penanganan Teks Panjang Multi-Baris (Paragraf bacaan, teks Arab, cerita, persamaan matematika, opsi panjang)
       if (currentTarget === 'explanation') {
         current.explanation += ' ' + rawLine;
       } else if (currentTarget === 'option' && currentOptionId) {
@@ -1588,7 +1618,7 @@ PERINGATAN SANGAT PENTING:
         if (opt) opt.text += ' ' + rawLine;
       } else if (currentTarget === 'question' && current.options.length === 0) {
         if (!isHeaderLine) {
-          current.questionText += ' ' + rawLine;
+          current.questionText += (current.questionText ? '\n' : '') + rawLine;
         }
       }
     }
@@ -1643,6 +1673,32 @@ PERINGATAN SANGAT PENTING:
 
   // Helper untuk mengekstrak teks langsung dari buffer berkas Word (.docx) dengan mammoth
   const extractTextFromWordBuffer = async (buffer: Buffer): Promise<string> => {
+    // 1. Coba konversi via HTML untuk mempertahankan struktur tabel, kolom opsi, dan pemisah paragraf
+    try {
+      const htmlRes = await mammoth.convertToHtml({ buffer });
+      if (htmlRes && htmlRes.value && htmlRes.value.trim().length > 10) {
+        let converted = htmlRes.value;
+        converted = converted.replace(/<\/td>\s*<td[^>]*>/gi, '\t');
+        converted = converted.replace(/<\/tr>/gi, '\n');
+        converted = converted.replace(/<\/p>|<\/div>|<\/li>|<br\s*\/?>/gi, '\n');
+        converted = converted.replace(/<[^>]+>/g, ' ');
+        converted = converted
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
+
+        if (converted.trim().length > 15) {
+          return converted.trim();
+        }
+      }
+    } catch (htmlErr) {
+      console.warn("[Mammoth Word HTML notice, fallback to rawText]:", htmlErr);
+    }
+
+    // 2. Fallback ke ekstraksi raw text standar
     try {
       const result = await mammoth.extractRawText({ buffer });
       const text = (result?.value || "").trim();

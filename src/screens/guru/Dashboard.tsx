@@ -87,6 +87,9 @@ export default function GuruDashboard() {
         // HANYA hitung jika tugasnya MASIH ADA, TIDAK KEDALUWARSA, dan statusnya 'submitted'
         if (sub.assignmentId && activeAssignmentIds.has(sub.assignmentId) && sub.status === 'submitted') {
           pendingCount++;
+        } else if (sub.assignmentId && !activeAssignmentIds.has(sub.assignmentId) && sub.status === 'submitted') {
+          // Bersihkan submisi yatim (karena soal kedaluwarsa atau dihapus) agar notifikasi feedback bersih tereset
+          deleteDoc(doc(db, 'pengumpulan_tugas', d.id)).catch(() => {});
         }
       });
       setPendingGradingCount(pendingCount);
@@ -105,9 +108,11 @@ export default function GuruDashboard() {
       snap.forEach(d => {
         const item = d.data();
         let isExpired = false;
-        if (item.dueDate) {
+        const dueVal = item.dueDate || item.deadline;
+        if (dueVal) {
           try {
-            const dueTime = new Date(`${item.dueDate}T${item.dueTime || '23:59'}:00`).getTime();
+            const timeStr = item.dueTime || '23:59';
+            const dueTime = new Date(`${dueVal}T${timeStr}:00`).getTime();
             if (!isNaN(dueTime) && dueTime < now) {
               isExpired = true;
             }
@@ -126,7 +131,7 @@ export default function GuruDashboard() {
           getDocs(qOrphan).then(orphanSnap => {
             orphanSnap.forEach(os => deleteDoc(doc(db, 'pengumpulan_tugas', os.id)).catch(() => {}));
           }).catch(() => {});
-        } else if (item.status === 'active') {
+        } else if (item.status !== 'closed') {
           validActiveIds.add(d.id);
           activeCount++;
         }
@@ -213,6 +218,10 @@ export default function GuruDashboard() {
     return typeof dateVal === 'string' ? dateVal : 'Baru saja';
   };
 
+  const safeAssignedClass = typeof assignedClass === 'string' ? assignedClass : 'Kelas 1 A';
+  const safeAcademicYear = typeof userData?.academicYear === 'string' ? userData.academicYear : 'T.A 2026/2027';
+  const safeTeacherName = typeof userData?.name === 'string' ? userData.name : 'Ustadz / Ustadzah';
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
       {/* 1. Header Ringkas, Elegan, & Fokus Informasi Utama */}
@@ -223,13 +232,13 @@ export default function GuruDashboard() {
           <div className="space-y-1.5">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-xs font-bold border border-white/20">
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Wali Kelas • {assignedClass}</span>
+              <span>Wali Kelas • {safeAssignedClass}</span>
               <span className="text-indigo-200">|</span>
-              <span className="text-indigo-200">{userData?.academicYear || 'T.A 2026/2027'}</span>
+              <span className="text-indigo-200">{safeAcademicYear}</span>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              Selamat Bertugas, {userData?.name || 'Ustadz / Ustadzah'}
+              Selamat Bertugas, {safeTeacherName}
             </h1>
 
             <p className="text-xs sm:text-sm text-indigo-200 font-medium">
