@@ -274,6 +274,95 @@ export function isClassMatch(classA?: string, classB?: string): boolean {
 }
 
 /**
+ * Cek apakah sebuah nama kelas adalah jenjang MTs / SMP (Kelas 7, 8, 9 atau memuat 'MTs')
+ */
+export function isMtsClass(className?: string): boolean {
+  if (!className || typeof className !== 'string') return false;
+  const clean = className.trim().toLowerCase();
+  if (clean.includes('mts') || clean.includes('smp')) return true;
+  return /^(?:kelas\s*)?(?:7|8|9|vii|viii|ix)\b/i.test(clean);
+}
+
+export interface SchoolPrincipalInfo {
+  name: string;
+  nip: string;
+  signature: string;
+  stamp: string;
+  roleTitle: string; // 'Kepala Madrasah' atau 'Kepala Sekolah'
+  levelLabel: string; // 'MTs' atau 'SD'
+  isMts: boolean;
+}
+
+/**
+ * Mengambil identitas Kepala Sekolah secara dinamis berdasarkan jenjang kelas (SD vs MTs)
+ * - Jika kelas MTs (Kelas 7-9 / MTs): Menggunakan data Kepala Madrasah MTs
+ * - Jika kelas SD (Kelas 1-6 / SD): Menggunakan data Kepala Sekolah SD
+ * - Dilengkapi fallback cerdas ke namaKepalaSekolah umum jika belum dispesifikasikan.
+ */
+export function getPrincipalForClass(
+  className: string | undefined,
+  schoolSettings: any
+): SchoolPrincipalInfo {
+  const isMts = isMtsClass(className);
+
+  if (isMts) {
+    const name = (
+      schoolSettings?.namaKepalaSekolahMTS ||
+      schoolSettings?.namaKepalaSekolah ||
+      schoolSettings?.kepalaSekolah ||
+      'Kepala Madrasah'
+    ).trim();
+
+    const nip = (
+      schoolSettings?.nipKepalaSekolahMTS ||
+      schoolSettings?.nipKepalaSekolah ||
+      '-'
+    ).trim();
+
+    const signature = schoolSettings?.tandaTanganKepalaSekolahMTS || schoolSettings?.tandaTanganKepalaSekolah || '';
+    const stamp = schoolSettings?.stempelSekolahMTS || schoolSettings?.stempelSekolah || '';
+    const roleTitle = schoolSettings?.jabatanKepalaMTS || 'Kepala Madrasah';
+
+    return {
+      name,
+      nip,
+      signature,
+      stamp,
+      roleTitle,
+      levelLabel: 'MTs',
+      isMts: true
+    };
+  } else {
+    const name = (
+      schoolSettings?.namaKepalaSekolahSD ||
+      schoolSettings?.namaKepalaSekolah ||
+      schoolSettings?.kepalaSekolah ||
+      'Kepala Sekolah'
+    ).trim();
+
+    const nip = (
+      schoolSettings?.nipKepalaSekolahSD ||
+      schoolSettings?.nipKepalaSekolah ||
+      '-'
+    ).trim();
+
+    const signature = schoolSettings?.tandaTanganKepalaSekolahSD || schoolSettings?.tandaTanganKepalaSekolah || '';
+    const stamp = schoolSettings?.stempelSekolahSD || schoolSettings?.stempelSekolah || '';
+    const roleTitle = schoolSettings?.jabatanKepalaSD || 'Kepala Sekolah';
+
+    return {
+      name,
+      nip,
+      signature,
+      stamp,
+      roleTitle,
+      levelLabel: 'SD',
+      isMts: false
+    };
+  }
+}
+
+/**
  * Cek apakah kelas siswa cocok dengan target kelas pengumuman/pemberitahuan
  * Mendukung multiple class, array, maupun string 'Semua Kelas'
  * - Jika target adalah 'Semua Kelas', 'Semua', 'Umum' -> Semua kelas cocok

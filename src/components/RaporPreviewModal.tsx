@@ -18,6 +18,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatTugasDisplay } from '../lib/gradeSync';
+import { getPrincipalForClass } from '../lib/schoolClasses';
 
 export interface RaporStudentInfo {
   id?: string;
@@ -254,23 +255,25 @@ export default function RaporPreviewModal({
     pdf.setFontSize(9.5);
     pdf.setTextColor(30, 41, 59);
 
-    // Kiri: Kepala Sekolah
+    const principalInfo = getPrincipalForClass(student.classId, schoolSettings);
+
+    // Kiri: Kepala Sekolah / Madrasah
     pdf.text('Mengetahui,', 45, signatureY, { align: 'center' });
-    pdf.text('Kepala Sekolah', 45, signatureY + 6, { align: 'center' });
+    pdf.text(principalInfo.roleTitle, 45, signatureY + 6, { align: 'center' });
 
     // Bubuhkan TTD Digital Kepala Sekolah jika ada
-    if (schoolSettings?.tandaTanganKepalaSekolah) {
+    if (principalInfo.signature) {
       try {
-        pdf.addImage(schoolSettings.tandaTanganKepalaSekolah, 'PNG', 31, signatureY + 7, 28, 16);
+        pdf.addImage(principalInfo.signature, 'PNG', 31, signatureY + 7, 28, 16);
       } catch (err) {
         console.warn('TTD digital embed note:', err);
       }
     }
 
     // Bubuhkan Stempel Sekolah jika ada
-    if (schoolSettings?.stempelSekolah) {
+    if (principalInfo.stamp) {
       try {
-        pdf.addImage(schoolSettings.stempelSekolah, 'PNG', 24, signatureY + 6, 22, 22);
+        pdf.addImage(principalInfo.stamp, 'PNG', 24, signatureY + 6, 22, 22);
       } catch (err) {
         console.warn('Stempel embed note:', err);
       }
@@ -278,7 +281,7 @@ export default function RaporPreviewModal({
 
     pdf.setFont('helvetica', 'bold');
     pdf.text(
-      schoolSettings?.namaKepalaSekolah || '________________________',
+      principalInfo.name || '________________________',
       45,
       signatureY + 25,
       { align: 'center' }
@@ -286,8 +289,8 @@ export default function RaporPreviewModal({
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8.5);
     pdf.text(
-      schoolSettings?.nipKepalaSekolah
-        ? `NIP. ${schoolSettings.nipKepalaSekolah}`
+      principalInfo.nip && principalInfo.nip !== '-'
+        ? `NIP. ${principalInfo.nip}`
         : 'NIP. __________________',
       45,
       signatureY + 30,
@@ -589,29 +592,36 @@ export default function RaporPreviewModal({
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-750 border border-slate-200 dark:border-slate-700 flex items-center gap-2.5">
-                    <UserCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-                    <div className="min-w-0">
-                      <span className="font-bold text-slate-800 dark:text-white block truncate">
-                        {schoolSettings?.namaKepalaSekolah || 'Kepala Sekolah'}
-                      </span>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                        {schoolSettings?.tandaTanganKepalaSekolah ? '✓ TTD Digital Terpasang' : 'Tanda Tangan Manual'}
-                      </span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const previewPrincipal = getPrincipalForClass(student.classId, schoolSettings);
+                    return (
+                      <>
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-750 border border-slate-200 dark:border-slate-700 flex items-center gap-2.5">
+                          <UserCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="font-bold text-slate-800 dark:text-white block truncate">
+                              {previewPrincipal.name || previewPrincipal.roleTitle}
+                            </span>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                              {previewPrincipal.signature ? `✓ TTD Digital ${previewPrincipal.levelLabel} Terpasang` : 'Tanda Tangan Manual'}
+                            </span>
+                          </div>
+                        </div>
 
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-750 border border-slate-200 dark:border-slate-700 flex items-center gap-2.5">
-                    <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-                    <div className="min-w-0">
-                      <span className="font-bold text-slate-800 dark:text-white block truncate">
-                        Stempel Sekolah
-                      </span>
-                      <span className="text-[10px] text-amber-600 dark:text-amber-400">
-                        {schoolSettings?.stempelSekolah ? '✓ Stempel Resmi Aktif' : 'Tanpa Stempel Digital'}
-                      </span>
-                    </div>
-                  </div>
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-750 border border-slate-200 dark:border-slate-700 flex items-center gap-2.5">
+                          <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="font-bold text-slate-800 dark:text-white block truncate">
+                              Stempel {previewPrincipal.levelLabel}
+                            </span>
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                              {previewPrincipal.stamp ? '✓ Stempel Resmi Aktif' : 'Tanpa Stempel Digital'}
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

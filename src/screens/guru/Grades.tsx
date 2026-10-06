@@ -8,7 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
 import { syncAllClassAssignmentGrades } from '../../lib/gradeSync';
 import RaporPreviewModal, { RaporStudentInfo } from '../../components/RaporPreviewModal';
-import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants, getPrincipalForClass } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -440,34 +440,36 @@ export default function GradesGuru() {
     }
     const signatureY = finalY > 230 ? 20 : finalY + 20;
 
+    const principalInfo = getPrincipalForClass(selectedClass, schoolSettings);
+
     pdf.setFont("helvetica", "normal");
     pdf.text('Mengetahui,', 40, signatureY, { align: 'center' });
-    pdf.text('Kepala Sekolah', 40, signatureY + 6, { align: 'center' });
+    pdf.text(principalInfo.roleTitle, 40, signatureY + 6, { align: 'center' });
 
     // Bubuhkan Tanda Tangan Digital Kepala Sekolah
-    if (schoolSettings.tandaTanganKepalaSekolah) {
+    if (principalInfo.signature) {
       try {
-        pdf.addImage(schoolSettings.tandaTanganKepalaSekolah, 'PNG', 26, signatureY + 7, 28, 16);
+        pdf.addImage(principalInfo.signature, 'PNG', 26, signatureY + 7, 28, 16);
       } catch (err) {
         console.warn('Gagal menambahkan tanda tangan digital ke PDF:', err);
       }
     }
 
     // Bubuhkan Stempel Resmi Sekolah
-    if (schoolSettings.stempelSekolah) {
+    if (principalInfo.stamp) {
       try {
-        pdf.addImage(schoolSettings.stempelSekolah, 'PNG', 19, signatureY + 6, 22, 22);
+        pdf.addImage(principalInfo.stamp, 'PNG', 19, signatureY + 6, 22, 22);
       } catch (err) {
         console.warn('Gagal menambahkan stempel resmi ke PDF:', err);
       }
     }
     
     pdf.setFont("helvetica", "bold");
-    pdf.text(`${schoolSettings.namaKepalaSekolah || '________________________'}`, 40, signatureY + 25, { align: 'center' });
+    pdf.text(`${principalInfo.name || '________________________'}`, 40, signatureY + 25, { align: 'center' });
     pdf.setFont("helvetica", "normal");
     
-    if(schoolSettings.nipKepalaSekolah) {
-      pdf.text(`NIP. ${schoolSettings.nipKepalaSekolah}`, 40, signatureY + 30, { align: 'center' });
+    if (principalInfo.nip && principalInfo.nip !== '-') {
+      pdf.text(`NIP. ${principalInfo.nip}`, 40, signatureY + 30, { align: 'center' });
     } else {
       pdf.text(`NIP. __________________`, 40, signatureY + 30, { align: 'center' });
     }

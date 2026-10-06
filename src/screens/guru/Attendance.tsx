@@ -8,7 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
-import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants, getPrincipalForClass } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -327,32 +327,36 @@ export default function AttendanceGuru() {
       const pageWidth = pdf.internal.pageSize.getWidth(); // 297mm
       const pageHeight = pdf.internal.pageSize.getHeight(); // 210mm
       const margin = 10;
+      const availableWidth = pageWidth - (2 * margin); // 277mm
+
+      // Dapatkan pejabat yang berwenang (Kepala Madrasah MTs atau Kepala Sekolah SD)
+      const principalInfo = getPrincipalForClass(selectedClass, schoolSettings);
 
       // Header Kop Lembaga / Sekolah
       const namaSekolah = schoolSettings?.namaSekolah || userData?.schoolName || 'MADRASAH TSANAWIYAH / SEKOLAH';
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(13);
       pdf.setTextColor(30, 41, 59); // slate-800
-      pdf.text(namaSekolah.toUpperCase(), pageWidth / 2, 14, { align: 'center' });
+      pdf.text(namaSekolah.toUpperCase(), pageWidth / 2, 13, { align: 'center' });
 
       pdf.setFontSize(10.5);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(67, 56, 202); // indigo-700
-      pdf.text('REKAPITULASI PRESENSI / KEHADIRAN SISWA BULANAN', pageWidth / 2, 20, { align: 'center' });
+      pdf.text('REKAPITULASI PRESENSI / KEHADIRAN SISWA BULANAN', pageWidth / 2, 19, { align: 'center' });
 
       pdf.setFontSize(8.5);
       pdf.setFont("helvetica", "normal");
       pdf.setTextColor(71, 85, 105); // slate-600
-      const subheaderText = `Kelas: ${selectedClass}   •   Bulan: ${monthName} ${exportYear}   •   Tahun Ajaran: ${schoolSettings?.tahunAjaran || '2026/2027'}   •   Hari Efektif Presensi: ${recordedDates.length} Pertemuan`;
-      pdf.text(subheaderText, pageWidth / 2, 25.5, { align: 'center' });
+      const subheaderText = `Kelas: ${selectedClass}   •   Bulan: ${monthName} ${exportYear}   •   Tahun Ajaran: ${schoolSettings?.academicYear || schoolSettings?.tahunAjaran || '2026/2027'}   •   Hari Efektif Presensi: ${recordedDates.length} Hari`;
+      pdf.text(subheaderText, pageWidth / 2, 24.5, { align: 'center' });
 
-      // Garis Kop Ganda Resmi
+      // Garis Kop Ganda Resmi yang pas selebar tabel (dari x=10 sampai x=287)
       pdf.setDrawColor(67, 56, 202);
       pdf.setLineWidth(0.7);
-      pdf.line(margin, 28, pageWidth - margin, 28);
+      pdf.line(margin, 27, pageWidth - margin, 27);
       pdf.setDrawColor(203, 213, 225);
       pdf.setLineWidth(0.3);
-      pdf.line(margin, 29, pageWidth - margin, 29);
+      pdf.line(margin, 28, pageWidth - margin, 28);
 
       // 5. Header Kolom Tabel:
       // Hanya menyertakan tanggal yang ADA datanya (recordedDates)
@@ -436,6 +440,11 @@ export default function AttendanceGuru() {
         ];
       });
 
+      const totalPossibleEntries = studentList.length * recordedDates.length;
+      const overallHadirPct = totalPossibleEntries > 0
+        ? Math.round((grandTotalH / totalPossibleEntries) * 100) + '%'
+        : '0%';
+
       // Baris Rangkuman / Footer Tabel
       const footerRows = [
         [
@@ -447,7 +456,7 @@ export default function AttendanceGuru() {
           '',
           '',
           '',
-          ''
+          overallHadirPct
         ],
         [
           '',
@@ -484,31 +493,60 @@ export default function AttendanceGuru() {
         ]
       ];
 
-      // Penyesuaian Lebar Kolom secara Dinamis
+      // Penyesuaian Lebar Kolom secara Proporsional & Dinamis Menghabiskan 277mm (Tidak Menciut)
       const totalDateCols = recordedDates.length;
-      const baseFontSize = totalDateCols > 24 ? 6.2 : (totalDateCols > 16 ? 7 : 7.8);
-      const dateCellWidth = totalDateCols > 24 ? 5.2 : (totalDateCols > 16 ? 6.2 : 7.5);
+      const noColWidth = 8;
+      const nisnColWidth = 22;
+      const sumHWidth = 8;
+      const sumIWidth = 8;
+      const sumSWidth = 8;
+      const sumAWidth = 8;
+      const sumPctWidth = 12;
+      const fixedColsWidth = noColWidth + nisnColWidth + sumHWidth + sumIWidth + sumSWidth + sumAWidth + sumPctWidth; // 74mm
+
+      const remainingWidth = availableWidth - fixedColsWidth; // 203mm
+
+      let dateColWidth = 7;
+      let nameColWidth = 60;
+
+      if (totalDateCols <= 10) {
+        // Jumlah hari sedikit: berikan lebar nyaman untuk Nama Siswa dan kolom tanggal tidak menyusut/menciut
+        dateColWidth = Math.min(12, Math.max(9, Math.floor((remainingWidth - 75) / totalDateCols * 10) / 10));
+        nameColWidth = Number((remainingWidth - (dateColWidth * totalDateCols)).toFixed(2));
+      } else if (totalDateCols <= 20) {
+        // Jumlah hari sedang (11 - 20 hari)
+        nameColWidth = 58;
+        dateColWidth = Number(((remainingWidth - nameColWidth) / totalDateCols).toFixed(2));
+      } else {
+        // Jumlah hari banyak (21 - 31 hari)
+        nameColWidth = 50;
+        dateColWidth = Number(((remainingWidth - nameColWidth) / totalDateCols).toFixed(2));
+      }
+
+      const baseFontSize = totalDateCols > 24 ? 6.5 : (totalDateCols > 16 ? 7.2 : 7.8);
+      const cellPaddingY = totalDateCols > 24 ? 1.0 : (totalDateCols > 16 ? 1.2 : 1.4);
 
       const columnStylesConfig: Record<number, any> = {
-        0: { cellWidth: 7, halign: 'center' }, // No
-        1: { cellWidth: 18, halign: 'center' }, // NISN
-        2: { cellWidth: totalDateCols > 20 ? 36 : 44, halign: 'left' }, // Nama
+        0: { cellWidth: noColWidth, halign: 'center' }, // No
+        1: { cellWidth: nisnColWidth, halign: 'center' }, // NISN
+        2: { cellWidth: nameColWidth, halign: 'left' }, // Nama Siswa
       };
 
       for (let c = 0; c < totalDateCols; c++) {
-        columnStylesConfig[3 + c] = { cellWidth: dateCellWidth, halign: 'center' };
+        columnStylesConfig[3 + c] = { cellWidth: dateColWidth, halign: 'center' };
       }
 
       const summaryStartIdx = 3 + totalDateCols;
-      columnStylesConfig[summaryStartIdx] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // H
-      columnStylesConfig[summaryStartIdx + 1] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // I
-      columnStylesConfig[summaryStartIdx + 2] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // S
-      columnStylesConfig[summaryStartIdx + 3] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // A
-      columnStylesConfig[summaryStartIdx + 4] = { cellWidth: 10, halign: 'center', fontStyle: 'bold' }; // %
+      columnStylesConfig[summaryStartIdx] = { cellWidth: sumHWidth, halign: 'center', fontStyle: 'bold' }; // H
+      columnStylesConfig[summaryStartIdx + 1] = { cellWidth: sumIWidth, halign: 'center', fontStyle: 'bold' }; // I
+      columnStylesConfig[summaryStartIdx + 2] = { cellWidth: sumSWidth, halign: 'center', fontStyle: 'bold' }; // S
+      columnStylesConfig[summaryStartIdx + 3] = { cellWidth: sumAWidth, halign: 'center', fontStyle: 'bold' }; // A
+      columnStylesConfig[summaryStartIdx + 4] = { cellWidth: sumPctWidth, halign: 'center', fontStyle: 'bold' }; // %
 
       autoTable(pdf, {
-        startY: 32,
-        margin: { left: margin, right: margin, top: 32, bottom: 20 },
+        startY: 31,
+        tableWidth: availableWidth,
+        margin: { left: margin, right: margin, top: 31, bottom: 20 },
         head: head,
         body: [...body, ...footerRows],
         theme: 'grid',
@@ -519,13 +557,17 @@ export default function AttendanceGuru() {
           fontSize: baseFontSize,
           halign: 'center',
           valign: 'middle',
-          cellPadding: 1.2
+          cellPadding: { top: 1.5, bottom: 1.5, left: 0.5, right: 0.5 },
+          lineColor: [199, 210, 254],
+          lineWidth: 0.15
         },
         bodyStyles: {
           fontSize: baseFontSize,
-          cellPadding: 1.1,
+          cellPadding: { top: cellPaddingY, bottom: cellPaddingY, left: 0.7, right: 0.7 },
           valign: 'middle',
-          textColor: [30, 41, 59]
+          textColor: [30, 41, 59],
+          lineColor: [226, 232, 240],
+          lineWidth: 0.15
         },
         alternateRowStyles: {
           fillColor: [248, 250, 252] // Slate-50
@@ -537,6 +579,9 @@ export default function AttendanceGuru() {
             data.cell.styles.fillColor = [241, 245, 249]; // Slate-100
             data.cell.styles.fontStyle = 'bold';
             data.cell.styles.textColor = [15, 23, 42];
+            if (data.column.index === 2) {
+              data.cell.styles.halign = 'right';
+            }
             return;
           }
 
@@ -559,64 +604,73 @@ export default function AttendanceGuru() {
       });
 
       // 6. Keterangan & Tanda Tangan Resmi
-      let finalY = (pdf as any).lastAutoTable.finalY + 5;
+      let finalY = (pdf as any).lastAutoTable.finalY + 4;
       
-      if (finalY + 38 > pageHeight) {
+      if (finalY + 40 > pageHeight) {
         pdf.addPage();
-        finalY = 18;
+        finalY = 16;
       }
 
-      pdf.setFontSize(7);
+      pdf.setFontSize(7.2);
       pdf.setFont("helvetica", "normal");
       pdf.setTextColor(100, 116, 139);
       pdf.text(
-        'Catatan: H = Hadir  |  I = Izin  |  S = Sakit  |  A = Alpa  |  *Hanya hari efektif yang dicatat/disimpan guru yang dimasukkan ke tabel.',
+        'Catatan: H = Hadir  |  I = Izin  |  S = Sakit  |  A = Alpa  |  *Hanya hari efektif yang dicatat & disimpan oleh guru yang dimasukkan ke dalam rekap.',
         margin,
         finalY
       );
 
       const signY = finalY + 5;
+      const leftSignX = margin + 35;
+      const rightSignX = pageWidth - margin - 35;
 
-      // Tanda Tangan Kepala Sekolah (Kiri)
+      // Tanda Tangan Kepala Sekolah / Kepala Madrasah (Kiri)
       pdf.setTextColor(30, 41, 59);
       pdf.setFontSize(8.5);
       pdf.setFont("helvetica", "normal");
-      pdf.text('Mengetahui,', 45, signY, { align: 'center' });
-      pdf.text('Kepala Sekolah', 45, signY + 4.5, { align: 'center' });
+      pdf.text('Mengetahui,', leftSignX, signY, { align: 'center' });
+      pdf.text(principalInfo.roleTitle, leftSignX, signY + 4.5, { align: 'center' });
 
       // Stempel Sekolah jika ada
-      if (schoolSettings?.stempelSekolah) {
+      if (principalInfo.stamp) {
         try {
-          pdf.addImage(schoolSettings.stempelSekolah, 'PNG', 26, signY + 5, 20, 20);
+          pdf.addImage(principalInfo.stamp, 'PNG', leftSignX - 18, signY + 5, 20, 20);
         } catch (err) {
           console.warn('Stempel tidak dapat dimuat ke PDF:', err);
         }
       }
 
       // TTD Kepala Sekolah jika ada
-      if (schoolSettings?.tandaTanganKepalaSekolah) {
+      if (principalInfo.signature) {
         try {
-          pdf.addImage(schoolSettings.tandaTanganKepalaSekolah, 'PNG', 36, signY + 6, 20, 12);
+          pdf.addImage(principalInfo.signature, 'PNG', leftSignX - 9, signY + 6, 22, 13);
         } catch (err) {
           console.warn('TTD tidak dapat dimuat ke PDF:', err);
         }
       }
 
       pdf.setFont("helvetica", "bold");
-      pdf.text(schoolSettings?.namaKepalaSekolah || '________________________', 45, signY + 23, { align: 'center' });
+      pdf.text(principalInfo.name || '________________________', leftSignX, signY + 23, { align: 'center' });
       pdf.setFont("helvetica", "normal");
-      pdf.text(schoolSettings?.nipKepalaSekolah ? `NIP. ${schoolSettings.nipKepalaSekolah}` : 'NIP. -', 45, signY + 27, { align: 'center' });
+      pdf.text(
+        principalInfo.nip && principalInfo.nip !== '-'
+          ? `NIP. ${principalInfo.nip}`
+          : 'NIP. -',
+        leftSignX,
+        signY + 27,
+        { align: 'center' }
+      );
 
       // Tanda Tangan Wali Kelas (Kanan)
       const todayFormatted = format(new Date(), 'dd MMMM yyyy', { locale: id });
-      pdf.text(`Kotayasa, ${todayFormatted}`, pageWidth - 45, signY, { align: 'center' });
-      pdf.text('Wali Kelas', pageWidth - 45, signY + 4.5, { align: 'center' });
+      pdf.text(`Kotayasa, ${todayFormatted}`, rightSignX, signY, { align: 'center' });
+      pdf.text(`Wali Kelas ${selectedClass}`, rightSignX, signY + 4.5, { align: 'center' });
 
       pdf.setFont("helvetica", "bold");
       const waliName = userData?.name || 'Wali Kelas';
-      pdf.text(waliName, pageWidth - 45, signY + 23, { align: 'center' });
+      pdf.text(waliName, rightSignX, signY + 23, { align: 'center' });
       pdf.setFont("helvetica", "normal");
-      pdf.text('NIP. -', pageWidth - 45, signY + 27, { align: 'center' });
+      pdf.text('NIP. -', rightSignX, signY + 27, { align: 'center' });
 
       const cleanFileName = `Rekap_Presensi_${selectedClass.replace(/\s+/g, '_')}_${monthName}_${exportYear}.pdf`;
       pdf.save(cleanFileName);

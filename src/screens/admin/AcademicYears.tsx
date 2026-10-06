@@ -36,6 +36,10 @@ export default function AcademicYears() {
     namaSekolah: 'SD / MTs CERDAS Kotayasa',
     namaKepalaSekolah: '',
     nipKepalaSekolah: '',
+    namaKepalaSekolahSD: '',
+    nipKepalaSekolahSD: '',
+    namaKepalaSekolahMTS: '',
+    nipKepalaSekolahMTS: '',
     alamatSekolah: 'Jl. Raya Pendidikan No. 1, Kotayasa, Banyumas',
     nomorTelepon: '(0281) 684210',
     emailSekolah: 'admin@sekolah.sch.id',
@@ -43,10 +47,16 @@ export default function AcademicYears() {
     semester: 'Ganjil',
     kkmGlobal: '75',
     tandaTanganKepalaSekolah: '',
+    tandaTanganKepalaSekolahSD: '',
+    tandaTanganKepalaSekolahMTS: '',
     stempelSekolah: '',
+    stempelSekolahSD: '',
+    stempelSekolahMTS: '',
     oneSignalAppId: '',
     oneSignalRestKey: ''
   });
+
+  const [activeTtdLevel, setActiveTtdLevel] = useState<'SD' | 'MTS'>('SD');
 
   const [kkmMap, setKkmMap] = useState<Record<string, number>>(DEFAULT_MAPEL_KKM);
   const [newMapelName, setNewMapelName] = useState('');
@@ -70,7 +80,18 @@ export default function AcademicYears() {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          setSettings((prev) => ({ ...prev, ...data }));
+          setSettings((prev) => ({
+            ...prev,
+            ...data,
+            namaKepalaSekolahSD: data.namaKepalaSekolahSD ?? (data.namaKepalaSekolah || ''),
+            nipKepalaSekolahSD: data.nipKepalaSekolahSD ?? (data.nipKepalaSekolah || ''),
+            tandaTanganKepalaSekolahSD: data.tandaTanganKepalaSekolahSD ?? (data.tandaTanganKepalaSekolah || ''),
+            stempelSekolahSD: data.stempelSekolahSD ?? (data.stempelSekolah || ''),
+            namaKepalaSekolahMTS: data.namaKepalaSekolahMTS ?? '',
+            nipKepalaSekolahMTS: data.nipKepalaSekolahMTS ?? '',
+            tandaTanganKepalaSekolahMTS: data.tandaTanganKepalaSekolahMTS ?? '',
+            stempelSekolahMTS: data.stempelSekolahMTS ?? ''
+          }));
           if (data.kkmMap && typeof data.kkmMap === 'object') {
             setKkmMap({ ...DEFAULT_MAPEL_KKM, ...data.kkmMap });
           }
@@ -90,27 +111,47 @@ export default function AcademicYears() {
     try {
       const dataToSave = {
         ...settings,
+        namaKepalaSekolah: settings.namaKepalaSekolahSD || settings.namaKepalaSekolah,
+        nipKepalaSekolah: settings.nipKepalaSekolahSD || settings.nipKepalaSekolah,
+        namaKepalaSekolahSD: settings.namaKepalaSekolahSD,
+        nipKepalaSekolahSD: settings.nipKepalaSekolahSD,
+        namaKepalaSekolahMTS: settings.namaKepalaSekolahMTS,
+        nipKepalaSekolahMTS: settings.nipKepalaSekolahMTS,
+        tandaTanganKepalaSekolah: settings.tandaTanganKepalaSekolahSD || settings.tandaTanganKepalaSekolah,
+        tandaTanganKepalaSekolahSD: settings.tandaTanganKepalaSekolahSD,
+        tandaTanganKepalaSekolahMTS: settings.tandaTanganKepalaSekolahMTS,
+        stempelSekolah: settings.stempelSekolahSD || settings.stempelSekolah,
+        stempelSekolahSD: settings.stempelSekolahSD,
+        stempelSekolahMTS: settings.stempelSekolahMTS,
         kkmMap,
         updatedAt: new Date().toISOString()
       };
 
       await setDoc(doc(db, 'pengaturan_sekolah', 'utama'), dataToSave, { merge: true });
 
-      // Sinkronkan ke settings/school untuk modul ajar/RPP
+      // Sinkronkan ke settings/school untuk modul ajar/RPP & Bank Soal
       await setDoc(
         doc(db, 'settings', 'school'),
         {
           schoolName: settings.namaSekolah,
           namaSekolah: settings.namaSekolah,
-          kepalaSekolah: settings.namaKepalaSekolah,
-          nipKepalaSekolah: settings.nipKepalaSekolah,
-          tandaTanganKepalaSekolah: settings.tandaTanganKepalaSekolah,
-          stempelSekolah: settings.stempelSekolah
+          kepalaSekolah: settings.namaKepalaSekolahSD || settings.namaKepalaSekolah,
+          nipKepalaSekolah: settings.nipKepalaSekolahSD || settings.nipKepalaSekolah,
+          namaKepalaSekolahSD: settings.namaKepalaSekolahSD,
+          nipKepalaSekolahSD: settings.nipKepalaSekolahSD,
+          namaKepalaSekolahMTS: settings.namaKepalaSekolahMTS,
+          nipKepalaSekolahMTS: settings.nipKepalaSekolahMTS,
+          tandaTanganKepalaSekolah: settings.tandaTanganKepalaSekolahSD || settings.tandaTanganKepalaSekolah,
+          tandaTanganKepalaSekolahSD: settings.tandaTanganKepalaSekolahSD,
+          tandaTanganKepalaSekolahMTS: settings.tandaTanganKepalaSekolahMTS,
+          stempelSekolah: settings.stempelSekolahSD || settings.stempelSekolah,
+          stempelSekolahSD: settings.stempelSekolahSD,
+          stempelSekolahMTS: settings.stempelSekolahMTS
         },
         { merge: true }
       );
 
-      showToast('Pengaturan Sekolah & Tanda Tangan berhasil disimpan!', 'success');
+      showToast('Pengaturan Sekolah, Kepala SD & MTs berhasil disimpan!', 'success');
     } catch (error: any) {
       console.error(error);
       showToast('Gagal menyimpan pengaturan: ' + (error.message || 'Kesalahan sistem'), 'error');
@@ -119,57 +160,119 @@ export default function AcademicYears() {
     }
   };
 
-  // Simpan tanda tangan digital khusus
-  const handleSaveSignature = async (sigBase64: string | null) => {
+  // Simpan tanda tangan digital khusus per jenjang (SD / MTs)
+  const handleSaveSignatureForLevel = async (level: 'SD' | 'MTS', sigBase64: string | null) => {
     try {
-      const updated = { ...settings, tandaTanganKepalaSekolah: sigBase64 || '' };
-      setSettings(updated);
-      await setDoc(
-        doc(db, 'pengaturan_sekolah', 'utama'),
-        { tandaTanganKepalaSekolah: sigBase64 || '' },
-        { merge: true }
-      );
-      await setDoc(
-        doc(db, 'settings', 'school'),
-        { tandaTanganKepalaSekolah: sigBase64 || '' },
-        { merge: true }
-      );
-      showToast(
-        sigBase64
-          ? 'Tanda tangan digital Kepala Sekolah berhasil disimpan & diaktifkan!'
-          : 'Tanda tangan digital dihapus.',
-        'success'
-      );
-    } catch (err) {
+      if (level === 'MTS') {
+        const updated = { ...settings, tandaTanganKepalaSekolahMTS: sigBase64 || '' };
+        setSettings(updated);
+        await setDoc(
+          doc(db, 'pengaturan_sekolah', 'utama'),
+          { tandaTanganKepalaSekolahMTS: sigBase64 || '' },
+          { merge: true }
+        );
+        await setDoc(
+          doc(db, 'settings', 'school'),
+          { tandaTanganKepalaSekolahMTS: sigBase64 || '' },
+          { merge: true }
+        );
+        showToast(
+          sigBase64
+            ? 'Tanda tangan digital Kepala Madrasah MTs berhasil disimpan!'
+            : 'Tanda tangan MTs dihapus.',
+          'success'
+        );
+      } else {
+        const updated = {
+          ...settings,
+          tandaTanganKepalaSekolahSD: sigBase64 || '',
+          tandaTanganKepalaSekolah: sigBase64 || settings.tandaTanganKepalaSekolah || ''
+        };
+        setSettings(updated);
+        await setDoc(
+          doc(db, 'pengaturan_sekolah', 'utama'),
+          {
+            tandaTanganKepalaSekolahSD: sigBase64 || '',
+            tandaTanganKepalaSekolah: sigBase64 || ''
+          },
+          { merge: true }
+        );
+        await setDoc(
+          doc(db, 'settings', 'school'),
+          {
+            tandaTanganKepalaSekolahSD: sigBase64 || '',
+            tandaTanganKepalaSekolah: sigBase64 || ''
+          },
+          { merge: true }
+        );
+        showToast(
+          sigBase64
+            ? 'Tanda tangan digital Kepala Sekolah SD berhasil disimpan!'
+            : 'Tanda tangan SD dihapus.',
+          'success'
+        );
+      }
+    } catch (err: any) {
       console.error(err);
-      showToast('Gagal menyimpan tanda tangan digital.', 'error');
+      showToast('Gagal menyimpan tanda tangan digital: ' + err.message, 'error');
     }
   };
 
-  // Simpan stempel sekolah khusus
-  const handleSaveStamp = async (stampBase64: string | null) => {
+  // Simpan stempel sekolah khusus per jenjang (SD / MTs)
+  const handleSaveStampForLevel = async (level: 'SD' | 'MTS', stampBase64: string | null) => {
     try {
-      const updated = { ...settings, stempelSekolah: stampBase64 || '' };
-      setSettings(updated);
-      await setDoc(
-        doc(db, 'pengaturan_sekolah', 'utama'),
-        { stempelSekolah: stampBase64 || '' },
-        { merge: true }
-      );
-      await setDoc(
-        doc(db, 'settings', 'school'),
-        { stempelSekolah: stampBase64 || '' },
-        { merge: true }
-      );
-      showToast(
-        stampBase64
-          ? 'Stempel resmi sekolah berhasil disimpan & diaktifkan!'
-          : 'Stempel resmi dihapus.',
-        'success'
-      );
-    } catch (err) {
+      if (level === 'MTS') {
+        const updated = { ...settings, stempelSekolahMTS: stampBase64 || '' };
+        setSettings(updated);
+        await setDoc(
+          doc(db, 'pengaturan_sekolah', 'utama'),
+          { stempelSekolahMTS: stampBase64 || '' },
+          { merge: true }
+        );
+        await setDoc(
+          doc(db, 'settings', 'school'),
+          { stempelSekolahMTS: stampBase64 || '' },
+          { merge: true }
+        );
+        showToast(
+          stampBase64
+            ? 'Stempel resmi MTs berhasil disimpan!'
+            : 'Stempel resmi MTs dihapus.',
+          'success'
+        );
+      } else {
+        const updated = {
+          ...settings,
+          stempelSekolahSD: stampBase64 || '',
+          stempelSekolah: stampBase64 || settings.stempelSekolah || ''
+        };
+        setSettings(updated);
+        await setDoc(
+          doc(db, 'pengaturan_sekolah', 'utama'),
+          {
+            stempelSekolahSD: stampBase64 || '',
+            stempelSekolah: stampBase64 || ''
+          },
+          { merge: true }
+        );
+        await setDoc(
+          doc(db, 'settings', 'school'),
+          {
+            stempelSekolahSD: stampBase64 || '',
+            stempelSekolah: stampBase64 || ''
+          },
+          { merge: true }
+        );
+        showToast(
+          stampBase64
+            ? 'Stempel resmi SD berhasil disimpan!'
+            : 'Stempel resmi SD dihapus.',
+          'success'
+        );
+      }
+    } catch (err: any) {
       console.error(err);
-      showToast('Gagal menyimpan stempel resmi.', 'error');
+      showToast('Gagal menyimpan stempel resmi: ' + err.message, 'error');
     }
   };
 
@@ -335,31 +438,116 @@ export default function AcademicYears() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Nama Kepala Sekolah <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={settings.namaKepalaSekolah}
-                  onChange={(e) => setSettings({ ...settings, namaKepalaSekolah: e.target.value })}
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm font-medium text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Nama Lengkap & Gelar (misal: H. Ahmad Fauzi, M.Pd.)"
-                />
-              </div>
+              {/* Pejabat Kepala Sekolah SD & Kepala Madrasah MTs */}
+              <div className="md:col-span-2 pt-1">
+                <div className="bg-gradient-to-r from-indigo-50/80 via-slate-50 to-blue-50/80 dark:from-slate-800 dark:via-slate-800/90 dark:to-slate-800/70 border border-indigo-100 dark:border-slate-700 rounded-3xl p-5 sm:p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-100 dark:border-slate-700/80 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                        <span>🏛️</span>
+                        <span>Atur Kepala Sekolah SD & Kepala Madrasah MTs (Berbeda Pejabat)</span>
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Tentukan nama & NIP pejabat penandatangan secara terpisah untuk tingkat SD (Kelas 1–6) dan tingkat MTs (Kelas 7–9).
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 self-start sm:self-auto">
+                      Otomatis Berbeda di Dokumen
+                    </span>
+                  </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  NIP Kepala Sekolah
-                </label>
-                <input
-                  type="text"
-                  value={settings.nipKepalaSekolah}
-                  onChange={(e) => setSettings({ ...settings, nipKepalaSekolah: e.target.value })}
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm font-medium text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Nomor Induk Pegawai (atau kosongkan jika non-PNS)"
-                />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
+                    {/* Kepala Sekolah SD */}
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                          1. Kepala Sekolah SD (Kelas 1 - 6)
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                          Jenjang SD
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Nama Kepala Sekolah SD <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={settings.namaKepalaSekolahSD}
+                          onChange={(e) => setSettings({ 
+                            ...settings, 
+                            namaKepalaSekolahSD: e.target.value,
+                            namaKepalaSekolah: settings.namaKepalaSekolah || e.target.value
+                          })}
+                          placeholder="Contoh: Cikun, S.Pd."
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          NIP Kepala Sekolah SD
+                        </label>
+                        <input
+                          type="text"
+                          value={settings.nipKepalaSekolahSD}
+                          onChange={(e) => setSettings({ 
+                            ...settings, 
+                            nipKepalaSekolahSD: e.target.value,
+                            nipKepalaSekolah: settings.nipKepalaSekolah || e.target.value
+                          })}
+                          placeholder="Nomor Induk Pegawai atau -"
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Kepala Madrasah MTs */}
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                          2. Kepala Madrasah MTs (Kelas 7 - 9)
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                          Jenjang MTs
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Nama Kepala Madrasah MTs <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={settings.namaKepalaSekolahMTS}
+                          onChange={(e) => setSettings({ ...settings, namaKepalaSekolahMTS: e.target.value })}
+                          placeholder="Contoh: Isma'il Hanafi, S.Pd."
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          NIP Kepala Madrasah MTs
+                        </label>
+                        <input
+                          type="text"
+                          value={settings.nipKepalaSekolahMTS}
+                          onChange={(e) => setSettings({ ...settings, nipKepalaSekolahMTS: e.target.value })}
+                          placeholder="Nomor Induk Pegawai atau -"
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                    💡 <b>Otomatisasi Sistem:</b> Dokumen presensi bulanan, rapor nilai, dan administrasi kelas 1–6 SD otomatis membubuhkan nama & tanda tangan Kepala Sekolah SD. Sedangkan kelas 7–9 MTs otomatis membubuhkan Kepala Madrasah MTs.
+                  </p>
+                </div>
               </div>
 
               <div className="md:col-span-2">
@@ -454,22 +642,94 @@ export default function AcademicYears() {
           <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl p-4 text-xs text-indigo-900 dark:text-indigo-200 flex items-start gap-3">
             <span className="text-xl">✍️</span>
             <div>
-              <p className="font-bold mb-0.5">Pembubuhan Otomatis Berfungsi Penuh</p>
+              <p className="font-bold mb-0.5">Pembubuhan Otomatis Berfungsi Penuh Sesuai Jenjang</p>
               <p>
-                Tanda tangan digital dan stempel resmi yang Anda simpan di sini akan <b>otomatis dibubuhkan</b> pada seluruh dokumen administrasi yang dihasilkan sistem CERDAS: <b>Rapor Siswa, Rekap Presensi Harian, Modul Ajar/RPP, dan Surat Pengumuman Resmi PDF</b>.
+                Tanda tangan digital dan stempel resmi yang disimpan di sini otomatis dibubuhkan pada dokumen administrasi: <b>Rapor Siswa, Rekap Presensi Bulanan, Modul Ajar/RPP, dan Dokumen Resmi PDF</b> sesuai jenjang kelas masing-masing (SD vs MTs).
               </p>
             </div>
           </div>
 
-          <DigitalSignatureUpload
-            signatureUrl={settings.tandaTanganKepalaSekolah}
-            stampUrl={settings.stempelSekolah}
-            principalName={settings.namaKepalaSekolah || 'Kepala Sekolah'}
-            principalNip={settings.nipKepalaSekolah || '-'}
-            schoolName={settings.namaSekolah || 'Satuan Pendidikan'}
-            onSaveSignature={handleSaveSignature}
-            onSaveStamp={handleSaveStamp}
-          />
+          {/* Switcher SD vs MTs */}
+          <div className="flex items-center gap-3 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl max-w-md">
+            <button
+              type="button"
+              onClick={() => setActiveTtdLevel('SD')}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all text-center cursor-pointer ${
+                activeTtdLevel === 'SD'
+                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              🏫 Kepala Sekolah SD (Kelas 1–6)
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTtdLevel('MTS')}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all text-center cursor-pointer ${
+                activeTtdLevel === 'MTS'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              🕌 Kepala Madrasah MTs (Kelas 7–9)
+            </button>
+          </div>
+
+          {activeTtdLevel === 'SD' ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-white">
+                    Tanda Tangan & Stempel: Kepala Sekolah SD (Kelas 1 - 6)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Pejabat: <span className="font-semibold text-slate-700 dark:text-slate-300">{settings.namaKepalaSekolahSD || settings.namaKepalaSekolah || 'Belum diisi'}</span>
+                  </p>
+                </div>
+                {(settings.tandaTanganKepalaSekolahSD || settings.tandaTanganKepalaSekolah) && (
+                  <span className="text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+                    ✓ TTD SD Aktif
+                  </span>
+                )}
+              </div>
+              <DigitalSignatureUpload
+                signatureUrl={settings.tandaTanganKepalaSekolahSD || settings.tandaTanganKepalaSekolah}
+                stampUrl={settings.stempelSekolahSD || settings.stempelSekolah}
+                principalName={settings.namaKepalaSekolahSD || settings.namaKepalaSekolah || 'Kepala Sekolah SD'}
+                principalNip={settings.nipKepalaSekolahSD || settings.nipKepalaSekolah || '-'}
+                schoolName={`${settings.namaSekolah || 'Satuan Pendidikan'} (SD)`}
+                onSaveSignature={(sig) => handleSaveSignatureForLevel('SD', sig)}
+                onSaveStamp={(stamp) => handleSaveStampForLevel('SD', stamp)}
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-white">
+                    Tanda Tangan & Stempel: Kepala Madrasah MTs (Kelas 7 - 9)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Pejabat: <span className="font-semibold text-slate-700 dark:text-slate-300">{settings.namaKepalaSekolahMTS || 'Belum diisi'}</span>
+                  </p>
+                </div>
+                {settings.tandaTanganKepalaSekolahMTS && (
+                  <span className="text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-3 py-1 rounded-full border border-blue-200 dark:border-blue-800">
+                    ✓ TTD MTs Aktif
+                  </span>
+                )}
+              </div>
+              <DigitalSignatureUpload
+                signatureUrl={settings.tandaTanganKepalaSekolahMTS}
+                stampUrl={settings.stempelSekolahMTS || settings.stempelSekolah}
+                principalName={settings.namaKepalaSekolahMTS || 'Kepala Madrasah MTs'}
+                principalNip={settings.nipKepalaSekolahMTS || '-'}
+                schoolName={`${settings.namaSekolah || 'Satuan Pendidikan'} (MTs)`}
+                onSaveSignature={(sig) => handleSaveSignatureForLevel('MTS', sig)}
+                onSaveStamp={(stamp) => handleSaveStampForLevel('MTS', stamp)}
+              />
+            </div>
+          )}
         </div>
       )}
 
