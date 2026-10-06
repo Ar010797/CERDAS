@@ -22,6 +22,7 @@ import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import ScheduleWidget from '../../components/ScheduleWidget';
 import CalendarWidget from '../../components/CalendarWidget';
+import { getClassVariants } from '../../lib/schoolClasses';
 
 export default function GuruDashboard() {
   const { userData } = useAuth();
@@ -45,17 +46,26 @@ export default function GuruDashboard() {
 
   useEffect(() => {
     // 1. Siswa di kelas yang diampu
-    const qStudents = query(collection(db, 'students'), where('classId', '==', assignedClass));
+    const variants = getClassVariants(assignedClass);
+    const qStudents = variants.length === 1
+      ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+      : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [assignedClass]));
     const unsubStudents = onSnapshot(qStudents, (snap) => {
       setStudentCount(snap.size);
     }, (err) => console.warn('unsubStudents error:', err));
 
     // 2. Absensi hari ini
-    const qAtt = query(
-      collection(db, 'attendance'),
-      where('classId', '==', assignedClass),
-      where('date', '==', todayStr)
-    );
+    const qAtt = variants.length === 1
+      ? query(
+          collection(db, 'attendance'),
+          where('classId', '==', variants[0]),
+          where('date', '==', todayStr)
+        )
+      : query(
+          collection(db, 'attendance'),
+          where('classId', 'in', variants.length > 0 ? variants : [assignedClass]),
+          where('date', '==', todayStr)
+        );
     const unsubAtt = onSnapshot(qAtt, (snap) => {
       let hadir = 0;
       let izin = 0;

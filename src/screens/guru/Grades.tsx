@@ -8,7 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
 import { syncAllClassAssignmentGrades } from '../../lib/gradeSync';
 import RaporPreviewModal, { RaporStudentInfo } from '../../components/RaporPreviewModal';
-import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -98,7 +98,10 @@ export default function GradesGuru() {
     setLoading(true);
     
     // Listen to Students
-    const qStudents = query(collection(db, 'students'), where('classId', '==', selectedClass));
+    const variants = getClassVariants(selectedClass);
+    const qStudents = variants.length === 1
+      ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+      : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
     const unsubStudents = onSnapshot(qStudents, (snap) => {
       const studentsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
       studentsData.sort((a, b) => (parseInt(a.absen_number) || 0) - (parseInt(b.absen_number) || 0));

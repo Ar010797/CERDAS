@@ -124,24 +124,27 @@ export default function ClassSelectWithCustom({
           </optgroup>
 
           {/* Group 2: Kelas 7 - 9 (A, B, C) */}
-          <optgroup label="Tingkat MTs / SMP (Kelas 7 - 9 dengan Pilihan A, B, C)">
+          <optgroup label="Tingkat MTs / SMP (Kelas 7 - 9)">
+            <option value="Kelas 7 MTs">Kelas 7 MTs</option>
+            <option value="Kelas 7 MTs A">Kelas 7 MTs A</option>
+            <option value="Kelas 7 MTs B">Kelas 7 MTs B</option>
             <option value="Kelas 7 A">Kelas 7 A</option>
             <option value="Kelas 7 B">Kelas 7 B</option>
             <option value="Kelas 7 C">Kelas 7 C</option>
-            <option value="Kelas 7 MTs A">Kelas 7 MTs A</option>
-            <option value="Kelas 7 MTs B">Kelas 7 MTs B</option>
             <option value="Kelas 7">Kelas 7 (Umum)</option>
+            <option value="Kelas 8 MTs">Kelas 8 MTs</option>
+            <option value="Kelas 8 MTs A">Kelas 8 MTs A</option>
+            <option value="Kelas 8 MTs B">Kelas 8 MTs B</option>
             <option value="Kelas 8 A">Kelas 8 A</option>
             <option value="Kelas 8 B">Kelas 8 B</option>
             <option value="Kelas 8 C">Kelas 8 C</option>
-            <option value="Kelas 8 MTs A">Kelas 8 MTs A</option>
-            <option value="Kelas 8 MTs B">Kelas 8 MTs B</option>
             <option value="Kelas 8">Kelas 8 (Umum)</option>
+            <option value="Kelas 9 MTs">Kelas 9 MTs</option>
+            <option value="Kelas 9 MTs A">Kelas 9 MTs A</option>
+            <option value="Kelas 9 MTs B">Kelas 9 MTs B</option>
             <option value="Kelas 9 A">Kelas 9 A</option>
             <option value="Kelas 9 B">Kelas 9 B</option>
             <option value="Kelas 9 C">Kelas 9 C</option>
-            <option value="Kelas 9 MTs A">Kelas 9 MTs A</option>
-            <option value="Kelas 9 MTs B">Kelas 9 MTs B</option>
             <option value="Kelas 9">Kelas 9 (Umum)</option>
           </optgroup>
 

@@ -212,6 +212,68 @@ export function normalizeClassName(raw?: string): string {
 }
 
 /**
+ * Dapatkan semua variasi penamaan kelas yang setara/ekuivalen
+ * Berguna agar filter Firestore query dapat mencocokkan 'Kelas 7' dan 'Kelas 7 MTs',
+ * 'Kelas 7 A' dan 'Kelas 7 MTs A', dsb.
+ */
+export function getClassVariants(className?: string): string[] {
+  if (!className || typeof className !== 'string') return [];
+  const clean = className.trim();
+  if (!clean || clean === 'Semua Kelas') return [];
+
+  const variants = new Set<string>();
+  variants.add(clean);
+
+  // Jika format MTs (7, 8, 9)
+  const mtsMatch = clean.match(/^(?:kelas\s*)?([789]|vii|viii|ix)\s*[\-_]?\s*(?:mts|smp)?\s*([a-z])?$/i);
+  if (mtsMatch) {
+    const romanMap: Record<string, string> = { 'vii': '7', 'viii': '8', 'ix': '9' };
+    const num = romanMap[mtsMatch[1].toLowerCase()] || mtsMatch[1];
+    const sub = (mtsMatch[2] || '').toUpperCase();
+
+    if (sub) {
+      variants.add(`Kelas ${num} MTs ${sub}`);
+      variants.add(`Kelas ${num} ${sub}`);
+      variants.add(`${num} MTs ${sub}`);
+      variants.add(`${num} ${sub}`);
+    } else {
+      variants.add(`Kelas ${num} MTs`);
+      variants.add(`Kelas ${num}`);
+      variants.add(`${num} MTs`);
+      variants.add(`${num}`);
+    }
+  }
+
+  // Jika format SD (1-6)
+  const sdMatch = clean.match(/^(?:kelas\s*)?([1-6]|vi|iv|v|iii|ii|i)\s*[\-_]?\s*([a-z])?$/i);
+  if (sdMatch) {
+    const romanMap: Record<string, string> = { 'i': '1', 'ii': '2', 'iii': '3', 'iv': '4', 'v': '5', 'vi': '6' };
+    const num = romanMap[sdMatch[1].toLowerCase()] || sdMatch[1];
+    const sub = (sdMatch[2] || '').toUpperCase();
+    if (sub) {
+      variants.add(`Kelas ${num} ${sub}`);
+      variants.add(`${num} ${sub}`);
+    } else {
+      variants.add(`Kelas ${num}`);
+      variants.add(`${num}`);
+    }
+  }
+
+  return Array.from(variants);
+}
+
+/**
+ * Periksa apakah dua string kelas merujuk pada kelas yang sama (mencakup varian MTs)
+ */
+export function isClassMatch(classA?: string, classB?: string): boolean {
+  if (!classA || !classB) return false;
+  if (classA.trim().toLowerCase() === classB.trim().toLowerCase()) return true;
+  const variantsA = getClassVariants(classA);
+  const variantsB = getClassVariants(classB);
+  return variantsA.some(v => variantsB.includes(v));
+}
+
+/**
  * Cek apakah kelas siswa cocok dengan target kelas pengumuman/pemberitahuan
  * Mendukung multiple class, array, maupun string 'Semua Kelas'
  * - Jika target adalah 'Semua Kelas', 'Semua', 'Umum' -> Semua kelas cocok

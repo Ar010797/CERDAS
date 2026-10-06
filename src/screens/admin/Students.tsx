@@ -4,7 +4,7 @@ import { db } from '../../lib/firebase';
 import { Upload, Plus, Trash2, Search, FileSpreadsheet, Filter, Edit2, X, FileDown, AlertTriangle, CheckCircle, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../contexts/AuthContext';
-import { normalizeClassName, CLASS_GROUPS, POPULAR_CLASSES, ALL_AVAILABLE_CLASSES } from '../../lib/schoolClasses';
+import { normalizeClassName, CLASS_GROUPS, POPULAR_CLASSES, ALL_AVAILABLE_CLASSES, getClassVariants } from '../../lib/schoolClasses';
 import ClassSelectWithCustom from '../../components/ClassSelectWithCustom';
 
 interface Student {
@@ -102,7 +102,10 @@ export default function StudentsAdmin() {
     let q = collection(db, 'students') as any;
     
     if (selectedClass !== 'Semua Kelas') {
-      q = query(collection(db, 'students'), where('classId', '==', selectedClass));
+      const variants = getClassVariants(selectedClass);
+      q = variants.length === 1
+        ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+        : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
     }
 
     const unsubscribe = onSnapshot(q, (snap: any) => {

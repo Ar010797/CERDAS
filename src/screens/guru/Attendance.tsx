@@ -1,25 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, writeBatch, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch, query, where, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Save, Calendar, FileDown, Filter, MessageSquare, CheckCircle2, AlertCircle, Bell, Users, Clock, Share2, Copy, Check, CheckCheck, Send } from 'lucide-react';
+import { Save, Calendar, FileDown, Filter, MessageSquare, CheckCircle2, AlertCircle, Bell, Users, Clock, Share2, Copy, Check, CheckCheck, Send, Printer, FileText, Loader2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
-import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
   nisn: string;
   name: string;
+  absen_number?: string;
   parentPhone?: string;
 }
 
 type AttendanceStatus = 'Hadir' | 'Izin' | 'Sakit' | 'Alpa';
 
 const CLASSES_LIST = ALL_AVAILABLE_CLASSES;
+
+const MONTHS_LIST = [
+  { value: '01', name: 'Januari' },
+  { value: '02', name: 'Februari' },
+  { value: '03', name: 'Maret' },
+  { value: '04', name: 'April' },
+  { value: '05', name: 'Mei' },
+  { value: '06', name: 'Juni' },
+  { value: '07', name: 'Juli' },
+  { value: '08', name: 'Agustus' },
+  { value: '09', name: 'September' },
+  { value: '10', name: 'Oktober' },
+  { value: '11', name: 'November' },
+  { value: '12', name: 'Desember' },
+];
 
 export default function AttendanceGuru() {
   const { userData } = useAuth();
@@ -36,6 +52,23 @@ export default function AttendanceGuru() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isWaBroadcastModalOpen, setIsWaBroadcastModalOpen] = useState(false);
   const [copiedWa, setCopiedWa] = useState(false);
+
+  // Modal Cetak Rekap Bulanan
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportMonth, setExportMonth] = useState<string>(format(new Date(), 'MM'));
+  const [exportYear, setExportYear] = useState<string>(format(new Date(), 'yyyy'));
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Pengaturan Sekolah untuk Kop & Tanda Tangan PDF
+  const [schoolSettings, setSchoolSettings] = useState<any>({
+    namaSekolah: 'SI Miftahussalam',
+    namaKepalaSekolah: '',
+    nipKepalaSekolah: '',
+    tandaTanganKepalaSekolah: '',
+    stempelSekolah: '',
+    tahunAjaran: '2026/2027'
+  });
+
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayDisplay = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id });
 
@@ -44,23 +77,48 @@ export default function AttendanceGuru() {
     setTimeout(() => setToast(null), 4500);
   };
 
+  // Realtime listener pengaturan sekolah
+  useEffect(() => {
+    const unsubSchool = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (docSnap) => {
+      if (docSnap.exists()) {
+        setSchoolSettings(docSnap.data());
+      }
+    });
+    return () => unsubSchool();
+  }, []);
+
   useEffect(() => {
     const fetchStudentsAndAttendance = async () => {
       setLoading(true);
       try {
-        const qStudents = query(collection(db, 'students'), where('classId', '==', selectedClass));
+        const variants = getClassVariants(selectedClass);
+        const qStudents = variants.length === 1
+          ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+          : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
+        
         const snap = await getDocs(qStudents);
         const studentsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        // Sort students alphabetically
-        studentsData.sort((a, b) => a.name.localeCompare(b.name));
+        // Urutkan nomor absen lalu alfabetis
+        studentsData.sort((a, b) => {
+          const numA = parseInt(a.absen_number || '999', 10);
+          const numB = parseInt(b.absen_number || '999', 10);
+          if (numA !== numB) return numA - numB;
+          return a.name.localeCompare(b.name);
+        });
         setStudents(studentsData);
         
         // Fetch existing attendance for today if already saved
-        const qAttToday = query(
-          collection(db, 'attendance'),
-          where('classId', '==', selectedClass),
-          where('date', '==', todayStr)
-        );
+        const qAttToday = variants.length === 1
+          ? query(
+              collection(db, 'attendance'),
+              where('classId', '==', variants[0]),
+              where('date', '==', todayStr)
+            )
+          : query(
+              collection(db, 'attendance'),
+              where('classId', 'in', variants.length > 0 ? variants : [selectedClass]),
+              where('date', '==', todayStr)
+            );
         const snapAtt = await getDocs(qAttToday);
         const existingAtt: Record<string, AttendanceStatus> = {};
         snapAtt.docs.forEach(docSnap => {
@@ -196,48 +254,381 @@ export default function AttendanceGuru() {
     showToast('Teks rekap presensi berhasil disalin!', 'success');
   };
 
-  const handleExportRekap = () => {
-    const pdf = new jsPDF('landscape');
-    
-    pdf.setFontSize(14);
-    pdf.setFont("helvetica", "bold");
-    pdf.text('REKAP ABSENSI BULANAN', 140, 20, { align: 'center' });
-    pdf.setFontSize(10);
-    pdf.text(`Bulan: ${format(new Date(), 'MMMM yyyy', { locale: id })} | ${selectedClass}`, 140, 26, { align: 'center' });
-    
-    // Simulate table data (1-5 dates for example)
-    const head = [['Nama Siswa', '1', '2', '3', '4', '5', 'H', 'I', 'S', 'A']];
-    const body = students.map(s => {
-      const isHadirToday = attendance[s.id] === 'Hadir' ? 'H' : attendance[s.id].charAt(0);
-      return [
-        s.name, 
-        isHadirToday, 'H', 'H', 'I', 'H', // dummy dates 1-5
-        '4', '1', '0', '0' // dummy totals
-      ];
-    });
+  const handleGenerateMonthlyPDF = async () => {
+    setIsExporting(true);
+    try {
+      const targetMonthNum = parseInt(exportMonth, 10);
+      const targetYearNum = parseInt(exportYear, 10);
+      const startDate = `${exportYear}-${exportMonth.padStart(2, '0')}-01`;
+      const lastDay = new Date(targetYearNum, targetMonthNum, 0).getDate();
+      const endDate = `${exportYear}-${exportMonth.padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      const monthName = format(new Date(targetYearNum, targetMonthNum - 1, 1), 'MMMM', { locale: id });
 
-    autoTable(pdf, {
-      startY: 35,
-      head: head,
-      body: body,
-      theme: 'grid',
-      headStyles: { fillColor: [79, 70, 229] },
-      styles: { fontSize: 8, cellPadding: 2 },
-      columnStyles: {
-        0: { cellWidth: 50 },
+      // 1. Ambil daftar siswa kelas target (menggunakan getClassVariants agar MTs & SD terakomodasi)
+      const variants = getClassVariants(selectedClass);
+      const qStudents = variants.length === 1
+        ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+        : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
+      
+      const snapStudents = await getDocs(qStudents);
+      const studentList = snapStudents.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+
+      if (studentList.length === 0) {
+        showToast(`Tidak ditemukan data siswa yang terdaftar di kelas ${selectedClass}.`, 'error');
+        setIsExporting(false);
+        return;
       }
-    });
 
-    const finalY = (pdf as any).lastAutoTable.finalY || 100;
-    pdf.text('Mengetahui,', 60, finalY + 20, { align: 'center' });
-    pdf.text('Kepala Sekolah', 60, finalY + 28, { align: 'center' });
-    pdf.text('(........................)', 60, finalY + 45, { align: 'center' });
+      // Urutkan siswa berdasarkan nomor absen, lalu alfabetis nama
+      studentList.sort((a, b) => {
+        const numA = parseInt(a.absen_number || '999', 10);
+        const numB = parseInt(b.absen_number || '999', 10);
+        if (numA !== numB) return numA - numB;
+        return a.name.localeCompare(b.name);
+      });
 
-    pdf.text(`Kotayasa, ${format(new Date(), 'dd MMMM yyyy', { locale: id })}`, 220, finalY + 20, { align: 'center' });
-    pdf.text('Wali Kelas', 220, finalY + 28, { align: 'center' });
-    pdf.text(`(${isAdmin ? '........................' : (userData?.name || '........................')})`, 220, finalY + 45, { align: 'center' });
+      // 2. Ambil data absensi NYATA yang telah disimpan guru di Firestore pada rentang bulan tersebut
+      const attMap: Record<string, Record<string, AttendanceStatus>> = {}; // studentId -> { date -> status }
+      const recordedDatesSet = new Set<string>();
 
-    pdf.save(`Rekap_Absen_${selectedClass.replace(/\s+/g, '_')}_${format(new Date(), 'MMM_yyyy')}.pdf`);
+      const targetClassesToQuery = variants.length > 0 ? variants : [selectedClass];
+      for (const cls of targetClassesToQuery) {
+        const qAtt = query(
+          collection(db, 'attendance'),
+          where('classId', '==', cls),
+          where('date', '>=', startDate),
+          where('date', '<=', endDate)
+        );
+        const snapAtt = await getDocs(qAtt);
+        snapAtt.docs.forEach(docSnap => {
+          const d = docSnap.data();
+          if (d.studentId && d.date && d.status) {
+            if (!attMap[d.studentId]) attMap[d.studentId] = {};
+            attMap[d.studentId][d.date] = d.status as AttendanceStatus;
+            recordedDatesSet.add(d.date);
+          }
+        });
+      }
+
+      const recordedDates = Array.from(recordedDatesSet).sort();
+
+      // 3. Verifikasi: JIKA TIDAK ADA HARI YANG DICATAT / DISIMPAN OLEH GURU
+      if (recordedDates.length === 0) {
+        showToast(
+          `Belum ada data absensi yang dicatat oleh guru pada bulan ${monthName} ${exportYear} untuk ${selectedClass}. Hanya tanggal yang telah disimpan yang akan dicetak.`,
+          'error'
+        );
+        setIsExporting(false);
+        return;
+      }
+
+      // 4. Inisialisasi Dokumen PDF Landscape A4 yang Rapi & Proporsional
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth(); // 297mm
+      const pageHeight = pdf.internal.pageSize.getHeight(); // 210mm
+      const margin = 10;
+
+      // Header Kop Lembaga / Sekolah
+      const namaSekolah = schoolSettings?.namaSekolah || userData?.schoolName || 'MADRASAH TSANAWIYAH / SEKOLAH';
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(13);
+      pdf.setTextColor(30, 41, 59); // slate-800
+      pdf.text(namaSekolah.toUpperCase(), pageWidth / 2, 14, { align: 'center' });
+
+      pdf.setFontSize(10.5);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(67, 56, 202); // indigo-700
+      pdf.text('REKAPITULASI PRESENSI / KEHADIRAN SISWA BULANAN', pageWidth / 2, 20, { align: 'center' });
+
+      pdf.setFontSize(8.5);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(71, 85, 105); // slate-600
+      const subheaderText = `Kelas: ${selectedClass}   •   Bulan: ${monthName} ${exportYear}   •   Tahun Ajaran: ${schoolSettings?.tahunAjaran || '2026/2027'}   •   Hari Efektif Presensi: ${recordedDates.length} Pertemuan`;
+      pdf.text(subheaderText, pageWidth / 2, 25.5, { align: 'center' });
+
+      // Garis Kop Ganda Resmi
+      pdf.setDrawColor(67, 56, 202);
+      pdf.setLineWidth(0.7);
+      pdf.line(margin, 28, pageWidth - margin, 28);
+      pdf.setDrawColor(203, 213, 225);
+      pdf.setLineWidth(0.3);
+      pdf.line(margin, 29, pageWidth - margin, 29);
+
+      // 5. Header Kolom Tabel:
+      // Hanya menyertakan tanggal yang ADA datanya (recordedDates)
+      const dateHeaders = recordedDates.map(d => {
+        // Ambil dua digit hari, misal "06"
+        return d.split('-')[2];
+      });
+
+      const head = [
+        [
+          'No',
+          'NISN',
+          'Nama Lengkap Siswa',
+          ...dateHeaders,
+          'H',
+          'I',
+          'S',
+          'A',
+          '% H'
+        ]
+      ];
+
+      // Rekap total kehadiran per tanggal untuk baris footer
+      const dateTotals: Record<string, { H: number; I: number; S: number; A: number }> = {};
+      recordedDates.forEach(d => {
+        dateTotals[d] = { H: 0, I: 0, S: 0, A: 0 };
+      });
+
+      let grandTotalH = 0;
+      let grandTotalI = 0;
+      let grandTotalS = 0;
+      let grandTotalA = 0;
+
+      const body = studentList.map((student, idx) => {
+        let countH = 0;
+        let countI = 0;
+        let countS = 0;
+        let countA = 0;
+
+        const dateCells = recordedDates.map(d => {
+          const status = attMap[student.id]?.[d];
+          if (status === 'Hadir') {
+            countH++;
+            dateTotals[d].H++;
+            return 'H';
+          } else if (status === 'Izin') {
+            countI++;
+            dateTotals[d].I++;
+            return 'I';
+          } else if (status === 'Sakit') {
+            countS++;
+            dateTotals[d].S++;
+            return 'S';
+          } else if (status === 'Alpa') {
+            countA++;
+            dateTotals[d].A++;
+            return 'A';
+          }
+          return '-';
+        });
+
+        grandTotalH += countH;
+        grandTotalI += countI;
+        grandTotalS += countS;
+        grandTotalA += countA;
+
+        const pct = recordedDates.length > 0 
+          ? Math.round((countH / recordedDates.length) * 100) + '%'
+          : '0%';
+
+        return [
+          String(student.absen_number || idx + 1),
+          student.nisn || '-',
+          student.name,
+          ...dateCells,
+          String(countH),
+          String(countI),
+          String(countS),
+          String(countA),
+          pct
+        ];
+      });
+
+      // Baris Rangkuman / Footer Tabel
+      const footerRows = [
+        [
+          '',
+          '',
+          'Jumlah Hadir (H)',
+          ...recordedDates.map(d => String(dateTotals[d].H)),
+          String(grandTotalH),
+          '',
+          '',
+          '',
+          ''
+        ],
+        [
+          '',
+          '',
+          'Jumlah Izin (I)',
+          ...recordedDates.map(d => String(dateTotals[d].I)),
+          '',
+          String(grandTotalI),
+          '',
+          '',
+          ''
+        ],
+        [
+          '',
+          '',
+          'Jumlah Sakit (S)',
+          ...recordedDates.map(d => String(dateTotals[d].S)),
+          '',
+          '',
+          String(grandTotalS),
+          '',
+          ''
+        ],
+        [
+          '',
+          '',
+          'Jumlah Alpa (A)',
+          ...recordedDates.map(d => String(dateTotals[d].A)),
+          '',
+          '',
+          '',
+          String(grandTotalA),
+          ''
+        ]
+      ];
+
+      // Penyesuaian Lebar Kolom secara Dinamis
+      const totalDateCols = recordedDates.length;
+      const baseFontSize = totalDateCols > 24 ? 6.2 : (totalDateCols > 16 ? 7 : 7.8);
+      const dateCellWidth = totalDateCols > 24 ? 5.2 : (totalDateCols > 16 ? 6.2 : 7.5);
+
+      const columnStylesConfig: Record<number, any> = {
+        0: { cellWidth: 7, halign: 'center' }, // No
+        1: { cellWidth: 18, halign: 'center' }, // NISN
+        2: { cellWidth: totalDateCols > 20 ? 36 : 44, halign: 'left' }, // Nama
+      };
+
+      for (let c = 0; c < totalDateCols; c++) {
+        columnStylesConfig[3 + c] = { cellWidth: dateCellWidth, halign: 'center' };
+      }
+
+      const summaryStartIdx = 3 + totalDateCols;
+      columnStylesConfig[summaryStartIdx] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // H
+      columnStylesConfig[summaryStartIdx + 1] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // I
+      columnStylesConfig[summaryStartIdx + 2] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // S
+      columnStylesConfig[summaryStartIdx + 3] = { cellWidth: 7.5, halign: 'center', fontStyle: 'bold' }; // A
+      columnStylesConfig[summaryStartIdx + 4] = { cellWidth: 10, halign: 'center', fontStyle: 'bold' }; // %
+
+      autoTable(pdf, {
+        startY: 32,
+        margin: { left: margin, right: margin, top: 32, bottom: 20 },
+        head: head,
+        body: [...body, ...footerRows],
+        theme: 'grid',
+        headStyles: {
+          fillColor: [67, 56, 202], // Indigo-700
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: baseFontSize,
+          halign: 'center',
+          valign: 'middle',
+          cellPadding: 1.2
+        },
+        bodyStyles: {
+          fontSize: baseFontSize,
+          cellPadding: 1.1,
+          valign: 'middle',
+          textColor: [30, 41, 59]
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252] // Slate-50
+        },
+        columnStyles: columnStylesConfig,
+        didParseCell: (data) => {
+          // Pewarnaan khusus untuk baris footer
+          if (data.row.index >= body.length) {
+            data.cell.styles.fillColor = [241, 245, 249]; // Slate-100
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.textColor = [15, 23, 42];
+            return;
+          }
+
+          // Pewarnaan status kehadiran
+          const val = data.cell.text[0];
+          if (val === 'H') {
+            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'I') {
+            data.cell.styles.textColor = [37, 99, 235]; // blue-600
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'S') {
+            data.cell.styles.textColor = [217, 119, 6]; // amber-600
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'A') {
+            data.cell.styles.textColor = [220, 38, 38]; // red-600
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      });
+
+      // 6. Keterangan & Tanda Tangan Resmi
+      let finalY = (pdf as any).lastAutoTable.finalY + 5;
+      
+      if (finalY + 38 > pageHeight) {
+        pdf.addPage();
+        finalY = 18;
+      }
+
+      pdf.setFontSize(7);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(
+        'Catatan: H = Hadir  |  I = Izin  |  S = Sakit  |  A = Alpa  |  *Hanya hari efektif yang dicatat/disimpan guru yang dimasukkan ke tabel.',
+        margin,
+        finalY
+      );
+
+      const signY = finalY + 5;
+
+      // Tanda Tangan Kepala Sekolah (Kiri)
+      pdf.setTextColor(30, 41, 59);
+      pdf.setFontSize(8.5);
+      pdf.setFont("helvetica", "normal");
+      pdf.text('Mengetahui,', 45, signY, { align: 'center' });
+      pdf.text('Kepala Sekolah', 45, signY + 4.5, { align: 'center' });
+
+      // Stempel Sekolah jika ada
+      if (schoolSettings?.stempelSekolah) {
+        try {
+          pdf.addImage(schoolSettings.stempelSekolah, 'PNG', 26, signY + 5, 20, 20);
+        } catch (err) {
+          console.warn('Stempel tidak dapat dimuat ke PDF:', err);
+        }
+      }
+
+      // TTD Kepala Sekolah jika ada
+      if (schoolSettings?.tandaTanganKepalaSekolah) {
+        try {
+          pdf.addImage(schoolSettings.tandaTanganKepalaSekolah, 'PNG', 36, signY + 6, 20, 12);
+        } catch (err) {
+          console.warn('TTD tidak dapat dimuat ke PDF:', err);
+        }
+      }
+
+      pdf.setFont("helvetica", "bold");
+      pdf.text(schoolSettings?.namaKepalaSekolah || '________________________', 45, signY + 23, { align: 'center' });
+      pdf.setFont("helvetica", "normal");
+      pdf.text(schoolSettings?.nipKepalaSekolah ? `NIP. ${schoolSettings.nipKepalaSekolah}` : 'NIP. -', 45, signY + 27, { align: 'center' });
+
+      // Tanda Tangan Wali Kelas (Kanan)
+      const todayFormatted = format(new Date(), 'dd MMMM yyyy', { locale: id });
+      pdf.text(`Kotayasa, ${todayFormatted}`, pageWidth - 45, signY, { align: 'center' });
+      pdf.text('Wali Kelas', pageWidth - 45, signY + 4.5, { align: 'center' });
+
+      pdf.setFont("helvetica", "bold");
+      const waliName = userData?.name || 'Wali Kelas';
+      pdf.text(waliName, pageWidth - 45, signY + 23, { align: 'center' });
+      pdf.setFont("helvetica", "normal");
+      pdf.text('NIP. -', pageWidth - 45, signY + 27, { align: 'center' });
+
+      const cleanFileName = `Rekap_Presensi_${selectedClass.replace(/\s+/g, '_')}_${monthName}_${exportYear}.pdf`;
+      pdf.save(cleanFileName);
+
+      showToast(`Rekap presensi bulan ${monthName} ${exportYear} berhasil diunduh (${recordedDates.length} hari efektif).`, 'success');
+      setIsExportModalOpen(false);
+    } catch (error: any) {
+      console.error("Error generating monthly attendance PDF:", error);
+      showToast('Gagal mencetak rekap: ' + (error?.message || 'Terjadi kesalahan sistem'), 'error');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const statusColors = {
@@ -306,7 +697,7 @@ export default function AttendanceGuru() {
           </button>
 
           <button
-            onClick={handleExportRekap}
+            onClick={() => setIsExportModalOpen(true)}
             className="flex items-center space-x-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-4 py-2.5 rounded-xl transition-colors font-medium text-xs shadow-xs cursor-pointer"
           >
             <FileDown className="w-4 h-4" />
@@ -516,6 +907,123 @@ export default function AttendanceGuru() {
               >
                 <Send className="w-4 h-4" />
                 <span>Buka WhatsApp</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cetak Rekap Absensi Bulanan (PDF) */}
+      {isExportModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Cetak Rekap Presensi Bulanan</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Unduh dokumen PDF resmi presensi siswa</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsExportModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Target Kelas */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                  Kelas Target:
+                </label>
+                <div className="px-3.5 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-xl font-bold text-sm text-indigo-700 dark:text-indigo-300 flex items-center justify-between">
+                  <span>{selectedClass}</span>
+                  <span className="text-xs font-semibold px-2 py-0.5 bg-indigo-600 text-white rounded-lg">
+                    {students.length} Siswa Terdaftar
+                  </span>
+                </div>
+              </div>
+
+              {/* Pilihan Periode Bulan & Tahun */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                    Pilih Bulan:
+                  </label>
+                  <select
+                    value={exportMonth}
+                    onChange={(e) => setExportMonth(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {MONTHS_LIST.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                    Pilih Tahun:
+                  </label>
+                  <select
+                    value={exportYear}
+                    onChange={(e) => setExportYear(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {[2024, 2025, 2026, 2027].map((yr) => (
+                      <option key={yr} value={String(yr)}>
+                        {yr}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Informasi Ketentuan */}
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 rounded-2xl flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-800 dark:text-amber-200 leading-relaxed">
+                  <p className="font-bold mb-0.5">Ketentuan Data Presensi:</p>
+                  <p>
+                    Data yang dicatat adalah <strong>data yang telah disimpan guru</strong> di database. Jika ada hari tidak dicatat atau disimpan guru (misal hari libur atau belum diabsen), hari tersebut <strong>tidak dimasukkan</strong> ke dalam tabel.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2.5 bg-slate-50/70 dark:bg-slate-850/50">
+              <button
+                type="button"
+                onClick={() => setIsExportModalOpen(false)}
+                disabled={isExporting}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateMonthlyPDF}
+                disabled={isExporting}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm shadow-indigo-600/30 active:scale-95"
+              >
+                {isExporting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Menyiapkan PDF...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileDown className="w-4 h-4" />
+                    <span>Unduh Rekap PDF</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

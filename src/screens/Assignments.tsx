@@ -68,6 +68,7 @@ import {
 import { QuizQuestion, StudentAnswer } from '../types/quiz';
 import OnlineQuizTakerModal from '../components/OnlineQuizTakerModal';
 import QuizQuestionEditor from '../components/QuizQuestionEditor';
+import { getClassVariants } from '../lib/schoolClasses';
 import { playNotificationSound } from '../lib/audioNotifier';
 import { sendPushAlert } from '../lib/fcmPush';
 import { syncAssignmentGradeToRapot } from '../lib/gradeSync';
@@ -243,7 +244,10 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
 
   // Listen to Students of selected class
   useEffect(() => {
-    const qStudents = query(collection(db, 'students'), where('classId', '==', selectedClass));
+    const variants = getClassVariants(selectedClass);
+    const qStudents = variants.length === 1
+      ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+      : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
     const unsubStudents = onSnapshot(qStudents, (snap) => {
       const list: Student[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
       list.sort((a, b) => (Number(a.absen_number) || 0) - (Number(b.absen_number) || 0));
