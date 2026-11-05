@@ -42,6 +42,7 @@ interface OnlineQuizTakerModalProps {
     maxScore: number;
     description?: string;
     questions?: QuizQuestion[];
+    maxAttempts?: number;
   };
   student: {
     id: string;
@@ -86,14 +87,22 @@ export default function OnlineQuizTakerModal({
 
       // If already graded, show results directly
       if (existingSubmission.status === 'graded') {
+        const attemptCount = existingSubmission.attemptCount || 1;
+        const highestScore = existingSubmission.highestScore !== undefined ? existingSubmission.highestScore : existingSubmission.score;
+        const lastAttemptScore = existingSubmission.lastAttemptScore !== undefined ? existingSubmission.lastAttemptScore : existingSubmission.score;
+
         setEvaluationResult({
-          totalScore: existingSubmission.score,
+          totalScore: lastAttemptScore,
+          highestScore: highestScore,
           maxScore: assignment.maxScore,
           totalQuestions: questions.length,
           mcqCorrectCount: existingSubmission.mcqCorrectCount || 0,
           mcqTotalCount: existingSubmission.mcqTotalCount || 0,
           studentAnswers: existingSubmission.studentAnswers,
-          feedbackSummary: existingSubmission.feedback || 'Tugas telah selesai dikerjakan.'
+          feedbackSummary: existingSubmission.feedback || 'Tugas telah selesai dikerjakan.',
+          attemptCount: attemptCount,
+          maxAttempts: assignment.maxAttempts !== undefined ? assignment.maxAttempts : 1,
+          attemptsHistory: existingSubmission.attemptsHistory || []
         });
       }
       return;
@@ -128,14 +137,46 @@ export default function OnlineQuizTakerModal({
 
   const unansweredCount = questions.length - answeredCount;
 
-  // Final submit handler with automatic scoring
+  // Handler untuk mengulang pengerjaan soal kuis (jika batas percobaan masih ada)
+  const handleRetakeQuiz = () => {
+    setAnswers({});
+    setCurrentIndex(0);
+    setEvaluationResult(null);
+    setShowConfirmSubmit(false);
+    clearQuizDraft(assignment.id, student.id);
+  };
+
+  // Final submit handler with automatic scoring & highest score preservation
   const handleSubmitQuiz = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
-      // 1. Calculate automatic score
+      // 1. Calculate automatic score for this attempt
       const result = calculateQuizScore(questions, answers, assignment.maxScore);
+
+      const prevHighestScore = typeof existingSubmission?.highestScore === 'number'
+        ? existingSubmission.highestScore
+        : (typeof existingSubmission?.score === 'number' ? existingSubmission.score : 0);
+
+      const prevAttemptCount = Number(existingSubmission?.attemptCount) || (existingSubmission ? 1 : 0);
+      const newAttemptCount = prevAttemptCount + 1;
+      const currentScore = result.totalScore;
+
+      // ATURAN RESMI: Nilai yang diambil atau disimpan adalah nilai tertinggi
+      const bestScore = Math.max(prevHighestScore, currentScore);
+
+      const attemptsHistory = [
+        ...(existingSubmission?.attemptsHistory || []),
+        {
+          attemptNumber: newAttemptCount,
+          score: currentScore,
+          submittedAt: new Date().toISOString(),
+          mcqCorrectCount: result.mcqCorrectCount,
+          mcqTotalCount: result.mcqTotalCount,
+          autoGraded: true
+        }
+      ];
 
       const subId = `${assignment.id}_${student.id}`;
       const payload: any = {
@@ -145,12 +186,17 @@ export default function OnlineQuizTakerModal({
         studentName: student.name,
         studentAbsen: student.absen_number || '-',
         classId: assignment.classId,
-        submissionText: `Mengerjakan Kuis Online (${result.mcqCorrectCount}/${result.mcqTotalCount} PG Benar, Skor: ${result.totalScore}/${result.maxScore})`,
+        submissionText: `Mengerjakan Kuis Online (Percobaan ke-${newAttemptCount}, PG: ${result.mcqCorrectCount}/${result.mcqTotalCount}, Skor Baru: ${currentScore}/${result.maxScore}, Nilai Tertinggi: ${bestScore}/${result.maxScore})`,
         submittedAt: new Date().toISOString(),
         submittedBy: currentUserName || 'Siswa / Wali Murid',
         isLate: false,
         status: 'graded', // Otomatis terkoreksi & dinilai langsung
-        score: result.totalScore,
+        score: bestScore, // Nilai yang disimpan adalah NILAI TERTINGGI!
+        highestScore: bestScore,
+        lastAttemptScore: currentScore,
+        attemptCount: newAttemptCount,
+        maxAttempts: assignment.maxAttempts !== undefined ? assignment.maxAttempts : 1,
+        attemptsHistory: attemptsHistory,
         feedback: result.feedbackSummary,
         feedbackAt: new Date().toISOString(),
         feedbackBy: 'Sistem Koreksi Otomatis CERDAS',
@@ -164,14 +210,14 @@ export default function OnlineQuizTakerModal({
       // 2. Save submission to Firestore
       await setDoc(doc(db, 'pengumpulan_tugas', subId), payload, { merge: true });
 
-      // 2b. Sinkronisasi otomatis nilai kuis tugas ke buku rapot bagian tugas (grades/{studentId}.gradesBySubject)
+      // 2b. Sinkronisasi otomatis nilai TERTINGGI kuis tugas ke buku rapot bagian tugas (grades/{studentId}.gradesBySubject)
       try {
         await syncAssignmentGradeToRapot({
           studentId: student.id,
           studentName: student.name,
           classId: assignment.classId,
           subject: assignment.subject || 'Umum',
-          score: result.totalScore,
+          score: bestScore, // NILAI TERTINGGI YANG DISIMPAN KE RAPOT
           maxScore: assignment.maxScore || 100,
           assignmentId: assignment.id,
           assignmentTitle: assignment.title
@@ -193,7 +239,7 @@ export default function OnlineQuizTakerModal({
       // Memicu notifikasi mengambang (Floating Heads-Up Banner)
       triggerFloatingNotification({
         title: `Hasil Kuis: ${assignment.title}`,
-        body: `Ananda ${student.name} meraih nilai ${result.totalScore} dari ${result.maxScore}! Nilai otomatis tersimpan ke rapor.`,
+        body: `Ananda ${student.name} meraih nilai ${currentScore} (Nilai Tertinggi Disimpan: ${bestScore}/${result.maxScore})! Nilai tersimpan ke rapor.`,
         type: 'grade_released',
         category: assignment.subject,
         url: '/assignments'
@@ -202,7 +248,7 @@ export default function OnlineQuizTakerModal({
       // 5. Send push notification alert
       sendPushAlert({
         title: `Nilai Kuis Siswa: ${assignment.title}`,
-        body: `Ananda ${student.name} telah menyelesaikan tugas kuis online dengan nilai ${result.totalScore}/${result.maxScore}!`,
+        body: `Ananda ${student.name} menyelesaikan kuis online (Skor: ${currentScore}, Nilai Tertinggi: ${bestScore}/${result.maxScore})!`,
         type: 'grade_released',
         targetClass: assignment.classId,
         studentId: student.id,
@@ -210,7 +256,14 @@ export default function OnlineQuizTakerModal({
         url: '/assignments'
       }).catch((e) => console.warn('Push alert error:', e));
 
-      setEvaluationResult(result);
+      setEvaluationResult({
+        ...result,
+        totalScore: currentScore,
+        highestScore: bestScore,
+        attemptCount: newAttemptCount,
+        maxAttempts: assignment.maxAttempts !== undefined ? assignment.maxAttempts : 1,
+        attemptsHistory: attemptsHistory
+      });
       setShowConfirmSubmit(false);
       onSuccess(payload);
     } catch (err) {
@@ -245,8 +298,11 @@ export default function OnlineQuizTakerModal({
   // RESULT VIEW (Setelah Koreksi Otomatis Selesai)
   // ----------------------------------------------------
   if (evaluationResult) {
-    const isPerfect = evaluationResult.totalScore >= 90;
-    const isPassing = evaluationResult.totalScore >= 70;
+    const isPerfect = (evaluationResult.highestScore ?? evaluationResult.totalScore) >= 90;
+    const isPassing = (evaluationResult.highestScore ?? evaluationResult.totalScore) >= 70;
+    const maxAtt = assignment.maxAttempts !== undefined ? assignment.maxAttempts : 1;
+    const currentAtt = evaluationResult.attemptCount || 1;
+    const canRetake = maxAtt === 0 || currentAtt < maxAtt;
 
     return (
       <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
@@ -261,7 +317,7 @@ export default function OnlineQuizTakerModal({
           }`}>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-bold mb-3">
               <Award className="w-4 h-4 text-amber-300" />
-              <span>Hasil Koreksi Otomatis Aplikasi</span>
+              <span>Hasil Koreksi Otomatis & Penilaian</span>
             </div>
 
             <h2 className="text-xl sm:text-2xl font-black">{assignment.title}</h2>
@@ -269,12 +325,33 @@ export default function OnlineQuizTakerModal({
               Peserta: <strong>{student.name}</strong> • Kelas: {assignment.classId}
             </p>
 
-            <div className="my-5 inline-flex flex-col items-center justify-center w-28 h-28 sm:w-32 sm:h-32 rounded-3xl bg-white/15 backdrop-blur-md border border-white/30 shadow-lg">
-              <span className="text-3xl sm:text-4xl font-black tracking-tight">{evaluationResult.totalScore}</span>
-              <span className="text-[11px] font-bold text-white/80 uppercase tracking-wider">dari {evaluationResult.maxScore}</span>
+            {/* Score badges: Nilai Percobaan Ini & Nilai Tertinggi Rapor */}
+            <div className="my-5 flex items-center justify-center gap-3 sm:gap-4 flex-wrap">
+              <div className="inline-flex flex-col items-center justify-center px-4 py-2.5 sm:px-5 sm:py-3 rounded-2xl bg-white/15 backdrop-blur-md border border-white/30">
+                <span className="text-[10px] sm:text-xs text-white/80 uppercase font-bold tracking-wider">
+                  Nilai Percobaan Ini
+                </span>
+                <span className="text-2xl sm:text-3xl font-black">{evaluationResult.totalScore}</span>
+                <span className="text-[10px] text-white/70">dari {evaluationResult.maxScore}</span>
+              </div>
+
+              <div className="inline-flex flex-col items-center justify-center px-5 py-2.5 sm:px-6 sm:py-3 rounded-2xl bg-amber-400 text-slate-900 shadow-xl border-2 border-amber-300">
+                <span className="text-[10px] sm:text-xs uppercase font-extrabold tracking-wider flex items-center gap-1 text-amber-950">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-800" />
+                  ⭐ Nilai Tertinggi Rapor
+                </span>
+                <span className="text-2xl sm:text-3xl font-black text-slate-900">
+                  {evaluationResult.highestScore ?? evaluationResult.totalScore}
+                </span>
+                <span className="text-[10px] font-bold text-slate-800">Tersimpan Resmi di Buku Rapor</span>
+              </div>
             </div>
 
-            <p className="text-xs sm:text-sm font-semibold text-white/95 max-w-md mx-auto">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-black/20 text-xs font-medium text-white/90">
+              <span>Percobaan ke-<strong>{currentAtt}</strong> {maxAtt > 0 ? `dari batas maksimal ${maxAtt} kali` : '(Bebas Latihan / Tanpa Batas)'}</span>
+            </div>
+
+            <p className="text-xs sm:text-sm font-semibold text-white/95 max-w-md mx-auto mt-2.5">
               {evaluationResult.feedbackSummary}
             </p>
           </div>
@@ -361,17 +438,34 @@ export default function OnlineQuizTakerModal({
           </div>
 
           {/* Footer Action */}
-          <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 flex items-center justify-between">
-            <span className="text-xs text-slate-500">
-              Nilai telah tersimpan secara resmi pada lembar tugas ananda.
-            </span>
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-            >
-              Selesai & Tutup
-            </button>
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-xs text-slate-500 dark:text-slate-400 text-center sm:text-left">
+              <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                {canRetake ? `Tersedia kesempatan mengulang (${currentAtt}/${maxAtt === 0 ? '∞' : maxAtt}x).` : `Seluruh batas pengerjaan (${maxAtt}x) telah digunakan.`}
+              </span>
+              Nilai yang masuk ke rapor adalah nilai tertinggi: <strong>{evaluationResult.highestScore ?? evaluationResult.totalScore} Poin</strong>.
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              {canRetake && (
+                <button
+                  type="button"
+                  onClick={handleRetakeQuiz}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Ulangi Pengerjaan (Percobaan ke-{currentAtt + 1})</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 sm:flex-initial px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+              >
+                Selesai & Tutup
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -420,6 +514,21 @@ export default function OnlineQuizTakerModal({
             </button>
           </div>
         </div>
+
+        {/* Banner Percobaan & Skor Tertinggi */}
+        {existingSubmission && (
+          <div className="px-5 py-2 bg-indigo-50/90 dark:bg-indigo-950/50 border-b border-indigo-100 dark:border-indigo-900/60 flex items-center justify-between text-xs text-indigo-800 dark:text-indigo-200 flex-wrap gap-2">
+            <span className="flex items-center gap-1.5 font-bold">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>
+                Percobaan ke-{(existingSubmission.attemptCount || 1) + 1} {assignment.maxAttempts ? `(Maks. ${assignment.maxAttempts === 0 ? 'Bebas' : `${assignment.maxAttempts}x`})` : ''}
+              </span>
+            </span>
+            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+              Nilai Terbaik Sebelumnya: <strong className="text-emerald-600 dark:text-emerald-400 font-black">{existingSubmission.highestScore ?? existingSubmission.score} Poin</strong> (Nilai tertinggi otomatis disimpan ke rapor)
+            </span>
+          </div>
+        )}
 
         {/* Question Selector Strip */}
         <div className="px-5 py-2.5 bg-slate-100/60 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 overflow-x-auto">

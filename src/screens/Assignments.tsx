@@ -93,6 +93,7 @@ export interface Assignment {
   mode?: 'manual' | 'online_quiz';
   questions?: QuizQuestion[];
   totalQuestions?: number;
+  maxAttempts?: number; // Batas maksimal pengerjaan (1x, 2x, 3x, 5x, 0 = tanpa batas). Nilai tertinggi yang disimpan
 }
 
 export interface Submission {
@@ -109,7 +110,19 @@ export interface Submission {
   submittedBy: string;
   isLate: boolean;
   status: 'submitted' | 'graded' | 'revision_needed';
-  score?: number | null;
+  score?: number | null; // Nilai tertinggi yang disimpan
+  highestScore?: number | null;
+  lastAttemptScore?: number | null;
+  attemptCount?: number;
+  maxAttempts?: number;
+  attemptsHistory?: Array<{
+    attemptNumber: number;
+    score: number;
+    submittedAt: string;
+    mcqCorrectCount?: number;
+    mcqTotalCount?: number;
+    autoGraded?: boolean;
+  }>;
   feedback?: string;
   feedbackAt?: string | null;
   feedbackBy?: string | null;
@@ -174,6 +187,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
     dueDate: format(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
     dueTime: '23:59',
     maxScore: 100,
+    maxAttempts: 1,
     attachmentUrl: '',
     attachmentName: '',
     notifyParents: true
@@ -496,6 +510,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
         dueDate: formData.dueDate,
         dueTime: formData.dueTime || '23:59',
         maxScore: Number(formData.maxScore) || 100,
+        maxAttempts: formData.maxAttempts !== undefined ? Number(formData.maxAttempts) : 1,
         attachmentUrl: formData.attachmentUrl || '',
         attachmentName: formData.attachmentName || '',
         teacherId: userData?.username || userData?.uid || 'guru',
@@ -558,6 +573,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
         dueDate: format(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
         dueTime: '23:59',
         maxScore: 100,
+        maxAttempts: 1,
         attachmentUrl: '',
         attachmentName: '',
         notifyParents: true
@@ -952,6 +968,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                     dueDate: format(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
                     dueTime: '23:59',
                     maxScore: 100,
+                    maxAttempts: 1,
                     attachmentUrl: '',
                     attachmentName: '',
                     notifyParents: true
@@ -1251,6 +1268,17 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                       </span>
                     </div>
 
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Maks. Percobaan:</span>
+                      </span>
+                      <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                        {assignment.maxAttempts === 0 ? 'Tanpa Batas' : `${assignment.maxAttempts || 1} Kali`}
+                        <span className="text-[10px] font-normal text-slate-400 ml-1">(Nilai Tertinggi Disimpan)</span>
+                      </span>
+                    </div>
+
                     {assignment.attachmentUrl && (
                       <div className="pt-1 flex items-center justify-between text-xs">
                         <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-medium">
@@ -1280,7 +1308,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                       {studentSub ? (
                         <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
                               {studentSub.status === 'graded' ? (
                                 <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
                                   <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1294,18 +1322,21 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                               ) : (
                                 <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400">
                                   <Clock className="w-3.5 h-3.5" />
-                                  <span>Sudah Dikumpulkan (Menunggu Dinilai)</span>
+                                  <span>Sudah Dikumpulkan</span>
                                 </span>
                               )}
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                                Percobaan {studentSub.attemptCount || 1}x {assignment.maxAttempts ? `(Maks. ${assignment.maxAttempts === 0 ? 'Bebas' : assignment.maxAttempts}x)` : ''}
+                              </span>
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5">
+                            <p className="text-[11px] text-slate-400 mt-1">
                               Dikirim pada {format(new Date(studentSub.submittedAt), 'dd MMM yyyy HH:mm', { locale: id })}
                             </p>
                           </div>
 
                           {studentSub.status === 'graded' && studentSub.score !== null && (
                             <div className="text-right">
-                              <span className="text-[10px] uppercase font-bold text-slate-400 block">Nilai</span>
+                              <span className="text-[10px] uppercase font-bold text-slate-400 block">Nilai Tertinggi</span>
                               <span className="text-lg font-black text-emerald-600 dark:text-emerald-400">
                                 {studentSub.score} / {assignment.maxScore}
                               </span>
@@ -1321,9 +1352,12 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                         </div>
                       )}
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {(() => {
                           const isOnlineQuiz = assignment.mode === 'online_quiz' || (assignment.questions && assignment.questions.length > 0);
+                          const maxAtt = assignment.maxAttempts !== undefined ? assignment.maxAttempts : 1;
+                          const currentAtt = studentSub?.attemptCount || (studentSub ? 1 : 0);
+                          const canRetake = (maxAtt === 0 || currentAtt < maxAtt) && assignment.status === 'active';
 
                           if (studentSub) {
                             return (
@@ -1332,10 +1366,10 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                                   <button
                                     type="button"
                                     onClick={() => setActiveQuizAssignment(assignment)}
-                                    className="flex-1 py-2.5 px-3 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-purple-200 dark:border-purple-800 shadow-2xs"
+                                    className="flex-1 min-w-[140px] py-2.5 px-3 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-purple-200 dark:border-purple-800 shadow-2xs"
                                   >
                                     <CheckSquare className="w-3.5 h-3.5 text-purple-600" />
-                                    <span>Lihat Lembar Jawaban & Pembahasan</span>
+                                    <span>{canRetake ? 'Buka Soal / Ulangi' : 'Lihat Hasil & Pembahasan'}</span>
                                   </button>
                                 )}
 
@@ -1454,6 +1488,8 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                           type="button"
                           onClick={() => {
                             setEditingAssignment(assignment);
+                            setAssignmentMode(assignment.mode || 'manual');
+                            setQuizQuestions(assignment.questions || []);
                             setFormData({
                               title: assignment.title,
                               subject: assignment.subject,
@@ -1462,6 +1498,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                               dueDate: assignment.dueDate,
                               dueTime: assignment.dueTime,
                               maxScore: assignment.maxScore,
+                              maxAttempts: assignment.maxAttempts !== undefined ? assignment.maxAttempts : 1,
                               attachmentUrl: assignment.attachmentUrl || '',
                               attachmentName: assignment.attachmentName || '',
                               notifyParents: false
@@ -1563,8 +1600,8 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                 />
               </div>
 
-              {/* Grid: Mapel & Skor Max */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Grid: Mapel, Skor Max, & Batas Percobaan */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                     Mata Pelajaran <span className="text-red-500">*</span>
@@ -1572,7 +1609,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                   <select
                     value={formData.subject}
                     onChange={e => setFormData({ ...formData, subject: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
                     {availableSubjects.map(s => (
                       <option key={s} value={s}>{s}</option>
@@ -1582,7 +1619,7 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Skor / Bobot Maksimal
+                    Skor Maksimal
                   </label>
                   <input
                     type="number"
@@ -1590,9 +1627,36 @@ export default function AssignmentsScreen({ forcedClassId, forcedStudentId }: { 
                     max={100}
                     value={formData.maxScore}
                     onChange={e => setFormData({ ...formData, maxScore: Number(e.target.value) })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
+                    <span>Maks. Percobaan</span>
+                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-extrabold">Nilai Tertinggi</span>
+                  </label>
+                  <select
+                    value={formData.maxAttempts}
+                    onChange={e => setFormData({ ...formData, maxAttempts: Number(e.target.value) })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-indigo-200 dark:border-indigo-900/60 rounded-xl text-xs font-bold text-indigo-700 dark:text-indigo-300 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    title="Berapa kali siswa boleh mengulang pengerjaan soal. Nilai yang disimpan adalah nilai tertinggi."
+                  >
+                    <option value={1}>1 Kali (Standar Sekali Kerjakan)</option>
+                    <option value={2}>2 Kali Percobaan</option>
+                    <option value={3}>3 Kali Percobaan</option>
+                    <option value={5}>5 Kali Percobaan</option>
+                    <option value={0}>Tanpa Batas (Bebas Mengulang)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Banner Penjelasan Nilai Tertinggi */}
+              <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 rounded-xl flex items-center gap-2 text-xs text-indigo-800 dark:text-indigo-200">
+                <Award className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span className="leading-snug">
+                  <strong>Aturan Nilai:</strong> Siswa dapat mengerjakan hingga <strong>{formData.maxAttempts === 0 ? 'bebas tanpa batas' : `${formData.maxAttempts} kali`}</strong>. Sistem <strong>secara otomatis menyimpan nilai tertinggi</strong> ke dalam buku rapor siswa.
+                </span>
               </div>
 
               {/* Grid: Tanggal & Jam Batas Pengumpulan */}

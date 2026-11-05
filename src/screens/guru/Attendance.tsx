@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { collection, getDocs, doc, writeBatch, query, where, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Save, Calendar, FileDown, Filter, MessageSquare, CheckCircle2, AlertCircle, Bell, Users, Clock, Share2, Copy, Check, CheckCheck, Send, Printer, FileText, Loader2, X } from 'lucide-react';
@@ -53,10 +54,15 @@ export default function AttendanceGuru() {
   const [isWaBroadcastModalOpen, setIsWaBroadcastModalOpen] = useState(false);
   const [copiedWa, setCopiedWa] = useState(false);
 
-  // Modal Cetak Rekap Bulanan
+  // Modal Cetak Rekap Presensi (Bulanan & Per Semester)
+  const location = useLocation();
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportPeriodType, setExportPeriodType] = useState<'monthly' | 'semester'>('monthly');
   const [exportMonth, setExportMonth] = useState<string>(format(new Date(), 'MM'));
   const [exportYear, setExportYear] = useState<string>(format(new Date(), 'yyyy'));
+  const [exportSemester, setExportSemester] = useState<'Ganjil' | 'Genap'>('Ganjil');
+  const [exportAcademicYear, setExportAcademicYear] = useState<string>('2026/2027');
+  const [exportTargetClass, setExportTargetClass] = useState<string>(selectedClass);
   const [isExporting, setIsExporting] = useState(false);
 
   // Pengaturan Sekolah untuk Kop & Tanda Tangan PDF
@@ -68,6 +74,19 @@ export default function AttendanceGuru() {
     stempelSekolah: '',
     tahunAjaran: '2026/2027'
   });
+
+  // Sinkronkan exportTargetClass saat selectedClass berganti
+  useEffect(() => {
+    setExportTargetClass(selectedClass);
+  }, [selectedClass]);
+
+  // Deteksi jika dibuka dari shortcut Dashboard Admin ?period=semester
+  useEffect(() => {
+    if (location.search.includes('period=semester')) {
+      setExportPeriodType('semester');
+      setIsExportModalOpen(true);
+    }
+  }, [location.search]);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayDisplay = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id });
@@ -81,7 +100,11 @@ export default function AttendanceGuru() {
   useEffect(() => {
     const unsubSchool = onSnapshot(doc(db, 'pengaturan_sekolah', 'utama'), (docSnap) => {
       if (docSnap.exists()) {
-        setSchoolSettings(docSnap.data());
+        const d = docSnap.data();
+        setSchoolSettings(d);
+        if (d.tahunAjaran) {
+          setExportAcademicYear(d.tahunAjaran);
+        }
       }
     });
     return () => unsubSchool();
@@ -685,6 +708,453 @@ export default function AttendanceGuru() {
     }
   };
 
+  // ==========================================
+  // CETAK REKAPITULASI PRESENSI PER SEMESTER
+  // (Format Resmi A4 Landscape, 277mm, Rapi & Tidak Menciut)
+  // Hanya menghitung tanggal yang tersimpan di Firestore
+  // ==========================================
+  const handleGenerateSemesterPDF = async () => {
+    setIsExporting(true);
+    try {
+      const targetClass = exportTargetClass || selectedClass;
+
+      // 1. Parse Tahun Ajaran (e.g. "2026/2027")
+      const parts = (exportAcademicYear || '2026/2027').split(/[\/\-]/);
+      const startYear = parseInt(parts[0], 10) || 2026;
+      const endYear = parseInt(parts[1], 10) || (startYear + 1);
+
+      let semesterMonths: { code: string; name: string }[] = [];
+      let startDate = '';
+      let endDate = '';
+
+      if (exportSemester === 'Ganjil') {
+        semesterMonths = [
+          { code: '07', name: 'Juli' },
+          { code: '08', name: 'Agustus' },
+          { code: '09', name: 'September' },
+          { code: '10', name: 'Oktober' },
+          { code: '11', name: 'November' },
+          { code: '12', name: 'Desember' },
+        ];
+        startDate = `${startYear}-07-01`;
+        endDate = `${startYear}-12-31`;
+      } else {
+        semesterMonths = [
+          { code: '01', name: 'Januari' },
+          { code: '02', name: 'Februari' },
+          { code: '03', name: 'Maret' },
+          { code: '04', name: 'April' },
+          { code: '05', name: 'Mei' },
+          { code: '06', name: 'Juni' },
+        ];
+        startDate = `${endYear}-01-01`;
+        endDate = `${endYear}-06-30`;
+      }
+
+      // 2. Ambil data siswa di kelas target
+      const variants = getClassVariants(targetClass);
+      const qStudents = variants.length === 1
+        ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+        : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [targetClass]));
+
+      const snapStudents = await getDocs(qStudents);
+      const studentList = snapStudents.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+
+      if (studentList.length === 0) {
+        showToast(`Tidak ditemukan data siswa yang terdaftar di kelas ${targetClass}.`, 'error');
+        setIsExporting(false);
+        return;
+      }
+
+      // Urutkan siswa berdasarkan nomor absen, lalu alfabetis nama
+      studentList.sort((a, b) => {
+        const numA = parseInt(a.absen_number || '999', 10);
+        const numB = parseInt(b.absen_number || '999', 10);
+        if (numA !== numB) return numA - numB;
+        return a.name.localeCompare(b.name);
+      });
+
+      // 3. Ambil data absensi NYATA yang telah disimpan guru di Firestore
+      const attMap: Record<string, Record<string, { H: number; I: number; S: number; A: number }>> = {};
+      studentList.forEach(s => {
+        attMap[s.id] = {};
+        semesterMonths.forEach(m => {
+          attMap[s.id][m.code] = { H: 0, I: 0, S: 0, A: 0 };
+        });
+      });
+
+      const monthRecordedDatesSet: Record<string, Set<string>> = {};
+      semesterMonths.forEach(m => {
+        monthRecordedDatesSet[m.code] = new Set<string>();
+      });
+      const allRecordedDatesSet = new Set<string>();
+
+      const targetClassesToQuery = variants.length > 0 ? variants : [targetClass];
+      for (const cls of targetClassesToQuery) {
+        const qAtt = query(
+          collection(db, 'attendance'),
+          where('classId', '==', cls),
+          where('date', '>=', startDate),
+          where('date', '<=', endDate)
+        );
+        const snapAtt = await getDocs(qAtt);
+        snapAtt.docs.forEach(docSnap => {
+          const d = docSnap.data();
+          if (d.studentId && d.date && d.status) {
+            const monthCode = d.date.substring(5, 7);
+            if (monthRecordedDatesSet[monthCode]) {
+              monthRecordedDatesSet[monthCode].add(d.date);
+              allRecordedDatesSet.add(d.date);
+
+              if (attMap[d.studentId] && attMap[d.studentId][monthCode]) {
+                const st = d.status as AttendanceStatus;
+                if (st === 'Hadir') attMap[d.studentId][monthCode].H++;
+                else if (st === 'Izin') attMap[d.studentId][monthCode].I++;
+                else if (st === 'Sakit') attMap[d.studentId][monthCode].S++;
+                else if (st === 'Alpa') attMap[d.studentId][monthCode].A++;
+              }
+            }
+          }
+        });
+      }
+
+      // Verifikasi: Hanya cetak jika ada hari yang disimpan guru
+      if (allRecordedDatesSet.size === 0) {
+        showToast(
+          `Belum ada data absensi yang dicatat/disimpan oleh guru pada Semester ${exportSemester} (${exportAcademicYear}) untuk ${targetClass}. Hanya tanggal yang telah disimpan yang akan dicetak.`,
+          'error'
+        );
+        setIsExporting(false);
+        return;
+      }
+
+      // 4. Inisialisasi Dokumen PDF Landscape A4 (297mm x 210mm)
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth(); // 297mm
+      const pageHeight = pdf.internal.pageSize.getHeight(); // 210mm
+      const margin = 10;
+      const availableWidth = pageWidth - (2 * margin); // 277mm
+
+      // Dapatkan pejabat yang berwenang (Kepala MTs vs Kepala SD)
+      const principalInfo = getPrincipalForClass(targetClass, schoolSettings);
+
+      // Header Kop Lembaga / Sekolah
+      const namaSekolah = schoolSettings?.namaSekolah || userData?.schoolName || 'MADRASAH TSANAWIYAH / SEKOLAH';
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(13);
+      pdf.setTextColor(30, 41, 59); // slate-800
+      pdf.text(namaSekolah.toUpperCase(), pageWidth / 2, 12, { align: 'center' });
+
+      pdf.setFontSize(10.5);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(67, 56, 202); // indigo-700
+      pdf.text(
+        `REKAPITULASI PRESENSI / KEHADIRAN SISWA SEMESTER ${exportSemester.toUpperCase()}`,
+        pageWidth / 2,
+        17.5,
+        { align: 'center' }
+      );
+
+      pdf.setFontSize(8.5);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(71, 85, 105); // slate-600
+      pdf.text(
+        `Kelas: ${targetClass}   |   Tahun Pelajaran: ${exportAcademicYear}   |   Total Siswa: ${studentList.length} Siswa   |   Total Hari Efektif Disimpan: ${allRecordedDatesSet.size} Hari`,
+        pageWidth / 2,
+        22.5,
+        { align: 'center' }
+      );
+
+      // Garis pemisah kop ganda rapi
+      pdf.setDrawColor(203, 213, 225); // slate-300
+      pdf.setLineWidth(0.4);
+      pdf.line(margin, 25.5, pageWidth - margin, 25.5);
+      pdf.setLineWidth(0.15);
+      pdf.line(margin, 26.5, pageWidth - margin, 26.5);
+
+      // Susun Header AutoTable Bertingkat (2 Baris Header Proporsional)
+      const head: any = [
+        [
+          { content: 'No', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
+          { content: 'NISN', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
+          { content: 'Nama Siswa', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
+          ...semesterMonths.map(m => {
+            const cnt = monthRecordedDatesSet[m.code]?.size || 0;
+            return {
+              content: `${m.name.toUpperCase()} (${cnt} hr)`,
+              colSpan: 4,
+              styles: { halign: 'center', valign: 'middle' }
+            };
+          }),
+          { content: 'TOTAL SEMESTER', colSpan: 5, styles: { halign: 'center', valign: 'middle' } }
+        ],
+        [
+          // 6 bulan x 4 (H, I, S, A)
+          ...semesterMonths.flatMap(() => [
+            { content: 'H', styles: { halign: 'center' } },
+            { content: 'I', styles: { halign: 'center' } },
+            { content: 'S', styles: { halign: 'center' } },
+            { content: 'A', styles: { halign: 'center' } }
+          ]),
+          // Rangkuman total semester
+          { content: 'H', styles: { halign: 'center' } },
+          { content: 'I', styles: { halign: 'center' } },
+          { content: 'S', styles: { halign: 'center' } },
+          { content: 'A', styles: { halign: 'center' } },
+          { content: '%', styles: { halign: 'center' } }
+        ]
+      ];
+
+      // Akumulasi total kelas per bulan
+      const monthTotals: Record<string, { H: number; I: number; S: number; A: number }> = {};
+      semesterMonths.forEach(m => {
+        monthTotals[m.code] = { H: 0, I: 0, S: 0, A: 0 };
+      });
+      let grandSemH = 0;
+      let grandSemI = 0;
+      let grandSemS = 0;
+      let grandSemA = 0;
+
+      const body = studentList.map((student, idx) => {
+        let studentTotalH = 0;
+        let studentTotalI = 0;
+        let studentTotalS = 0;
+        let studentTotalA = 0;
+
+        const monthCells: string[] = [];
+        semesterMonths.forEach(m => {
+          const rec = attMap[student.id]?.[m.code] || { H: 0, I: 0, S: 0, A: 0 };
+          monthCells.push(rec.H > 0 ? String(rec.H) : '-');
+          monthCells.push(rec.I > 0 ? String(rec.I) : '-');
+          monthCells.push(rec.S > 0 ? String(rec.S) : '-');
+          monthCells.push(rec.A > 0 ? String(rec.A) : '-');
+
+          studentTotalH += rec.H;
+          studentTotalI += rec.I;
+          studentTotalS += rec.S;
+          studentTotalA += rec.A;
+
+          monthTotals[m.code].H += rec.H;
+          monthTotals[m.code].I += rec.I;
+          monthTotals[m.code].S += rec.S;
+          monthTotals[m.code].A += rec.A;
+        });
+
+        grandSemH += studentTotalH;
+        grandSemI += studentTotalI;
+        grandSemS += studentTotalS;
+        grandSemA += studentTotalA;
+
+        const totalSavedDays = allRecordedDatesSet.size;
+        const studentPct = totalSavedDays > 0
+          ? Math.round((studentTotalH / totalSavedDays) * 100) + '%'
+          : '0%';
+
+        return [
+          String(student.absen_number || idx + 1),
+          student.nisn || '-',
+          student.name,
+          ...monthCells,
+          String(studentTotalH),
+          String(studentTotalI),
+          String(studentTotalS),
+          String(studentTotalA),
+          studentPct
+        ];
+      });
+
+      const totalPossibleEntries = studentList.length * allRecordedDatesSet.size;
+      const overallHadirPct = totalPossibleEntries > 0
+        ? Math.round((grandSemH / totalPossibleEntries) * 100) + '%'
+        : '0%';
+
+      // Baris Footer Rangkuman Kelas Per Semester
+      const footerRows = [
+        [
+          '',
+          '',
+          'Jumlah Hadir (H)',
+          ...semesterMonths.flatMap(m => [String(monthTotals[m.code].H), '', '', '']),
+          String(grandSemH),
+          '',
+          '',
+          '',
+          overallHadirPct
+        ],
+        [
+          '',
+          '',
+          'Jumlah Izin (I)',
+          ...semesterMonths.flatMap(m => ['', String(monthTotals[m.code].I), '', '']),
+          '',
+          String(grandSemI),
+          '',
+          '',
+          ''
+        ],
+        [
+          '',
+          '',
+          'Jumlah Sakit (S)',
+          ...semesterMonths.flatMap(m => ['', '', String(monthTotals[m.code].S), '']),
+          '',
+          '',
+          String(grandSemS),
+          '',
+          ''
+        ],
+        [
+          '',
+          '',
+          'Jumlah Alpa (A)',
+          ...semesterMonths.flatMap(m => ['', '', '', String(monthTotals[m.code].A)]),
+          '',
+          '',
+          '',
+          String(grandSemA),
+          ''
+        ]
+      ];
+
+      // Konfigurasi Lebar Kolom Proporsional (277mm)
+      // No: 8mm, NISN: 20mm, Nama: 49mm, 24 sub-kolom bulan @ 6.7mm = 160.8mm, 5 summary (4x7.6 + 8.8) = 39.2mm.
+      const columnStylesConfig: Record<number, any> = {
+        0: { cellWidth: 8, halign: 'center' }, // No
+        1: { cellWidth: 20, halign: 'center' }, // NISN
+        2: { cellWidth: 49, halign: 'left' }, // Nama
+      };
+
+      for (let c = 0; c < 24; c++) {
+        columnStylesConfig[3 + c] = { cellWidth: 6.7, halign: 'center' };
+      }
+
+      // Summary columns: 27 to 31
+      columnStylesConfig[27] = { cellWidth: 7.6, halign: 'center', fontStyle: 'bold' }; // Total H
+      columnStylesConfig[28] = { cellWidth: 7.6, halign: 'center', fontStyle: 'bold' }; // Total I
+      columnStylesConfig[29] = { cellWidth: 7.6, halign: 'center', fontStyle: 'bold' }; // Total S
+      columnStylesConfig[30] = { cellWidth: 7.6, halign: 'center', fontStyle: 'bold' }; // Total A
+      columnStylesConfig[31] = { cellWidth: 8.8, halign: 'center', fontStyle: 'bold' }; // %
+
+      autoTable(pdf, {
+        startY: 29,
+        tableWidth: availableWidth,
+        margin: { left: margin, right: margin, top: 29, bottom: 20 },
+        head: head,
+        body: [...body, ...footerRows],
+        theme: 'grid',
+        headStyles: {
+          fillColor: [67, 56, 202], // Indigo-700
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 6.8,
+          halign: 'center',
+          valign: 'middle',
+          cellPadding: { top: 1.2, bottom: 1.2, left: 0.3, right: 0.3 },
+          lineColor: [199, 210, 254],
+          lineWidth: 0.15
+        },
+        bodyStyles: {
+          fontSize: 6.7,
+          cellPadding: { top: 1.1, bottom: 1.1, left: 0.5, right: 0.5 },
+          valign: 'middle',
+          textColor: [30, 41, 59],
+          lineColor: [226, 232, 240],
+          lineWidth: 0.15
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252] // Slate-50
+        },
+        columnStyles: columnStylesConfig,
+        didParseCell: (data) => {
+          // Baris footer
+          if (data.row.index >= body.length) {
+            data.cell.styles.fillColor = [241, 245, 249];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.textColor = [15, 23, 42];
+            if (data.column.index === 2) {
+              data.cell.styles.halign = 'right';
+            }
+          }
+        }
+      });
+
+      // Tanda Tangan Resmi
+      let finalY = (pdf as any).lastAutoTable.finalY + 4;
+      if (finalY + 38 > pageHeight) {
+        pdf.addPage();
+        finalY = 16;
+      }
+
+      pdf.setFontSize(7.2);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(
+        'Catatan: H = Hadir  |  I = Izin  |  S = Sakit  |  A = Alpa  |  *Data dihitung murni dari presensi harian yang disimpan guru.',
+        margin,
+        finalY
+      );
+
+      const signY = finalY + 5;
+      const leftSignX = margin + 35;
+      const rightSignX = pageWidth - margin - 35;
+
+      // Kepala Madrasah / Sekolah (Kiri)
+      pdf.setTextColor(30, 41, 59);
+      pdf.setFontSize(8.5);
+      pdf.setFont("helvetica", "normal");
+      pdf.text('Mengetahui,', leftSignX, signY, { align: 'center' });
+      pdf.text(principalInfo.roleTitle, leftSignX, signY + 4.5, { align: 'center' });
+
+      if (principalInfo.stamp) {
+        try {
+          pdf.addImage(principalInfo.stamp, 'PNG', leftSignX - 18, signY + 5, 20, 20);
+        } catch (err) {
+          console.warn('Stempel tidak dapat dimuat:', err);
+        }
+      }
+
+      if (principalInfo.signature) {
+        try {
+          pdf.addImage(principalInfo.signature, 'PNG', leftSignX - 9, signY + 6, 22, 13);
+        } catch (err) {
+          console.warn('TTD tidak dapat dimuat:', err);
+        }
+      }
+
+      pdf.setFont("helvetica", "bold");
+      pdf.text(principalInfo.name || '________________________', leftSignX, signY + 23, { align: 'center' });
+      pdf.setFont("helvetica", "normal");
+      pdf.text(
+        principalInfo.nip && principalInfo.nip !== '-' ? `NIP. ${principalInfo.nip}` : 'NIP. -',
+        leftSignX,
+        signY + 27,
+        { align: 'center' }
+      );
+
+      // Wali Kelas (Kanan)
+      const todayFormatted = format(new Date(), 'dd MMMM yyyy', { locale: id });
+      pdf.text(`Kotayasa, ${todayFormatted}`, rightSignX, signY, { align: 'center' });
+      pdf.text(`Wali Kelas ${targetClass}`, rightSignX, signY + 4.5, { align: 'center' });
+
+      pdf.setFont("helvetica", "bold");
+      const waliName = (userData?.assigned_class === targetClass ? userData?.name : '') || 'Wali Kelas';
+      pdf.text(waliName, rightSignX, signY + 23, { align: 'center' });
+      pdf.setFont("helvetica", "normal");
+      pdf.text('NIP. -', rightSignX, signY + 27, { align: 'center' });
+
+      const cleanFileName = `Rekap_Presensi_Semester_${exportSemester}_${targetClass.replace(/\s+/g, '_')}_${exportAcademicYear.replace(/\//g, '-')}.pdf`;
+      pdf.save(cleanFileName);
+
+      showToast(`Rekap presensi Semester ${exportSemester} berhasil diunduh (${allRecordedDatesSet.size} hari efektif disimpan).`, 'success');
+      setIsExportModalOpen(false);
+    } catch (error: any) {
+      console.error("Error generating semester attendance PDF:", error);
+      showToast('Gagal mencetak rekap semester: ' + (error?.message || 'Terjadi kesalahan sistem'), 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const statusColors = {
     'Hadir': 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
     'Izin': 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
@@ -750,13 +1220,31 @@ export default function AttendanceGuru() {
             <span>Broadcast Rekap WA</span>
           </button>
 
-          <button
-            onClick={() => setIsExportModalOpen(true)}
-            className="flex items-center space-x-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-4 py-2.5 rounded-xl transition-colors font-medium text-xs shadow-xs cursor-pointer"
-          >
-            <FileDown className="w-4 h-4" />
-            <span className="hidden sm:inline">Cetak Rekap PDF</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                setExportPeriodType('monthly');
+                setIsExportModalOpen(true);
+              }}
+              className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl transition-colors font-semibold text-xs shadow-xs cursor-pointer"
+              title="Cetak rekap presensi per bulan"
+            >
+              <FileDown className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Rekap Bulanan</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setExportPeriodType('semester');
+                setIsExportModalOpen(true);
+              }}
+              className="flex items-center space-x-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-3 py-2 rounded-xl transition-all font-bold text-xs shadow-xs cursor-pointer active:scale-95"
+              title="Cetak rekap presensi per semester (A4 Landscape)"
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Rekap Semester</span>
+            </button>
+          </div>
 
           <button
             onClick={handleSaveMassal}
@@ -970,22 +1458,58 @@ export default function AttendanceGuru() {
       {/* Modal Cetak Rekap Absensi Bulanan (PDF) */}
       {isExportModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in duration-200">
+            {/* Modal Header */}
             <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850/50">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Cetak Rekap Presensi Bulanan</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Unduh dokumen PDF resmi presensi siswa</p>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {exportPeriodType === 'semester' ? 'Cetak Rekap Presensi Per Semester' : 'Cetak Rekap Presensi Bulanan'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Unduh dokumen resmi kehadiran siswa (A4 Landscape)</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsExportModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tab Navigasi Modal */}
+            <div className="flex border-b border-slate-200 dark:border-slate-800 px-5 pt-3 gap-2 bg-slate-50/40 dark:bg-slate-900/40">
+              <button
+                type="button"
+                onClick={() => setExportPeriodType('monthly')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                  exportPeriodType === 'monthly'
+                    ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Rekap Bulanan</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setExportPeriodType('semester')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                  exportPeriodType === 'semester'
+                    ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                }`}
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>Rekap Per Semester</span>
+                {isAdmin && (
+                  <span className="px-1.5 py-0.2 rounded-sm bg-indigo-100 dark:bg-indigo-950 text-[10px] text-indigo-700 dark:text-indigo-300 font-extrabold">
+                    Admin
+                  </span>
+                )}
               </button>
             </div>
 
@@ -995,50 +1519,100 @@ export default function AttendanceGuru() {
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
                   Kelas Target:
                 </label>
-                <div className="px-3.5 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-xl font-bold text-sm text-indigo-700 dark:text-indigo-300 flex items-center justify-between">
-                  <span>{selectedClass}</span>
-                  <span className="text-xs font-semibold px-2 py-0.5 bg-indigo-600 text-white rounded-lg">
-                    {students.length} Siswa Terdaftar
-                  </span>
-                </div>
-              </div>
-
-              {/* Pilihan Periode Bulan & Tahun */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
-                    Pilih Bulan:
-                  </label>
+                {isAdmin ? (
                   <select
-                    value={exportMonth}
-                    onChange={(e) => setExportMonth(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={exportTargetClass}
+                    onChange={(e) => setExportTargetClass(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
-                    {MONTHS_LIST.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.name}
+                    {CLASSES_LIST.map((c) => (
+                      <option key={c} value={c} className="dark:bg-slate-850">
+                        {c}
                       </option>
                     ))}
                   </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
-                    Pilih Tahun:
-                  </label>
-                  <select
-                    value={exportYear}
-                    onChange={(e) => setExportYear(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {[2024, 2025, 2026, 2027].map((yr) => (
-                      <option key={yr} value={String(yr)}>
-                        {yr}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                ) : (
+                  <div className="px-3.5 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-xl font-bold text-sm text-indigo-700 dark:text-indigo-300 flex items-center justify-between">
+                    <span>{selectedClass}</span>
+                    <span className="text-xs font-semibold px-2 py-0.5 bg-indigo-600 text-white rounded-lg">
+                      {students.length} Siswa Terdaftar
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {exportPeriodType === 'monthly' ? (
+                /* Form Bulanan */
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                      Pilih Bulan:
+                    </label>
+                    <select
+                      value={exportMonth}
+                      onChange={(e) => setExportMonth(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {MONTHS_LIST.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                      Pilih Tahun:
+                    </label>
+                    <select
+                      value={exportYear}
+                      onChange={(e) => setExportYear(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {[2024, 2025, 2026, 2027].map((yr) => (
+                        <option key={yr} value={String(yr)}>
+                          {yr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                /* Form Per Semester */
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                      Pilihan Semester:
+                    </label>
+                    <select
+                      value={exportSemester}
+                      onChange={(e) => setExportSemester(e.target.value as 'Ganjil' | 'Genap')}
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="Ganjil">Semester Ganjil (Juli - Des)</option>
+                      <option value="Genap">Semester Genap (Jan - Juni)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+                      Tahun Ajaran:
+                    </label>
+                    <select
+                      value={exportAcademicYear}
+                      onChange={(e) => setExportAcademicYear(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {['2024/2025', '2025/2026', '2026/2027', '2027/2028'].map((ta) => (
+                        <option key={ta} value={ta}>
+                          {ta}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Informasi Ketentuan */}
               <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 rounded-2xl flex items-start gap-2.5">
@@ -1057,13 +1631,13 @@ export default function AttendanceGuru() {
                 type="button"
                 onClick={() => setIsExportModalOpen(false)}
                 disabled={isExporting}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="button"
-                onClick={handleGenerateMonthlyPDF}
+                onClick={exportPeriodType === 'semester' ? handleGenerateSemesterPDF : handleGenerateMonthlyPDF}
                 disabled={isExporting}
                 className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm shadow-indigo-600/30 active:scale-95"
               >
@@ -1075,7 +1649,7 @@ export default function AttendanceGuru() {
                 ) : (
                   <>
                     <FileDown className="w-4 h-4" />
-                    <span>Unduh Rekap PDF</span>
+                    <span>{exportPeriodType === 'semester' ? 'Unduh Rekap Semester' : 'Unduh Rekap Bulanan'}</span>
                   </>
                 )}
               </button>

@@ -155,7 +155,8 @@ export default function AdminDashboard() {
   const adminShortcuts = [
     { title: 'Data Siswa', desc: 'Daftar, tambah, & impor massal Excel', to: '/admin/students', icon: GraduationCap },
     { title: 'Kelola Pengguna', desc: 'Akun guru, wali kelas, & hak akses', to: '/admin/users', icon: Users },
-    { title: 'Absensi Siswa', desc: 'Monitoring rekap kehadiran sekolah', to: '/admin/attendance', icon: CheckCircle },
+    { title: 'Absensi Harian', desc: 'Monitoring rekap kehadiran sekolah', to: '/admin/attendance', icon: CheckCircle },
+    { title: 'Rekap Presensi Semester', desc: 'Unduh cetak PDF absensi per semester', to: '/admin/attendance?period=semester', icon: CalendarDays },
     { title: 'Rapor & Nilai', desc: 'Pantau nilai seluruh kelas & siswa', to: '/admin/grades', icon: BookOpen },
     { title: 'Pengumuman', desc: 'Kirim siaran penting ke guru & wali', to: '/admin/announcements', icon: Bell },
   ];
