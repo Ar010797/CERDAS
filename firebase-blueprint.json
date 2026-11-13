@@ -99,22 +99,32 @@
     },
     "OfflineGradingRecord": {
       "title": "OfflineGradingRecord",
-      "description": "Riwayat hasil koreksi otomatis foto lembar jawaban offline siswa.",
+      "description": "Riwayat hasil koreksi otomatis foto lembar jawaban offline siswa beserta bukti foto dan audit verifikasi guru.",
       "type": "object",
       "properties": {
         "keyId": { "type": "string" },
         "title": { "type": "string" },
         "classId": { "type": "string" },
         "subject": { "type": "string" },
-        "assessmentCategory": { "type": "string" },
+        "assessmentCategory": { "type": "string", "description": "tugas, ulanganHarian, pts (UTS), atau pas (UAS)" },
+        "assessmentDate": { "type": "string", "description": "Tanggal penilaian YYYY-MM-DD" },
         "studentId": { "type": "string" },
         "studentName": { "type": "string" },
+        "studentSource": { "type": "string", "description": "daftar_kelas atau input_manual" },
         "scoreScale100": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "wrongCount": { "type": "number" },
+        "unansweredCount": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "qualityStatus": { "type": "string" },
+        "originalPhotoUrl": { "type": "string" },
         "items": { "type": "array" },
+        "verifiedBy": { "type": "string" },
+        "approvedAtIso": { "type": "string" },
         "gradedBy": { "type": "string" },
         "gradedAtIso": { "type": "string" }
       },
-      "required": ["title", "classId", "subject", "studentId", "studentName", "scoreScale100"]
+      "required": ["title", "classId", "subject", "assessmentCategory", "assessmentDate", "studentId", "studentName", "scoreScale100"]
     }
   },
   "firestore": {

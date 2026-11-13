@@ -2221,11 +2221,12 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
 
       const subject = String(req.body?.subject || "").trim();
       const title = String(req.body?.title || "").trim();
-      const studentName = String(req.body?.studentName || "").trim();
+      const assessmentCategory = String(req.body?.assessmentCategory || "").trim();
+      const assessmentDate = String(req.body?.assessmentDate || "").trim();
 
       const keyDescription = normalizedKey
         .map((k) => {
-          const typeLabel = k.type === "multiple_choice" ? "Pilihan Ganda" : "Isian/Uraian";
+          const typeLabel = k.type === "multiple_choice" ? "Pilihan Ganda (A-E)" : "Isian/Uraian";
           const notePart = k.notes ? ` | Catatan/Rubrik: ${k.notes}` : "";
           return `- No. ${k.number} (${typeLabel}, Bobot Maks ${k.points} poin): Kunci = "${k.correctAnswer}"${notePart}`;
         })
@@ -2234,35 +2235,54 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
       const ai = getAi();
       const base64Data = fileBuffer.toString("base64");
 
-      const promptText = `Anda adalah sistem koreksi otomatis (Optical Mark & Handwriting Grader) untuk lembar jawaban / soal offline siswa sekolah di Indonesia.
-${title ? `Judul Ujian/Tugas: ${title}` : ""}
+      const promptText = `Anda adalah sistem OMR & Koreksi Lembar Jawaban Offline Berbasis Visi Komputer yang SANGAT TELITI, OBJEKTIF, dan ANTI-MENEBAK untuk sekolah di Indonesia.
+${title ? `Judul Penilaian: ${title}` : ""}
 ${subject ? `Mata Pelajaran: ${subject}` : ""}
-${studentName ? `Nama Siswa Target: ${studentName}` : ""}
+${assessmentCategory ? `Kategori: ${assessmentCategory}` : ""}
+${assessmentDate ? `Tanggal Penilaian: ${assessmentDate}` : ""}
 
-KUNCI JAWABAN RESMI DARI GURU (WAJIB MENJADI ACUAN MUTLAK):
+ATURAN IDENTITAS (WAJIB DIPATUHI):
+- JANGAN membaca, mengekstrak, atau menentukan nama siswa dari foto lembar jawaban. Identitas siswa telah ditetapkan secara resmi oleh guru di sistem. Fokus 100% hanya pada pemeriksaan kualitas foto, pembacaan tanda jawaban per nomor, dan lokasi potongan foto bukti.
+
+KUNCI JAWABAN RESMI DARI GURU:
 ${keyDescription}
 
-TUGAS ANDA:
-1. Periksa foto lembar jawaban siswa secara teliti dari nomor ${normalizedKey[0].number} sampai nomor ${normalizedKey[normalizedKey.length - 1].number}.
-2. Jawaban siswa di kertas offline bisa berupa:
-   - Huruf yang dilingkari, disilang (X), dicontreng (✓), atau dihitamkan pada pilihan A/B/C/D/E.
-   - Huruf atau teks tulisan tangan di samping nomor soal atau di lembar jawaban siswa.
-   - Kalimat/angka jawaban isian singkat atau uraian di bawah/samping soal.
-   - Jika terdapat coretan/ralat dan siswa menulis/melingkari pilihan pengganti yang jelas, gunakan jawaban akhir yang dimaksud siswa.
-3. Untuk SETIAP nomor pada kunci jawaban guru (wajib ada semua ${normalizedKey.length} item berurutan):
-   - 'number': nomor soal sesuai kunci.
-   - 'detectedAnswer': tulis jawaban siswa yang terlihat di foto. Untuk Pilihan Ganda, kembalikan HANYA SATU HURUF KAPITAL (A, B, C, D, atau E). Jika kosong/tidak dijawab tulis "KOSONG". Jika ragu/tidak terbaca sama sekali tulis "TIDAK TERBACA". Untuk Isian/Uraian, transkripsikan jawaban tulisan tangan siswa dengan akurat (atau "KOSONG" jika kosong).
-   - 'isCorrect': true jika jawaban siswa benar/sesuai kunci, false jika salah/kosong.
-   - 'earnedPoints': untuk Pilihan Ganda isi bobot penuh jika benar atau 0 jika salah; untuk Isian/Uraian beri skor proporsional 0 sampai bobot maksimal soal sesuai ketepatan makna terhadap kunci guru & rubrik.
-   - 'confidence': 'high', 'medium', atau 'low' sesuai kejelasan tulisan/tanda di foto.
-   - 'feedback': penjelasan singkat dan jelas dalam Bahasa Indonesia (contoh: "Siswa menyilang opsi B, sesuai kunci B" atau "Terbaca jawaban '3/4', sedangkan kunci '1/2'").
-4. Juga isi 'detectedStudentName' jika nama/no absen siswa tertulis di kertas (atau string kosong jika tidak terlihat), 'paperLegibility' ('clear' | 'moderate' | 'blurry'), dan 'overallNotes' (ringkasan singkat kondisi lembar jawaban).
+TAHAP 1 — PEMERIKSAAN KUALITAS FOTO:
+Periksa kelayakan foto terlebih dahulu sebelum menilai jawaban:
+1. Kejelasan/ketajaman: Apakah tanda jawaban & nomor soal terbaca jelas atau buram/blur?
+2. Kelengkapan bidang (tidak terpotong): Apakah seluruh area jawaban dari nomor ${normalizedKey[0].number} sampai ${normalizedKey[normalizedKey.length - 1].number} masuk dalam bingkai foto dan tidak terpotong di tepi?
+3. Pencahayaan: Apakah cahaya cukup terang dan merata (tidak terlalu gelap, tidak silau/bayangan pekat yang menutupi tanda)?
+4. Posisi/Sudut: Apakah foto diambil cukup tegak lurus dari atas sehingga baris soal tidak terlalu miring/terdistorsi parah?
+Isi:
+- 'isPhotoAcceptable': false JIKA foto tidak layak dikoreksi (buram parah, bagian nomor soal terpotong, pencahayaan terlalu gelap hingga tanda tak terlihat, atau sudut sangat miring). Isi true JIKA foto cukup jelas dan layak untuk dibaca.
+- 'qualityStatus': salah satu dari 'good', 'blurry', 'cropped', 'too_dark', atau 'tilted'.
+- 'qualityIssues': array daftar masalah spesifik dalam Bahasa Indonesia (kosong [] jika 'good').
+- 'qualityFeedback': ringkasan singkat kondisi kualitas foto dalam Bahasa Indonesia.
+
+TAHAP 2 — DETEKSI JAWABAN PER NOMOR (TANPA MENEBAK):
+Jika foto layak ('isPhotoAcceptable' = true), periksa nomor ${normalizedKey[0].number} hingga ${normalizedKey[normalizedKey.length - 1].number}.
+Untuk Pilihan Ganda (opsi A, B, C, D, dan E) dengan tanda silang (X), lingkaran (O), atau tanda jelas lainnya, patuhi aturan ketat berikut:
+1. PEMBATALAN JAWABAN YANG JELAS ('corrected'):
+   - Jika suatu opsi (misal A) dicoret dengan garis pembatalan yang jelas lalu opsi lain (misal B) dilingkari/disilang dengan jelas => A dibatalkan, B menjadi jawaban akhir. Set 'detectionStatus' = 'corrected', 'detectedAnswer' = 'B', 'needsVerification' = false (kecuali coretannya agak samar, maka 'needsVerification' = true).
+   - Jika tanda jawaban ditimpa tanda sama dengan ('=') yang jelas sebagai pembatalan, lalu ada tanda jawaban pengganti yang jelas => kenali tanda '=' tersebut sebagai pembatalan, dan gunakan jawaban penggantinya ('detectionStatus' = 'corrected').
+2. JAWABAN GANDA ('multiple_answers'):
+   - Jika terdapat DUA ATAU LEBIH opsi yang sama-sama ditandai jelas TANPA ada pembatalan/coretan/tanda '=' yang jelas => WAJIB set 'detectionStatus' = 'multiple_answers', 'detectedAnswer' = 'GANDA', 'needsVerification' = true, 'confidence' = 'low'. JANGAN memilih salah satu!
+3. TANDA TIDAK JELAS / MERAGUKAN ('unclear'):
+   - Jika tanda sangat tipis, terhapus setengah, coretan tidak jelas mana yang dibatalkan, tertutup bayangan lokal, atau meragukan => JANGAN PERNAH MENEBAK! Set 'detectionStatus' = 'unclear', 'detectedAnswer' = 'TIDAK_JELAS', 'needsVerification' = true, 'confidence' = 'low'.
+4. JAWABAN KOSONG ('empty'):
+   - Jika sama sekali tidak ada tanda pada opsi A-E maupun tulisan tangan => set 'detectionStatus' = 'empty', 'detectedAnswer' = 'KOSONG', 'needsVerification' = false.
+5. JAWABAN TUNGGAL JELAS ('clear'):
+   - Jika hanya ada satu tanda silang/lingkaran yang bersih & tegas pada A/B/C/D/E => 'detectionStatus' = 'clear', 'detectedAnswer' = huruf tunggal ('A'/'B'/'C'/'D'/'E'), 'needsVerification' = false.
+6. BUKTI POTONGAN FOTO ('bbox'):
+   - Untuk SETIAP nomor soal, berikan koordinat kotak pembatas 'bbox': { ymin, xmin, ymax, xmax } dengan skala bilangan bulat 0 sampai 1000 (relatif terhadap lebar & tinggi gambar) yang melingkupi nomor soal beserta pilihan jawaban / tulisan jawaban siswa untuk nomor tersebut agar aplikasi dapat memotong potongan foto sebagai bukti visual bagi guru.
+
+Untuk soal Isian/Uraian ('essay'): transkripsikan teks jawaban siswa secara akurat apa adanya (atau 'KOSONG' jika kosong, 'TIDAK_JELAS' + 'needsVerification: true' jika tulisan tak terbaca).
 
 Kembalikan HANYA JSON sesuai skema.`;
 
       const response: any = await callGeminiWithRetry(ai, {
         model: "gemini-4-hydrogen",
-        timeoutMs: 28000,
+        timeoutMs: 35000,
         contents: {
           parts: [
             {
@@ -2281,8 +2301,13 @@ Kembalikan HANYA JSON sesuai skema.`;
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              detectedStudentName: { type: Type.STRING },
-              paperLegibility: { type: Type.STRING },
+              isPhotoAcceptable: { type: Type.BOOLEAN },
+              qualityStatus: { type: Type.STRING },
+              qualityIssues: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              qualityFeedback: { type: Type.STRING },
               overallNotes: { type: Type.STRING },
               items: {
                 type: Type.ARRAY,
@@ -2290,17 +2315,39 @@ Kembalikan HANYA JSON sesuai skema.`;
                   type: Type.OBJECT,
                   properties: {
                     number: { type: Type.NUMBER },
+                    rawMarksObserved: { type: Type.STRING },
                     detectedAnswer: { type: Type.STRING },
+                    detectionStatus: { type: Type.STRING },
+                    needsVerification: { type: Type.BOOLEAN },
                     isCorrect: { type: Type.BOOLEAN },
                     earnedPoints: { type: Type.NUMBER },
                     confidence: { type: Type.STRING },
-                    feedback: { type: Type.STRING }
+                    feedback: { type: Type.STRING },
+                    bbox: {
+                      type: Type.OBJECT,
+                      properties: {
+                        ymin: { type: Type.NUMBER },
+                        xmin: { type: Type.NUMBER },
+                        ymax: { type: Type.NUMBER },
+                        xmax: { type: Type.NUMBER }
+                      },
+                      required: ["ymin", "xmin", "ymax", "xmax"]
+                    }
                   },
-                  required: ["number", "detectedAnswer", "isCorrect", "earnedPoints", "confidence", "feedback"]
+                  required: [
+                    "number",
+                    "rawMarksObserved",
+                    "detectedAnswer",
+                    "detectionStatus",
+                    "needsVerification",
+                    "confidence",
+                    "feedback",
+                    "bbox"
+                  ]
                 }
               }
             },
-            required: ["paperLegibility", "overallNotes", "items"]
+            required: ["isPhotoAcceptable", "qualityStatus", "qualityIssues", "qualityFeedback", "overallNotes", "items"]
           }
         }
       });
@@ -2314,10 +2361,47 @@ Kembalikan HANYA JSON sesuai skema.`;
         if (match) parsed = JSON.parse(match[0]);
       }
 
-      if (!parsed || !Array.isArray(parsed.items)) {
+      if (!parsed) {
         return res.status(200).json({
           success: false,
-          error: "Sistem belum dapat membaca struktur jawaban dari foto tersebut. Pastikan foto cukup terang, tegak, dan tidak buram."
+          error: "Sistem belum dapat membaca respons pemeriksaan foto. Silakan unggah ulang foto yang lebih jelas."
+        });
+      }
+
+      const rawQualityStatus = String(parsed.qualityStatus || "good").toLowerCase();
+      const qualityStatus: "good" | "blurry" | "cropped" | "too_dark" | "tilted" =
+        rawQualityStatus === "blurry" ||
+        rawQualityStatus === "cropped" ||
+        rawQualityStatus === "too_dark" ||
+        rawQualityStatus === "tilted"
+          ? rawQualityStatus
+          : "good";
+
+      const qualityIssues: string[] = Array.isArray(parsed.qualityIssues)
+        ? parsed.qualityIssues.map((x: any) => String(x).trim()).filter(Boolean)
+        : [];
+      const qualityFeedback = String(parsed.qualityFeedback || "").trim();
+
+      // Photo quality gate: reject & prompt teacher to retake if unacceptable
+      if (parsed.isPhotoAcceptable === false) {
+        return res.json({
+          success: true,
+          photoRejected: true,
+          qualityStatus,
+          qualityIssues:
+            qualityIssues.length > 0
+              ? qualityIssues
+              : [qualityFeedback || "Foto lembar jawaban kurang jelas atau terpotong."],
+          qualityFeedback:
+            qualityFeedback ||
+            "Foto belum memenuhi syarat kejelasan (tidak buram, tidak terpotong, pencahayaan cukup, tegak lurus dari atas). Silakan ambil foto ulang."
+        });
+      }
+
+      if (!Array.isArray(parsed.items)) {
+        return res.status(200).json({
+          success: false,
+          error: "Struktur jawaban tidak terbaca pada foto. Pastikan foto jelas, tidak terpotong, dan tegak lurus dari atas."
         });
       }
 
@@ -2333,106 +2417,185 @@ Kembalikan HANYA JSON sesuai skema.`;
       let correctCount = 0;
       let wrongCount = 0;
       let unansweredCount = 0;
+      let verificationRequiredCount = 0;
 
       const gradedItems = normalizedKey.map((keyItem) => {
         const aiItem = aiItemMap.get(keyItem.number) || {};
-        let detected = String(aiItem.detectedAnswer ?? "KOSONG").trim();
-        let isCorrect = false;
-        let earnedPoints = 0;
-
+        const rawObserved = String(aiItem.rawMarksObserved || "").trim();
+        let detected = String(aiItem.detectedAnswer ?? "TIDAK_JELAS").trim();
         const upperDetected = detected.toUpperCase();
-        const isBlank =
+
+        const rawStatus = String(aiItem.detectionStatus || "").toLowerCase();
+        let detectionStatus: "clear" | "corrected" | "multiple_answers" | "unclear" | "empty" =
+          rawStatus === "clear" ||
+          rawStatus === "corrected" ||
+          rawStatus === "multiple_answers" ||
+          rawStatus === "unclear" ||
+          rawStatus === "empty"
+            ? rawStatus
+            : "unclear";
+
+        const confRaw = String(aiItem.confidence || "medium").toLowerCase();
+        let confidence: "high" | "medium" | "low" =
+          confRaw === "high" || confRaw === "low" ? confRaw : "medium";
+
+        const isBlankText =
           !detected ||
           upperDetected === "KOSONG" ||
           upperDetected === "-" ||
           upperDetected === "NONE" ||
           upperDetected === "EMPTY";
 
-        if (keyItem.type === "multiple_choice") {
-          // Extract single option letter A-E if detected
+        const isMultipleFlag =
+          detectionStatus === "multiple_answers" ||
+          upperDetected === "GANDA" ||
+          upperDetected.includes("GANDA") ||
+          upperDetected.includes("DOUBLE");
+
+        const isUnclearFlag =
+          detectionStatus === "unclear" ||
+          upperDetected === "TIDAK_JELAS" ||
+          upperDetected === "TIDAK TERBACA" ||
+          upperDetected.includes("TIDAK JELAS") ||
+          upperDetected.includes("RAGU");
+
+        let needsVerification = Boolean(aiItem.needsVerification);
+        let isCorrect = false;
+        let earnedPoints = 0;
+
+        if (isMultipleFlag) {
+          detectionStatus = "multiple_answers";
+          detected = "GANDA";
+          confidence = "low";
+          needsVerification = true;
+          isCorrect = false;
+          earnedPoints = 0;
+          wrongCount++;
+        } else if (isUnclearFlag) {
+          detectionStatus = "unclear";
+          detected = "TIDAK_JELAS";
+          confidence = "low";
+          needsVerification = true;
+          isCorrect = false;
+          earnedPoints = 0;
+          wrongCount++;
+        } else if (isBlankText || detectionStatus === "empty") {
+          detectionStatus = "empty";
+          detected = "KOSONG";
+          isCorrect = false;
+          earnedPoints = 0;
+          unansweredCount++;
+        } else if (keyItem.type === "multiple_choice") {
           const letterMatch = upperDetected.match(/\b([A-E])\b/);
-          const cleanDetectedLetter = isBlank
-            ? "KOSONG"
-            : upperDetected === "TIDAK TERBACA"
-              ? "TIDAK TERBACA"
-              : letterMatch
-                ? letterMatch[1]
-                : upperDetected.slice(0, 1);
-
-          detected = cleanDetectedLetter;
-          const targetKey = keyItem.correctAnswer.trim().toUpperCase().slice(0, 1);
-
-          if (!isBlank && cleanDetectedLetter === targetKey) {
-            isCorrect = true;
-            earnedPoints = keyItem.points;
-            correctCount++;
-          } else if (isBlank) {
-            isCorrect = false;
-            earnedPoints = 0;
-            unansweredCount++;
-          } else {
+          if (!letterMatch) {
+            // Never guess if no clear single option A-E
+            detectionStatus = "unclear";
+            detected = "TIDAK_JELAS";
+            confidence = "low";
+            needsVerification = true;
             isCorrect = false;
             earnedPoints = 0;
             wrongCount++;
+          } else {
+            const cleanLetter = letterMatch[1];
+            detected = cleanLetter;
+            if (confidence === "low") {
+              needsVerification = true;
+            }
+            const targetKey = keyItem.correctAnswer.trim().toUpperCase().slice(0, 1);
+            if (cleanLetter === targetKey) {
+              isCorrect = true;
+              earnedPoints = keyItem.points;
+              correctCount++;
+            } else {
+              isCorrect = false;
+              earnedPoints = 0;
+              wrongCount++;
+            }
           }
         } else {
           // Essay / short answer: semantic AI scoring clamped strictly to [0, keyItem.points]
-          if (isBlank) {
-            detected = "KOSONG";
-            isCorrect = false;
-            earnedPoints = 0;
-            unansweredCount++;
-          } else {
-            const rawPts = Number(aiItem.earnedPoints);
-            const clampedPts = isNaN(rawPts)
-              ? (aiItem.isCorrect ? keyItem.points : 0)
-              : Math.min(keyItem.points, Math.max(0, Math.round(rawPts * 10) / 10));
-            earnedPoints = clampedPts;
-            isCorrect = Boolean(aiItem.isCorrect) || clampedPts >= keyItem.points * 0.6;
-            if (isCorrect) correctCount++;
-            else wrongCount++;
-          }
+          if (confidence === "low") needsVerification = true;
+          const rawPts = Number(aiItem.earnedPoints);
+          const clampedPts = isNaN(rawPts)
+            ? aiItem.isCorrect
+              ? keyItem.points
+              : 0
+            : Math.min(keyItem.points, Math.max(0, Math.round(rawPts * 10) / 10));
+          earnedPoints = clampedPts;
+          isCorrect = Boolean(aiItem.isCorrect) || clampedPts >= keyItem.points * 0.6;
+          if (isCorrect) correctCount++;
+          else wrongCount++;
         }
 
+        if (needsVerification) verificationRequiredCount++;
         totalMaxPoints += keyItem.points;
         totalEarnedPoints += earnedPoints;
 
-        const confRaw = String(aiItem.confidence || "medium").toLowerCase();
-        const confidence: "high" | "medium" | "low" =
-          confRaw === "high" || confRaw === "low" ? confRaw : "medium";
+        const rawBbox = aiItem.bbox || {};
+        const clampCoord = (val: any, fallback: number) => {
+          const n = Number(val);
+          if (isNaN(n)) return fallback;
+          return Math.min(1000, Math.max(0, Math.round(n)));
+        };
+        const bbox = {
+          ymin: clampCoord(rawBbox.ymin, 0),
+          xmin: clampCoord(rawBbox.xmin, 0),
+          ymax: clampCoord(rawBbox.ymax, 1000),
+          xmax: clampCoord(rawBbox.xmax, 1000)
+        };
+        if (bbox.ymax <= bbox.ymin) bbox.ymax = Math.min(1000, bbox.ymin + 80);
+        if (bbox.xmax <= bbox.xmin) bbox.xmax = Math.min(1000, bbox.xmin + 200);
 
         return {
           number: keyItem.number,
           type: keyItem.type,
           correctAnswer: keyItem.correctAnswer,
           maxPoints: keyItem.points,
+          rawMarksObserved:
+            rawObserved ||
+            (detectionStatus === "empty"
+              ? "Tidak ada tanda jawaban."
+              : detectionStatus === "multiple_answers"
+                ? "Terdeteksi lebih dari satu jawaban tanpa pembatalan."
+                : detectionStatus === "unclear"
+                  ? "Tanda kurang jelas / meragukan."
+                  : `Terbaca pilihan ${detected}`),
           detectedAnswer: detected,
+          detectionStatus,
+          needsVerification,
+          verifiedByTeacher: !needsVerification,
           isCorrect,
           earnedPoints,
           confidence,
-          feedback: String(aiItem.feedback || "").trim() || (
-            isCorrect ? "Sesuai kunci jawaban guru." : "Belum sesuai kunci jawaban."
-          )
+          bbox,
+          feedback:
+            String(aiItem.feedback || "").trim() ||
+            (needsVerification
+              ? "Tanda meragukan/ganda — wajib diperiksa guru sebelum difinalisasi."
+              : isCorrect
+                ? "Sesuai kunci jawaban guru."
+                : "Belum sesuai kunci jawaban.")
         };
       });
 
       const scoreScale100 =
         totalMaxPoints > 0 ? Math.round((totalEarnedPoints / totalMaxPoints) * 100) : 0;
 
-      const legibilityRaw = String(parsed.paperLegibility || "moderate").toLowerCase();
-      const paperLegibility =
-        legibilityRaw === "clear" || legibilityRaw === "blurry" ? legibilityRaw : "moderate";
-
       return res.json({
         success: true,
+        photoRejected: false,
         result: {
-          detectedStudentName: String(parsed.detectedStudentName || "").trim(),
-          paperLegibility,
+          isPhotoAcceptable: true,
+          qualityStatus,
+          qualityIssues,
+          qualityFeedback: qualityFeedback || "Foto jelas, pencahayaan cukup, dan layak dikoreksi.",
           overallNotes: String(parsed.overallNotes || "").trim(),
           totalQuestions: gradedItems.length,
           correctCount,
           wrongCount,
           unansweredCount,
+          verificationRequiredCount,
           totalEarnedPoints: Math.round(totalEarnedPoints * 10) / 10,
           totalMaxPoints: Math.round(totalMaxPoints * 10) / 10,
           scoreScale100,
