@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { collection, doc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { FileDown, Save, Edit2, X, Plus, Trash2, Filter, Settings, Check, RefreshCw, Sparkles } from 'lucide-react';
+import { FileDown, Save, Edit2, X, Plus, Trash2, Filter, Settings, Check, RefreshCw, Sparkles, Camera } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
@@ -559,6 +560,14 @@ export default function GradesGuru() {
               <RefreshCw className={`w-3.5 h-3.5 ${syncingAssignments ? 'animate-spin' : ''}`} />
               <span>{syncingAssignments ? 'Menyinkronkan...' : 'Sinkronkan Nilai Tugas ke Rapor'}</span>
             </button>
+            <Link
+              to={isAdmin ? '/admin/koreksi-foto' : '/guru/koreksi-foto'}
+              className="flex items-center space-x-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-3.5 py-2 rounded-xl transition-colors font-bold text-xs cursor-pointer shadow-2xs"
+              title="Koreksi otomatis foto lembar jawaban kertas siswa berdasarkan kunci jawaban guru"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Koreksi Foto Offline</span>
+            </Link>
             <button
               onClick={() => setIsKkmModalOpen(true)}
               className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl transition-colors font-medium text-xs cursor-pointer shadow-2xs"

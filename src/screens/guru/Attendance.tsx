@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { collection, getDocs, doc, writeBatch, query, where, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Save, Calendar, FileDown, Filter, MessageSquare, CheckCircle2, AlertCircle, Bell, Users, Clock, Share2, Copy, Check, CheckCheck, Send, Printer, FileText, Loader2, X } from 'lucide-react';
-import { format } from 'date-fns';
+import { Save, Calendar, FileDown, Filter, MessageSquare, CheckCircle2, AlertCircle, Bell, Users, Clock, Share2, Copy, Check, CheckCheck, Send, Printer, FileText, Loader2, X, ChevronLeft, ChevronRight, History, Edit3 } from 'lucide-react';
+import { format, addDays, subDays } from 'date-fns';
 import { id } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -89,12 +89,28 @@ export default function AttendanceGuru() {
   }, [location.search]);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
-  const todayDisplay = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id });
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const [hasSavedRecord, setHasSavedRecord] = useState(false);
+  const [savedInfo, setSavedInfo] = useState<{ count: number; recordedBy?: string; recordedAt?: string } | null>(null);
+  const [notifyWali, setNotifyWali] = useState<boolean>(true);
+  const [recordedDatesMap, setRecordedDatesMap] = useState<Record<string, number>>({});
+  const [showMonthQuickStrip, setShowMonthQuickStrip] = useState<boolean>(false);
+
+  const isToday = selectedDate === todayStr;
+  const selectedDateObj = new Date(`${selectedDate}T00:00:00`);
+  const selectedDateDisplay = !isNaN(selectedDateObj.getTime())
+    ? format(selectedDateObj, 'EEEE, dd MMMM yyyy', { locale: id })
+    : selectedDate;
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4500);
   };
+
+  // Otomatis aktifkan notifikasi wali hanya jika absen untuk hari ini; untuk tanggal lampau default mati agar tidak spam
+  useEffect(() => {
+    setNotifyWali(selectedDate === todayStr);
+  }, [selectedDate, todayStr]);
 
   // Realtime listener pengaturan sekolah
   useEffect(() => {
@@ -109,6 +125,51 @@ export default function AttendanceGuru() {
     });
     return () => unsubSchool();
   }, []);
+
+  // Muat daftar tanggal dalam bulan terpilih yang sudah pernah disimpan guru
+  const selectedMonthPrefix = selectedDate.slice(0, 7); // YYYY-MM
+  const loadMonthRecordedDates = async (clsName: string, monthPrefix: string) => {
+    try {
+      const variants = getClassVariants(clsName);
+      const targetClasses = variants.length > 0 ? variants : [clsName];
+      const [yrStr, moStr] = monthPrefix.split('-');
+      const yr = parseInt(yrStr, 10);
+      const mo = parseInt(moStr, 10);
+      const lastDay = new Date(yr, mo, 0).getDate();
+      const startD = `${monthPrefix}-01`;
+      const endD = `${monthPrefix}-${String(lastDay).padStart(2, '0')}`;
+
+      const dateCounts: Record<string, Set<string>> = {};
+      for (const cls of targetClasses) {
+        const qMonth = query(
+          collection(db, 'attendance'),
+          where('classId', '==', cls),
+          where('date', '>=', startD),
+          where('date', '<=', endD)
+        );
+        const snapMonth = await getDocs(qMonth);
+        snapMonth.docs.forEach((docSnap) => {
+          const d = docSnap.data();
+          if (d.date && d.studentId) {
+            if (!dateCounts[d.date]) dateCounts[d.date] = new Set();
+            dateCounts[d.date].add(d.studentId);
+          }
+        });
+      }
+
+      const summaryMap: Record<string, number> = {};
+      Object.entries(dateCounts).forEach(([dt, set]) => {
+        summaryMap[dt] = set.size;
+      });
+      setRecordedDatesMap(summaryMap);
+    } catch (err) {
+      console.warn('Error loading month recorded dates:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadMonthRecordedDates(selectedClass, selectedMonthPrefix);
+  }, [selectedClass, selectedMonthPrefix]);
 
   useEffect(() => {
     const fetchStudentsAndAttendance = async () => {
@@ -130,26 +191,43 @@ export default function AttendanceGuru() {
         });
         setStudents(studentsData);
         
-        // Fetch existing attendance for today if already saved
-        const qAttToday = variants.length === 1
+        // Fetch existing attendance for selectedDate if already saved
+        const qAttDate = variants.length === 1
           ? query(
               collection(db, 'attendance'),
               where('classId', '==', variants[0]),
-              where('date', '==', todayStr)
+              where('date', '==', selectedDate)
             )
           : query(
               collection(db, 'attendance'),
               where('classId', 'in', variants.length > 0 ? variants : [selectedClass]),
-              where('date', '==', todayStr)
+              where('date', '==', selectedDate)
             );
-        const snapAtt = await getDocs(qAttToday);
+        const snapAtt = await getDocs(qAttDate);
         const existingAtt: Record<string, AttendanceStatus> = {};
+        let metaRecordedBy = '';
+        let metaRecordedAt = '';
+
         snapAtt.docs.forEach(docSnap => {
           const d = docSnap.data();
           if (d.studentId && d.status) {
             existingAtt[d.studentId] = d.status as AttendanceStatus;
           }
+          if (!metaRecordedBy && d.recordedBy) metaRecordedBy = d.recordedBy;
+          if (!metaRecordedAt && d.recordedAt) metaRecordedAt = d.recordedAt;
         });
+
+        if (snapAtt.size > 0) {
+          setHasSavedRecord(true);
+          setSavedInfo({
+            count: Object.keys(existingAtt).length,
+            recordedBy: metaRecordedBy,
+            recordedAt: metaRecordedAt
+          });
+        } else {
+          setHasSavedRecord(false);
+          setSavedInfo(null);
+        }
 
         // Initialize default attendance as Hadir or existing saved status
         const initialAtt: Record<string, AttendanceStatus> = {};
@@ -164,7 +242,16 @@ export default function AttendanceGuru() {
       }
     };
     fetchStudentsAndAttendance();
-  }, [selectedClass, todayStr]);
+  }, [selectedClass, selectedDate]);
+
+  const handleShiftDate = (daysDelta: number) => {
+    const base = new Date(`${selectedDate}T00:00:00`);
+    const nextDate = daysDelta < 0 ? subDays(base, Math.abs(daysDelta)) : addDays(base, daysDelta);
+    const nextStr = format(nextDate, 'yyyy-MM-dd');
+    if (nextStr <= todayStr) {
+      setSelectedDate(nextStr);
+    }
+  };
 
   const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
     setAttendance(prev => ({
@@ -190,9 +277,10 @@ export default function AttendanceGuru() {
 
     setSaving(true);
     try {
-      // Chunk students into groups of 150 (each student creates 2 docs: attendance + student_notifications)
+      // Chunk students into groups of 150 (each student creates up to 2 docs: attendance + student_notifications)
       const chunkSize = 150;
       const nowIso = new Date().toISOString();
+      const shouldNotify = notifyWali;
 
       for (let i = 0; i < students.length; i += chunkSize) {
         const chunk = students.slice(i, i + chunkSize);
@@ -201,56 +289,79 @@ export default function AttendanceGuru() {
         chunk.forEach(student => {
           const status = attendance[student.id] || 'Hadir';
           
-          // 1. Catat ke koleksi attendance
-          const docId = `${student.id}_${todayStr}`;
+          // 1. Catat / Perbarui ke koleksi attendance menggunakan docId konsisten `${student.id}_${selectedDate}`
+          const docId = `${student.id}_${selectedDate}`;
           const ref = doc(db, 'attendance', docId);
           batch.set(ref, {
             studentId: student.id,
             studentName: student.name,
             nisn: student.nisn || '',
             classId: selectedClass,
-            date: todayStr,
+            date: selectedDate,
             status: status,
             academicYearId: 'active',
             recordedBy: userData?.name || 'Wali Kelas',
             recordedRole: userData?.role || 'Guru',
             recordedAt: nowIso,
-            notifiedToWali: true,
-            notifiedAt: nowIso,
+            isEditedOrBackfilled: !isToday || hasSavedRecord,
+            notifiedToWali: shouldNotify,
+            notifiedAt: shouldNotify ? nowIso : '',
             updatedAt: serverTimestamp()
           }, { merge: true });
 
-          // 2. Kirim notifikasi individual ke wali murid
-          const notifId = `${student.id}_att_${todayStr}`;
-          const notifRef = doc(db, 'student_notifications', notifId);
-          batch.set(notifRef, {
-            studentId: student.id,
-            studentName: student.name,
-            classId: selectedClass,
-            date: todayStr,
-            type: 'attendance',
-            status: status,
-            title: status === 'Hadir' 
-              ? '✅ Ananda Telah Masuk Sekolah' 
-              : (status === 'Izin' ? 'ℹ️ Izin Kehadiran Santri' : (status === 'Sakit' ? '🏥 Keterangan Santri Sakit' : '⚠️ Kehadiran: Alpa')),
-            body: status === 'Hadir'
-              ? `Alhamdulillah, ananda ${student.name} telah masuk sekolah dan tercatat HADIR di ${selectedClass} hari ini (${todayDisplay}).`
-              : `Informasi Kehadiran: ananda ${student.name} tercatat status "${status}" pada absensi ${selectedClass} hari ini (${todayDisplay}).`,
-            recordedBy: userData?.name || 'Wali Kelas',
-            recordedAt: nowIso,
-            createdAt: serverTimestamp(),
-            isRead: false
-          }, { merge: true });
+          // 2. Kirim notifikasi individual ke wali murid jika diaktifkan
+          if (shouldNotify) {
+            const notifId = `${student.id}_att_${selectedDate}`;
+            const notifRef = doc(db, 'student_notifications', notifId);
+            batch.set(notifRef, {
+              studentId: student.id,
+              studentName: student.name,
+              classId: selectedClass,
+              date: selectedDate,
+              type: 'attendance',
+              status: status,
+              title: status === 'Hadir' 
+                ? (isToday ? '✅ Ananda Telah Masuk Sekolah' : '✅ Pembaruan Presensi Masuk Sekolah')
+                : (status === 'Izin' ? 'ℹ️ Izin Kehadiran Santri' : (status === 'Sakit' ? '🏥 Keterangan Santri Sakit' : '⚠️ Kehadiran: Alpa')),
+              body: status === 'Hadir'
+                ? `Alhamdulillah, ananda ${student.name} tercatat HADIR di ${selectedClass} pada tanggal ${selectedDateDisplay}.`
+                : `Informasi Kehadiran: ananda ${student.name} tercatat status "${status}" pada absensi ${selectedClass} tanggal ${selectedDateDisplay}.`,
+              recordedBy: userData?.name || 'Wali Kelas',
+              recordedAt: nowIso,
+              createdAt: serverTimestamp(),
+              isRead: false
+            }, { merge: true });
+          }
         });
 
         await batch.commit();
       }
+
+      setHasSavedRecord(true);
+      setSavedInfo({
+        count: students.length,
+        recordedBy: userData?.name || 'Wali Kelas',
+        recordedAt: nowIso
+      });
+      setRecordedDatesMap(prev => ({
+        ...prev,
+        [selectedDate]: students.length
+      }));
       
       if (userData) {
-        await logActivity(userData.name, userData.assigned_class || 'Admin', `Menyimpan absensi ${selectedClass} (${todayStr}) dan mengirimkan notifikasi ke wali murid`);
+        const actionDesc = hasSavedRecord
+          ? `Memperbarui/mengedit absensi ${selectedClass} tanggal ${selectedDate}`
+          : `Menyimpan absensi ${selectedClass} (${selectedDate})${shouldNotify ? ' dan mengirimkan notifikasi ke wali murid' : ''}`;
+        await logActivity(userData.name, userData.assigned_class || 'Admin', actionDesc);
       }
       
-      showToast(`Absensi berhasil disimpan! Notifikasi otomatis terkirim ke seluruh Wali Murid agar mengetahui anak telah masuk sekolah.`, 'success');
+      if (isToday && shouldNotify) {
+        showToast(`Absensi berhasil disimpan! Notifikasi otomatis terkirim ke seluruh Wali Murid.`, 'success');
+      } else if (hasSavedRecord) {
+        showToast(`Perubahan absensi tanggal ${selectedDateDisplay} berhasil disimpan.${shouldNotify ? ' Notifikasi diperbarui ke Wali Murid.' : ''}`, 'success');
+      } else {
+        showToast(`Absensi susulan tanggal ${selectedDateDisplay} berhasil disimpan.${shouldNotify ? ' Notifikasi terkirim ke Wali Murid.' : ''}`, 'success');
+      }
     } catch (error: any) {
       console.error(error);
       showToast('Gagal menyimpan absensi: ' + (error?.message || 'Terjadi kesalahan.'), 'error');
@@ -268,7 +379,7 @@ export default function AttendanceGuru() {
   };
 
   // Teks broadcast untuk WhatsApp Group Wali Murid
-  const waBroadcastText = `*LAPORAN KEHADIRAN SISWA*\n*${selectedClass}*\n*Hari/Tanggal:* ${todayDisplay}\n\n*Ringkasan Presensi:*\n✅ Hadir: ${counts.hadir} siswa\nℹ️ Izin: ${counts.izin} siswa\n🏥 Sakit: ${counts.sakit} siswa\n⚠️ Alpa: ${counts.alpa} siswa\nTotal: ${students.length} siswa\n\n*Keterangan:*\nAbsensi telah selesai diverifikasi oleh Wali Kelas (${userData?.name || 'Wali Kelas'}). Bapak/Ibu Wali Murid dapat melihat detail riwayat kehadiran ananda secara langsung melalui aplikasi CERDAS.\n\nTerima kasih atas kerja samanya. Wassalamu'alaikum wr. wb.`;
+  const waBroadcastText = `*LAPORAN KEHADIRAN SISWA*\n*${selectedClass}*\n*Hari/Tanggal:* ${selectedDateDisplay}\n\n*Ringkasan Presensi:*\n✅ Hadir: ${counts.hadir} siswa\nℹ️ Izin: ${counts.izin} siswa\n🏥 Sakit: ${counts.sakit} siswa\n⚠️ Alpa: ${counts.alpa} siswa\nTotal: ${students.length} siswa\n\n*Keterangan:*\nAbsensi telah selesai diverifikasi oleh Wali Kelas (${userData?.name || 'Wali Kelas'}). Bapak/Ibu Wali Murid dapat melihat detail riwayat kehadiran ananda secara langsung melalui aplikasi CERDAS.\n\nTerima kasih atas kerja samanya. Wassalamu'alaikum wr. wb.`;
 
   const handleCopyWaText = () => {
     navigator.clipboard.writeText(waBroadcastText);
@@ -1186,14 +1297,21 @@ export default function AttendanceGuru() {
               {selectedClass}
             </span>
           </h1>
-          <div className="flex items-center space-x-2 text-slate-500 dark:text-slate-400 mt-1 text-sm">
+          <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-slate-500 dark:text-slate-400 mt-1 text-sm">
             <Calendar className="w-4 h-4 text-indigo-500" />
-            <span className="font-medium">{todayDisplay}</span>
+            <span className="font-medium text-slate-700 dark:text-slate-200">{selectedDateDisplay}</span>
             <span className="text-slate-300 dark:text-slate-700">•</span>
-            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-              <Bell className="w-3.5 h-3.5" />
-              Notifikasi otomatis ke HP Wali Murid aktif
-            </span>
+            {hasSavedRecord ? (
+              <span className="text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1">
+                <Edit3 className="w-3.5 h-3.5" />
+                Data Tersimpan ({savedInfo?.count || students.length} siswa) — Mode Edit
+              </span>
+            ) : (
+              <span className={`font-semibold flex items-center gap-1 ${isToday ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                <Clock className="w-3.5 h-3.5" />
+                {isToday ? 'Belum Diabsen Hari Ini' : 'Belum Terisi (Isi Absen Susulan)'}
+              </span>
+            )}
           </div>
         </div>
         
@@ -1250,16 +1368,180 @@ export default function AttendanceGuru() {
             onClick={handleSaveMassal}
             disabled={saving || loading || students.length === 0}
             className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl transition-all font-bold text-xs shadow-md shadow-indigo-500/20 cursor-pointer active:scale-95"
-            title="Simpan absensi dan kirim notifikasi ke wali murid agar tahu anaknya telah masuk sekolah"
+            title="Simpan atau perbarui absensi pada tanggal yang dipilih"
           >
             {saving ? (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
-              <Bell className="w-4 h-4" />
+              <Save className="w-4 h-4" />
             )}
-            <span>{saving ? 'Menyimpan & Mengirim...' : 'Simpan & Beritahu Wali'}</span>
+            <span>
+              {saving
+                ? 'Menyimpan...'
+                : isToday
+                  ? (hasSavedRecord ? 'Perbarui & Beritahu Wali' : 'Simpan & Beritahu Wali')
+                  : (hasSavedRecord ? 'Simpan Perubahan Absen' : 'Simpan Absen Susulan')}
+            </span>
           </button>
         </div>
+      </div>
+
+      {/* Bar Pemilih Tanggal & Edit Absen Hari Sebelumnya */}
+      <div className="bg-white dark:bg-slate-850 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 mr-1">
+              <History className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span>Tanggal Absen:</span>
+            </span>
+
+            <div className="inline-flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handleShiftDate(-1)}
+                className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                title="Hari sebelumnya"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <input
+                type="date"
+                value={selectedDate}
+                max={todayStr}
+                onChange={(e) => {
+                  if (e.target.value && e.target.value <= todayStr) {
+                    setSelectedDate(e.target.value);
+                  }
+                }}
+                className="px-2.5 py-1.5 bg-transparent text-xs font-bold text-slate-800 dark:text-white outline-none cursor-pointer tabular-nums"
+              />
+              <button
+                type="button"
+                onClick={() => handleShiftDate(1)}
+                disabled={selectedDate >= todayStr}
+                className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700 disabled:opacity-35 transition-colors cursor-pointer"
+                title="Hari berikutnya"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSelectedDate(todayStr)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                isToday
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              Hari Ini
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedDate(format(subDays(new Date(), 1), 'yyyy-MM-dd'))}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                selectedDate === format(subDays(new Date(), 1), 'yyyy-MM-dd')
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              Kemarin
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowMonthQuickStrip(prev => !prev)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+              <span>{showMonthQuickStrip ? 'Tutup Kalender Bulan Ini' : 'Cek Tanggal Bulan Ini'}</span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {!isToday && (
+              <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={notifyWali}
+                  onChange={(e) => setNotifyWali(e.target.checked)}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Kirim notifikasi pembaruan ke Wali Murid</span>
+              </label>
+            )}
+
+            <div className={`px-3 py-1.5 rounded-xl border text-xs font-semibold ${
+              hasSavedRecord
+                ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300'
+                : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+            }`}>
+              {hasSavedRecord
+                ? `Tersimpan (${savedInfo?.recordedBy ? `oleh ${savedInfo.recordedBy}` : 'Siap Diedit'})`
+                : isToday
+                  ? 'Belum tersimpan — silakan simpan'
+                  : 'Tanggal ini belum diisi — mode absen susulan'}
+            </div>
+          </div>
+        </div>
+
+        {showMonthQuickStrip && (
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                Status Presensi Bulan {format(selectedDateObj, 'MMMM yyyy', { locale: id })} ({selectedClass}):
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Sudah Diabsen (Klik untuk Edit)
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-amber-200 dark:bg-amber-800 border border-amber-400 inline-block" /> Belum Terisi
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(() => {
+                const [yrStr, moStr] = selectedMonthPrefix.split('-');
+                const yr = parseInt(yrStr, 10);
+                const mo = parseInt(moStr, 10);
+                const daysInMonth = new Date(yr, mo, 0).getDate();
+                const dayButtons = [];
+                for (let d = 1; d <= daysInMonth; d++) {
+                  const dateKey = `${selectedMonthPrefix}-${String(d).padStart(2, '0')}`;
+                  if (dateKey > todayStr) break;
+                  const dtObj = new Date(`${dateKey}T00:00:00`);
+                  const isSunday = dtObj.getDay() === 0;
+                  const isRecorded = (recordedDatesMap[dateKey] || 0) > 0;
+                  const isSelected = dateKey === selectedDate;
+                  dayButtons.push(
+                    <button
+                      key={dateKey}
+                      type="button"
+                      onClick={() => setSelectedDate(dateKey)}
+                      title={`${format(dtObj, 'EEEE, dd MMM yyyy', { locale: id })} — ${isRecorded ? `Tersimpan (${recordedDatesMap[dateKey]} siswa)` : (isSunday ? 'Hari Minggu' : 'Belum terisi')}`}
+                      className={`w-9 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer tabular-nums flex flex-col items-center leading-tight ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : isRecorded
+                            ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100'
+                            : isSunday
+                              ? 'bg-slate-50 dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800 opacity-60'
+                              : 'bg-amber-50/70 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border-dashed border-amber-300 dark:border-amber-700 hover:bg-amber-100'
+                      }`}
+                    >
+                      <span>{String(d).padStart(2, '0')}</span>
+                      <span className="text-[9px] font-medium opacity-80">{format(dtObj, 'EEE', { locale: id }).slice(0, 3)}</span>
+                    </button>
+                  );
+                }
+                return dayButtons;
+              })()}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Summary KPI Badges & Quick Action */}
@@ -1306,14 +1588,14 @@ export default function AttendanceGuru() {
             <thead>
               <tr className="bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
                 <th className="px-6 py-4 font-medium">Siswa & Kontak Wali</th>
-                <th className="px-6 py-4 font-medium">Status Kehadiran Hari Ini</th>
+                <th className="px-6 py-4 font-medium">Status Kehadiran ({isToday ? 'Hari Ini' : format(selectedDateObj, 'dd MMM yyyy', { locale: id })})</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {loading ? (
                 <tr>
                   <td colSpan={2} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
-                    Memuat data siswa dan absensi hari ini...
+                    Memuat data siswa dan absensi tanggal {selectedDateDisplay}...
                   </td>
                 </tr>
               ) : students.length === 0 ? (
@@ -1349,8 +1631,8 @@ export default function AttendanceGuru() {
                                 const phoneFormatted = phoneClean.startsWith('0') ? '62' + phoneClean.slice(1) : phoneClean;
                                 
                                 const waMsg = currentStatus === 'Hadir'
-                                  ? `Assalamu'alaikum wr. wb. Yth. Bapak/Ibu Wali Murid dari *${student.name}*.\n\nMenginformasikan bahwa ananda telah hadir dan masuk sekolah di *${selectedClass}* hari ini (${todayDisplay}).\nPresensi telah dicatat oleh Wali Kelas (${userData?.name || 'Wali Kelas'}). Terima kasih atas perhatian dan kerja samanya.\n\nWassalamu'alaikum wr. wb.`
-                                  : `Assalamu'alaikum wr. wb. Yth. Bapak/Ibu Wali Murid dari *${student.name}*.\n\nMenginformasikan bahwa pada absensi kelas *${selectedClass}* hari ini (${todayDisplay}), ananda tercatat berstatus *${currentStatus.toUpperCase()}*.\n\nTerima kasih atas perhatiannya.\nWali Kelas (${userData?.name || 'Wali Kelas'})`;
+                                  ? `Assalamu'alaikum wr. wb. Yth. Bapak/Ibu Wali Murid dari *${student.name}*.\n\nMenginformasikan bahwa ananda tercatat HADIR di *${selectedClass}* pada tanggal *${selectedDateDisplay}*.\nPresensi telah dicatat oleh Wali Kelas (${userData?.name || 'Wali Kelas'}). Terima kasih atas perhatian dan kerja samanya.\n\nWassalamu'alaikum wr. wb.`
+                                  : `Assalamu'alaikum wr. wb. Yth. Bapak/Ibu Wali Murid dari *${student.name}*.\n\nMenginformasikan bahwa pada absensi kelas *${selectedClass}* tanggal *${selectedDateDisplay}*, ananda tercatat berstatus *${currentStatus.toUpperCase()}*.\n\nTerima kasih atas perhatiannya.\nWali Kelas (${userData?.name || 'Wali Kelas'})`;
 
                                 const waLink = `https://wa.me/${phoneFormatted}?text=${encodeURIComponent(waMsg)}`;
                                 window.open(waLink, '_blank');

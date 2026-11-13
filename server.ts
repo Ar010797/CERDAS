@@ -2158,6 +2158,296 @@ Jika hari tidak tertera per baris melainkan kolom per hari (tabel matriks), urai
     }
   });
 
+  // API 3b: Auto-Grade Offline Worksheet / Answer Sheet Photo against Teacher Answer Key
+  app.post("/api/grade-offline-photo", upload.single("file"), async (req, res) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    try {
+      let fileBuffer: Buffer | null = null;
+      let mimeType = "image/jpeg";
+
+      if (req.file) {
+        fileBuffer = req.file.buffer;
+        mimeType = req.file.mimetype || "image/jpeg";
+        if (mimeType === "application/octet-stream") {
+          const name = (req.file.originalname || "").toLowerCase();
+          if (name.endsWith(".png")) mimeType = "image/png";
+          else if (name.endsWith(".webp")) mimeType = "image/webp";
+          else if (name.endsWith(".heic") || name.endsWith(".heif")) mimeType = "image/heic";
+          else if (name.endsWith(".pdf")) mimeType = "application/pdf";
+          else mimeType = "image/jpeg";
+        }
+      } else if (req.body?.imageBase64) {
+        let cleanBase64 = String(req.body.imageBase64);
+        if (cleanBase64.includes("base64,")) {
+          const header = cleanBase64.split("base64,")[0];
+          const mimeMatch = header.match(/data:([^;]+);/);
+          if (mimeMatch) mimeType = mimeMatch[1];
+          cleanBase64 = cleanBase64.split("base64,")[1];
+        }
+        fileBuffer = Buffer.from(cleanBase64.trim(), "base64");
+        if (req.body.mimeType) mimeType = String(req.body.mimeType);
+      }
+
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Foto lembar jawaban siswa wajib diunggah terlebih dahulu."
+        });
+      }
+
+      let rawAnswerKey = req.body?.answerKey;
+      if (typeof rawAnswerKey === "string") {
+        try {
+          rawAnswerKey = JSON.parse(rawAnswerKey);
+        } catch {
+          rawAnswerKey = [];
+        }
+      }
+
+      if (!Array.isArray(rawAnswerKey) || rawAnswerKey.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Kunci jawaban guru belum diisi. Silakan masukkan kunci jawaban terlebih dahulu."
+        });
+      }
+
+      const normalizedKey = rawAnswerKey.map((item: any, idx: number) => ({
+        number: Number(item.number) || idx + 1,
+        type: item.type === "essay" ? "essay" : "multiple_choice",
+        correctAnswer: String(item.correctAnswer || "").trim(),
+        points: Number(item.points) > 0 ? Number(item.points) : (item.type === "essay" ? 10 : 1),
+        notes: String(item.notes || "").trim()
+      }));
+
+      const subject = String(req.body?.subject || "").trim();
+      const title = String(req.body?.title || "").trim();
+      const studentName = String(req.body?.studentName || "").trim();
+
+      const keyDescription = normalizedKey
+        .map((k) => {
+          const typeLabel = k.type === "multiple_choice" ? "Pilihan Ganda" : "Isian/Uraian";
+          const notePart = k.notes ? ` | Catatan/Rubrik: ${k.notes}` : "";
+          return `- No. ${k.number} (${typeLabel}, Bobot Maks ${k.points} poin): Kunci = "${k.correctAnswer}"${notePart}`;
+        })
+        .join("\n");
+
+      const ai = getAi();
+      const base64Data = fileBuffer.toString("base64");
+
+      const promptText = `Anda adalah sistem koreksi otomatis (Optical Mark & Handwriting Grader) untuk lembar jawaban / soal offline siswa sekolah di Indonesia.
+${title ? `Judul Ujian/Tugas: ${title}` : ""}
+${subject ? `Mata Pelajaran: ${subject}` : ""}
+${studentName ? `Nama Siswa Target: ${studentName}` : ""}
+
+KUNCI JAWABAN RESMI DARI GURU (WAJIB MENJADI ACUAN MUTLAK):
+${keyDescription}
+
+TUGAS ANDA:
+1. Periksa foto lembar jawaban siswa secara teliti dari nomor ${normalizedKey[0].number} sampai nomor ${normalizedKey[normalizedKey.length - 1].number}.
+2. Jawaban siswa di kertas offline bisa berupa:
+   - Huruf yang dilingkari, disilang (X), dicontreng (✓), atau dihitamkan pada pilihan A/B/C/D/E.
+   - Huruf atau teks tulisan tangan di samping nomor soal atau di lembar jawaban siswa.
+   - Kalimat/angka jawaban isian singkat atau uraian di bawah/samping soal.
+   - Jika terdapat coretan/ralat dan siswa menulis/melingkari pilihan pengganti yang jelas, gunakan jawaban akhir yang dimaksud siswa.
+3. Untuk SETIAP nomor pada kunci jawaban guru (wajib ada semua ${normalizedKey.length} item berurutan):
+   - 'number': nomor soal sesuai kunci.
+   - 'detectedAnswer': tulis jawaban siswa yang terlihat di foto. Untuk Pilihan Ganda, kembalikan HANYA SATU HURUF KAPITAL (A, B, C, D, atau E). Jika kosong/tidak dijawab tulis "KOSONG". Jika ragu/tidak terbaca sama sekali tulis "TIDAK TERBACA". Untuk Isian/Uraian, transkripsikan jawaban tulisan tangan siswa dengan akurat (atau "KOSONG" jika kosong).
+   - 'isCorrect': true jika jawaban siswa benar/sesuai kunci, false jika salah/kosong.
+   - 'earnedPoints': untuk Pilihan Ganda isi bobot penuh jika benar atau 0 jika salah; untuk Isian/Uraian beri skor proporsional 0 sampai bobot maksimal soal sesuai ketepatan makna terhadap kunci guru & rubrik.
+   - 'confidence': 'high', 'medium', atau 'low' sesuai kejelasan tulisan/tanda di foto.
+   - 'feedback': penjelasan singkat dan jelas dalam Bahasa Indonesia (contoh: "Siswa menyilang opsi B, sesuai kunci B" atau "Terbaca jawaban '3/4', sedangkan kunci '1/2'").
+4. Juga isi 'detectedStudentName' jika nama/no absen siswa tertulis di kertas (atau string kosong jika tidak terlihat), 'paperLegibility' ('clear' | 'moderate' | 'blurry'), dan 'overallNotes' (ringkasan singkat kondisi lembar jawaban).
+
+Kembalikan HANYA JSON sesuai skema.`;
+
+      const response: any = await callGeminiWithRetry(ai, {
+        model: "gemini-4-hydrogen",
+        timeoutMs: 28000,
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType
+              }
+            },
+            {
+              text: promptText
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              detectedStudentName: { type: Type.STRING },
+              paperLegibility: { type: Type.STRING },
+              overallNotes: { type: Type.STRING },
+              items: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    number: { type: Type.NUMBER },
+                    detectedAnswer: { type: Type.STRING },
+                    isCorrect: { type: Type.BOOLEAN },
+                    earnedPoints: { type: Type.NUMBER },
+                    confidence: { type: Type.STRING },
+                    feedback: { type: Type.STRING }
+                  },
+                  required: ["number", "detectedAnswer", "isCorrect", "earnedPoints", "confidence", "feedback"]
+                }
+              }
+            },
+            required: ["paperLegibility", "overallNotes", "items"]
+          }
+        }
+      });
+
+      let rawText = (response.text || "").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+      }
+
+      if (!parsed || !Array.isArray(parsed.items)) {
+        return res.status(200).json({
+          success: false,
+          error: "Sistem belum dapat membaca struktur jawaban dari foto tersebut. Pastikan foto cukup terang, tegak, dan tidak buram."
+        });
+      }
+
+      // Deterministic verification & scoring against the teacher's exact answer key
+      const aiItemMap = new Map<number, any>();
+      parsed.items.forEach((it: any) => {
+        const num = Number(it.number);
+        if (!isNaN(num)) aiItemMap.set(num, it);
+      });
+
+      let totalEarnedPoints = 0;
+      let totalMaxPoints = 0;
+      let correctCount = 0;
+      let wrongCount = 0;
+      let unansweredCount = 0;
+
+      const gradedItems = normalizedKey.map((keyItem) => {
+        const aiItem = aiItemMap.get(keyItem.number) || {};
+        let detected = String(aiItem.detectedAnswer ?? "KOSONG").trim();
+        let isCorrect = false;
+        let earnedPoints = 0;
+
+        const upperDetected = detected.toUpperCase();
+        const isBlank =
+          !detected ||
+          upperDetected === "KOSONG" ||
+          upperDetected === "-" ||
+          upperDetected === "NONE" ||
+          upperDetected === "EMPTY";
+
+        if (keyItem.type === "multiple_choice") {
+          // Extract single option letter A-E if detected
+          const letterMatch = upperDetected.match(/\b([A-E])\b/);
+          const cleanDetectedLetter = isBlank
+            ? "KOSONG"
+            : upperDetected === "TIDAK TERBACA"
+              ? "TIDAK TERBACA"
+              : letterMatch
+                ? letterMatch[1]
+                : upperDetected.slice(0, 1);
+
+          detected = cleanDetectedLetter;
+          const targetKey = keyItem.correctAnswer.trim().toUpperCase().slice(0, 1);
+
+          if (!isBlank && cleanDetectedLetter === targetKey) {
+            isCorrect = true;
+            earnedPoints = keyItem.points;
+            correctCount++;
+          } else if (isBlank) {
+            isCorrect = false;
+            earnedPoints = 0;
+            unansweredCount++;
+          } else {
+            isCorrect = false;
+            earnedPoints = 0;
+            wrongCount++;
+          }
+        } else {
+          // Essay / short answer: semantic AI scoring clamped strictly to [0, keyItem.points]
+          if (isBlank) {
+            detected = "KOSONG";
+            isCorrect = false;
+            earnedPoints = 0;
+            unansweredCount++;
+          } else {
+            const rawPts = Number(aiItem.earnedPoints);
+            const clampedPts = isNaN(rawPts)
+              ? (aiItem.isCorrect ? keyItem.points : 0)
+              : Math.min(keyItem.points, Math.max(0, Math.round(rawPts * 10) / 10));
+            earnedPoints = clampedPts;
+            isCorrect = Boolean(aiItem.isCorrect) || clampedPts >= keyItem.points * 0.6;
+            if (isCorrect) correctCount++;
+            else wrongCount++;
+          }
+        }
+
+        totalMaxPoints += keyItem.points;
+        totalEarnedPoints += earnedPoints;
+
+        const confRaw = String(aiItem.confidence || "medium").toLowerCase();
+        const confidence: "high" | "medium" | "low" =
+          confRaw === "high" || confRaw === "low" ? confRaw : "medium";
+
+        return {
+          number: keyItem.number,
+          type: keyItem.type,
+          correctAnswer: keyItem.correctAnswer,
+          maxPoints: keyItem.points,
+          detectedAnswer: detected,
+          isCorrect,
+          earnedPoints,
+          confidence,
+          feedback: String(aiItem.feedback || "").trim() || (
+            isCorrect ? "Sesuai kunci jawaban guru." : "Belum sesuai kunci jawaban."
+          )
+        };
+      });
+
+      const scoreScale100 =
+        totalMaxPoints > 0 ? Math.round((totalEarnedPoints / totalMaxPoints) * 100) : 0;
+
+      const legibilityRaw = String(parsed.paperLegibility || "moderate").toLowerCase();
+      const paperLegibility =
+        legibilityRaw === "clear" || legibilityRaw === "blurry" ? legibilityRaw : "moderate";
+
+      return res.json({
+        success: true,
+        result: {
+          detectedStudentName: String(parsed.detectedStudentName || "").trim(),
+          paperLegibility,
+          overallNotes: String(parsed.overallNotes || "").trim(),
+          totalQuestions: gradedItems.length,
+          correctCount,
+          wrongCount,
+          unansweredCount,
+          totalEarnedPoints: Math.round(totalEarnedPoints * 10) / 10,
+          totalMaxPoints: Math.round(totalMaxPoints * 10) / 10,
+          scoreScale100,
+          items: gradedItems
+        }
+      });
+    } catch (error: any) {
+      console.error("[Grade Offline Photo Error]:", error);
+      return res.status(500).json({
+        success: false,
+        error: error?.message || "Gagal memproses koreksi foto lembar jawaban."
+      });
+    }
+  });
+
   // API 4: Push Notification Trigger for Announcements (Median Native & Web Push)
   app.post(["/api/send-push-announcement", "/api/broadcast-announcement", "/api/broadcast-push-alert"], async (req, res) => {
     res.setHeader("Content-Type", "application/json");

@@ -17,6 +17,7 @@ import LessonPlansGuru from './screens/guru/LessonPlans';
 import SettingsGuru from './screens/guru/Settings';
 import QuestionBankGuru from './screens/guru/QuestionBank';
 import FinanceGuru from './screens/guru/Finance';
+import OfflineGraderGuru from './screens/guru/OfflineGrader';
 import WaliMuridDashboard from './screens/walimurid/Dashboard';
 import SchedulesScreen from './screens/Schedules';
 import AcademicCalendar from './screens/AcademicCalendar';
@@ -91,6 +92,7 @@ export default function App() {
                 <Route path="students" element={<StudentsAdmin />} />
                 <Route path="attendance" element={<AttendanceGuru />} />
                 <Route path="grades" element={<GradesGuru />} />
+                <Route path="koreksi-foto" element={<OfflineGraderGuru />} />
                 <Route path="assignments" element={<AssignmentsScreen />} />
                 <Route path="schedules" element={<SchedulesScreen />} />
                 <Route path="calendar" element={<AcademicCalendar />} />
@@ -111,6 +113,7 @@ export default function App() {
                 <Route path="students" element={<StudentsAdmin />} />
                 <Route path="attendance" element={<AttendanceGuru />} />
                 <Route path="grades" element={<GradesGuru />} />
+                <Route path="koreksi-foto" element={<OfflineGraderGuru />} />
                 <Route path="assignments" element={<AssignmentsScreen />} />
                 <Route path="schedules" element={<SchedulesScreen />} />
                 <Route path="calendar" element={<AcademicCalendar />} />

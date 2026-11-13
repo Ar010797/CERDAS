@@ -33,7 +33,8 @@ import {
   Image as ImageIcon,
   Wallet,
   Sun,
-  Moon
+  Moon,
+  Camera
 } from 'lucide-react';
 
 export const DashboardLayout = () => {
@@ -76,6 +77,7 @@ export const DashboardLayout = () => {
     { to: '/admin/students', icon: GraduationCap, label: 'Data Siswa' },
     { to: '/admin/attendance', icon: ClipboardList, label: 'Absensi Siswa' },
     { to: '/admin/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
+    { to: '/admin/koreksi-foto', icon: Camera, label: 'Koreksi Foto Soal' },
     { to: '/admin/assignments', icon: FileCheck, label: 'Tugas Online' },
     { to: '/admin/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/admin/calendar', icon: Calendar, label: 'Kalender Pendidikan' },
@@ -91,6 +93,7 @@ export const DashboardLayout = () => {
     { to: '/guru/students', icon: GraduationCap, label: 'Siswa Kelas' },
     { to: '/guru/attendance', icon: ClipboardList, label: 'Absensi' },
     { to: '/guru/grades', icon: BookOpen, label: 'Penilaian & Rapor' },
+    { to: '/guru/koreksi-foto', icon: Camera, label: 'Koreksi Foto Soal' },
     { to: '/guru/assignments', icon: FileCheck, label: 'Tugas Online' },
     { to: '/guru/schedules', icon: CalendarDays, label: 'Jadwal Kelas' },
     { to: '/guru/calendar', icon: Calendar, label: 'Kalender Pendidikan' },

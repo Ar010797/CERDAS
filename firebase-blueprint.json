@@ -82,6 +82,39 @@
         "feedbackBy": { "type": "string", "description": "Nama guru yang menilai" }
       },
       "required": ["assignmentId", "studentId", "studentName", "classId", "submittedAt"]
+    },
+    "OfflineAnswerKey": {
+      "title": "OfflineAnswerKey",
+      "description": "Template kunci jawaban guru untuk koreksi foto soal/lembar jawaban offline.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Judul soal atau ujian" },
+        "classId": { "type": "string", "description": "Target kelas" },
+        "subject": { "type": "string", "description": "Mata pelajaran" },
+        "assessmentCategory": { "type": "string", "description": "Kategori nilai rapor: tugas, ulanganHarian, pts, atau pas" },
+        "items": { "type": "array", "description": "Daftar butir kunci jawaban dan bobot poin" },
+        "createdBy": { "type": "string", "description": "Nama guru pembuat kunci" }
+      },
+      "required": ["title", "classId", "subject", "items"]
+    },
+    "OfflineGradingRecord": {
+      "title": "OfflineGradingRecord",
+      "description": "Riwayat hasil koreksi otomatis foto lembar jawaban offline siswa.",
+      "type": "object",
+      "properties": {
+        "keyId": { "type": "string" },
+        "title": { "type": "string" },
+        "classId": { "type": "string" },
+        "subject": { "type": "string" },
+        "assessmentCategory": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "scoreScale100": { "type": "number" },
+        "items": { "type": "array" },
+        "gradedBy": { "type": "string" },
+        "gradedAtIso": { "type": "string" }
+      },
+      "required": ["title", "classId", "subject", "studentId", "studentName", "scoreScale100"]
     }
   },
   "firestore": {
@@ -100,6 +133,14 @@
     "/pengumpulan_tugas/{submissionId}": {
       "schema": { "$ref": "#/entities/AssignmentSubmission" },
       "description": "Koleksi lembar pengumpulan tugas siswa beserta penilaian dan feedback guru."
+    },
+    "/kunci_jawaban_offline/{keyId}": {
+      "schema": { "$ref": "#/entities/OfflineAnswerKey" },
+      "description": "Koleksi kunci jawaban guru untuk koreksi otomatis foto lembar jawaban offline."
+    },
+    "/koreksi_foto_offline/{recordId}": {
+      "schema": { "$ref": "#/entities/OfflineGradingRecord" },
+      "description": "Koleksi hasil koreksi otomatis foto lembar jawaban offline siswa."
     }
   }
 }
