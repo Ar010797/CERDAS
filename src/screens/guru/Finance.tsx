@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Wallet, Coins, ArrowUpRight, ArrowDownRight, Plus, Trash2, Filter } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
+import { sortStudentsAlphabetically } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -67,8 +68,9 @@ export default function FinanceGuru() {
       try {
         const q = query(collection(db, 'students'), where('classId', '==', selectedClass));
         const snap = await getDocs(q);
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        data.sort((a, b) => (parseInt(a.absen_number) || 0) - (parseInt(b.absen_number) || 0));
+        const data = sortStudentsAlphabetically(
+          snap.docs.map(d => ({ id: d.id, ...d.data() } as Student))
+        );
         setStudents(data);
         if (data.length > 0) {
           if (!selectedStudent || !data.some(s => s.id === selectedStudent)) {

@@ -9,7 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
 import { syncAllClassAssignmentGrades } from '../../lib/gradeSync';
 import RaporPreviewModal, { RaporStudentInfo } from '../../components/RaporPreviewModal';
-import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants, getPrincipalForClass } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants, getPrincipalForClass, sortStudentsAlphabetically } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -104,8 +104,9 @@ export default function GradesGuru() {
       ? query(collection(db, 'students'), where('classId', '==', variants[0]))
       : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
     const unsubStudents = onSnapshot(qStudents, (snap) => {
-      const studentsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-      studentsData.sort((a, b) => (parseInt(a.absen_number) || 0) - (parseInt(b.absen_number) || 0));
+      const studentsData = sortStudentsAlphabetically(
+        snap.docs.map(d => ({ id: d.id, ...d.data() } as Student))
+      );
       setStudents(studentsData);
     });
 
@@ -630,7 +631,7 @@ export default function GradesGuru() {
 
                   return (
                     <tr key={student.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                      <td className="px-6 py-4 text-sm font-semibold text-slate-400 text-center">{student.absen_number || index + 1}</td>
+                      <td className="px-6 py-4 text-sm font-semibold text-slate-400 text-center tabular-nums">{index + 1}</td>
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-800 dark:text-white">{student.name}</div>
                         <div className="text-xs text-slate-400 font-medium mt-0.5">NISN: {student.nisn}</div>

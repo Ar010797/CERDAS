@@ -4,7 +4,7 @@ import { db } from '../../lib/firebase';
 import { Upload, Plus, Trash2, Search, FileSpreadsheet, Filter, Edit2, X, FileDown, AlertTriangle, CheckCircle, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../contexts/AuthContext';
-import { normalizeClassName, CLASS_GROUPS, POPULAR_CLASSES, ALL_AVAILABLE_CLASSES, getClassVariants } from '../../lib/schoolClasses';
+import { normalizeClassName, CLASS_GROUPS, POPULAR_CLASSES, ALL_AVAILABLE_CLASSES, getClassVariants, sortStudentsAlphabetically } from '../../lib/schoolClasses';
 import ClassSelectWithCustom from '../../components/ClassSelectWithCustom';
 
 interface Student {
@@ -45,7 +45,44 @@ export default function StudentsAdmin() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autoSyncedClassKeysRef = useRef<Set<string>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
+
+  // Sinkronisasi nomor urut absen (1..N) sesuai abjad nama siswa untuk kelas terkait
+  const syncClassAbsenNumbersAlphabetically = async (classIds: string[]) => {
+    const uniqueClasses = Array.from(new Set(classIds.map(c => (c || '').trim()).filter(Boolean)));
+    for (const cls of uniqueClasses) {
+      if (cls === 'Semua Kelas') continue;
+      const variants = getClassVariants(cls);
+      const qCls = variants.length === 1
+        ? query(collection(db, 'students'), where('classId', '==', variants[0]))
+        : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [cls]));
+      const snapCls = await getDocs(qCls);
+      if (snapCls.empty) continue;
+
+      const sorted = sortStudentsAlphabetically(
+        snapCls.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+      );
+
+      const updates: Array<{ id: string; nextAbsen: string }> = [];
+      sorted.forEach((st, idx) => {
+        const expected = idx + 1;
+        const currentNum = parseInt(String(st.absen_number || '').trim(), 10);
+        if (currentNum !== expected) {
+          updates.push({ id: st.id, nextAbsen: String(expected) });
+        }
+      });
+
+      for (let i = 0; i < updates.length; i += 400) {
+        const chunk = updates.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(u => {
+          batch.update(doc(db, 'students', u.id), { absen_number: u.nextAbsen });
+        });
+        await batch.commit();
+      }
+    }
+  };
 
   // Jumlah siswa per kelas di seluruh sekolah secara realtime
   const [allClassCounts, setAllClassCounts] = useState<Record<string, number>>({});
@@ -109,13 +146,22 @@ export default function StudentsAdmin() {
     }
 
     const unsubscribe = onSnapshot(q, (snap: any) => {
-      const data = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Student));
-      // Sort by absen_number if possible
-      data.sort((a: Student, b: Student) => {
-        return (parseInt(a.absen_number) || 0) - (parseInt(b.absen_number) || 0);
-      });
+      const rawData: Student[] = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Student));
+      const data = sortStudentsAlphabetically<Student>(rawData, selectedClass === 'Semua Kelas');
       setStudents(data);
       setLoading(false);
+
+      // Otomatis rapikan no. absen agar sesuai urutan abjad A-Z untuk kelas yang sedang dibuka
+      if (selectedClass !== 'Semua Kelas' && data.length > 0) {
+        const hasMismatch = data.some((st, idx) => parseInt(String(st.absen_number || '').trim(), 10) !== idx + 1);
+        const syncSig = `${selectedClass}:${data.map(d => d.id).join(',')}`;
+        if (hasMismatch && !autoSyncedClassKeysRef.current.has(syncSig)) {
+          autoSyncedClassKeysRef.current.add(syncSig);
+          syncClassAbsenNumbersAlphabetically([selectedClass]).catch(err =>
+            console.warn('Auto sync alphabetical absen failed:', err)
+          );
+        }
+      }
     }, (error: any) => {
       console.error("Error fetching students: ", error);
       setLoading(false);
@@ -317,10 +363,21 @@ export default function StudentsAdmin() {
         return;
       }
 
+      // Urutkan siswa impor per kelas secara alfabetis (A-Z) dan sesuaikan nomor urut absennya
+      const sortedImportStudents = sortStudentsAlphabetically(studentsToInsert, true);
+      const perClassPreviewIdx: Record<string, number> = {};
+      const numberedImportStudents = sortedImportStudents.map(st => {
+        perClassPreviewIdx[st.classId] = (perClassPreviewIdx[st.classId] || 0) + 1;
+        return {
+          ...st,
+          absen_number: String(perClassPreviewIdx[st.classId])
+        };
+      });
+
       // Buka modal konfirmasi / preview impor dengan ringkasan kelas
       setOverrideClass('auto');
       setImportPreview({
-        students: studentsToInsert,
+        students: numberedImportStudents,
         classCounters,
         sheetsCount: sheetsWithData,
         fileName: file.name
@@ -364,12 +421,15 @@ export default function StudentsAdmin() {
         await batch.commit();
       }
 
+      // Sinkronkan ulang nomor urut absen sesuai abjad (menggabungkan siswa lama & baru di kelas terkait)
+      await syncClassAbsenNumbersAlphabetically(Object.keys(finalCounters));
+
       const classSummary = Object.entries(finalCounters)
         .map(([cls, count]) => `${cls} (${count} siswa)`)
         .join(', ');
 
       showToast(
-        `Alhamdulillah! Berhasil mengimpor ${finalStudents.length} siswa! Otomatis terbagi ke: ${classSummary}.`,
+        `Alhamdulillah! Berhasil mengimpor ${finalStudents.length} siswa dan mengurutkan nomor absen sesuai abjad ke: ${classSummary}.`,
         'success'
       );
       setImportPreview(null);
@@ -401,8 +461,11 @@ export default function StudentsAdmin() {
       });
       
       await batch.commit();
+      if (studentToDelete.classId) {
+        await syncClassAbsenNumbersAlphabetically([studentToDelete.classId]);
+      }
       
-      showToast(`Data siswa ${studentToDelete.name} beserta nilai dan absensinya berhasil dihapus!`, 'success');
+      showToast(`Data siswa ${studentToDelete.name} beserta nilai dan absensinya berhasil dihapus! No. absen disesuaikan abjad.`, 'success');
       setStudentToDelete(null);
     } catch (error: any) {
       console.error("Error deleting student:", error);
@@ -534,10 +597,12 @@ export default function StudentsAdmin() {
       };
       if (editingStudent) {
         await updateDoc(doc(db, 'students', editingStudent.id), payload);
-        showToast('Data siswa & Catatan Wali Kelas berhasil diperbarui!', 'success');
+        await syncClassAbsenNumbersAlphabetically([formData.classId, editingStudent.classId]);
+        showToast('Data siswa & urutan absen abjad berhasil diperbarui!', 'success');
       } else {
         await addDoc(collection(db, 'students'), payload);
-        showToast('Siswa baru berhasil ditambahkan!', 'success');
+        await syncClassAbsenNumbersAlphabetically([formData.classId]);
+        showToast('Siswa baru berhasil ditambahkan & no. absen otomatis disesuaikan abjad!', 'success');
       }
       setIsModalOpen(false);
     } catch (error: any) {
@@ -1018,12 +1083,12 @@ export default function StudentsAdmin() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">No. Absen</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">No. Absen (Otomatis Abjad)</label>
                   <input
                     type="text"
-                    required
                     value={formData.absen_number}
                     onChange={(e) => setFormData({...formData, absen_number: e.target.value})}
+                    placeholder="Otomatis sesuai abjad"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
                   />
                 </div>

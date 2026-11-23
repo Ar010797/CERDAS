@@ -442,3 +442,23 @@ export function isClassTargetMatching(
   });
 }
 
+/**
+ * Urutkan daftar siswa secara alfabetis berdasarkan nama (A-Z, standar Bahasa Indonesia).
+ * Jika groupByClass = true (misal saat menampilkan 'Semua Kelas'), urutkan kelas terlebih dahulu lalu nama A-Z.
+ */
+export function sortStudentsAlphabetically<T extends { name?: string; classId?: string }>(
+  list: T[],
+  groupByClass = false
+): T[] {
+  return [...list].sort((a, b) => {
+    if (groupByClass) {
+      const clsA = (a.classId || '').trim();
+      const clsB = (b.classId || '').trim();
+      const clsCmp = clsA.localeCompare(clsB, 'id', { numeric: true, sensitivity: 'base' });
+      if (clsCmp !== 0) return clsCmp;
+    }
+    const nameA = (a.name || '').trim();
+    const nameB = (b.name || '').trim();
+    return nameA.localeCompare(nameB, 'id', { sensitivity: 'base' });
+  });
+}

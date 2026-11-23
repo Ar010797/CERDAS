@@ -9,7 +9,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
-import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants, getPrincipalForClass } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, CLASS_GROUPS, getClassVariants, getPrincipalForClass, sortStudentsAlphabetically } from '../../lib/schoolClasses';
 
 interface Student {
   id: string;
@@ -181,14 +181,9 @@ export default function AttendanceGuru() {
           : query(collection(db, 'students'), where('classId', 'in', variants.length > 0 ? variants : [selectedClass]));
         
         const snap = await getDocs(qStudents);
-        const studentsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        // Urutkan nomor absen lalu alfabetis
-        studentsData.sort((a, b) => {
-          const numA = parseInt(a.absen_number || '999', 10);
-          const numB = parseInt(b.absen_number || '999', 10);
-          if (numA !== numB) return numA - numB;
-          return a.name.localeCompare(b.name);
-        });
+        const studentsData = sortStudentsAlphabetically(
+          snap.docs.map(d => ({ id: d.id, ...d.data() } as Student))
+        );
         setStudents(studentsData);
         
         // Fetch existing attendance for selectedDate if already saved
@@ -413,13 +408,9 @@ export default function AttendanceGuru() {
         return;
       }
 
-      // Urutkan siswa berdasarkan nomor absen, lalu alfabetis nama
-      studentList.sort((a, b) => {
-        const numA = parseInt(a.absen_number || '999', 10);
-        const numB = parseInt(b.absen_number || '999', 10);
-        if (numA !== numB) return numA - numB;
-        return a.name.localeCompare(b.name);
-      });
+      // Urutkan siswa secara alfabetis sesuai abjad (A-Z)
+      const sortedMonthlyStudents = sortStudentsAlphabetically(studentList);
+      studentList.splice(0, studentList.length, ...sortedMonthlyStudents);
 
       // 2. Ambil data absensi NYATA yang telah disimpan guru di Firestore pada rentang bulan tersebut
       const attMap: Record<string, Record<string, AttendanceStatus>> = {}; // studentId -> { date -> status }
@@ -562,7 +553,7 @@ export default function AttendanceGuru() {
           : '0%';
 
         return [
-          String(student.absen_number || idx + 1),
+          String(idx + 1),
           student.nisn || '-',
           student.name,
           ...dateCells,
@@ -877,13 +868,9 @@ export default function AttendanceGuru() {
         return;
       }
 
-      // Urutkan siswa berdasarkan nomor absen, lalu alfabetis nama
-      studentList.sort((a, b) => {
-        const numA = parseInt(a.absen_number || '999', 10);
-        const numB = parseInt(b.absen_number || '999', 10);
-        if (numA !== numB) return numA - numB;
-        return a.name.localeCompare(b.name);
-      });
+      // Urutkan siswa secara alfabetis sesuai abjad (A-Z)
+      const sortedSemesterStudents = sortStudentsAlphabetically(studentList);
+      studentList.splice(0, studentList.length, ...sortedSemesterStudents);
 
       // 3. Ambil data absensi NYATA yang telah disimpan guru di Firestore
       const attMap: Record<string, Record<string, { H: number; I: number; S: number; A: number }>> = {};
@@ -1062,7 +1049,7 @@ export default function AttendanceGuru() {
           : '0%';
 
         return [
-          String(student.absen_number || idx + 1),
+          String(idx + 1),
           student.nisn || '-',
           student.name,
           ...monthCells,
@@ -1587,6 +1574,7 @@ export default function AttendanceGuru() {
           <table className="w-full text-left border-collapse min-w-[600px]">
             <thead>
               <tr className="bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
+                <th className="px-4 py-4 font-medium w-16 text-center">No</th>
                 <th className="px-6 py-4 font-medium">Siswa & Kontak Wali</th>
                 <th className="px-6 py-4 font-medium">Status Kehadiran ({isToday ? 'Hari Ini' : format(selectedDateObj, 'dd MMM yyyy', { locale: id })})</th>
               </tr>
@@ -1594,21 +1582,24 @@ export default function AttendanceGuru() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={2} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={3} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                     Memuat data siswa dan absensi tanggal {selectedDateDisplay}...
                   </td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={2} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={3} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                     Belum ada siswa di {selectedClass}.
                   </td>
                 </tr>
               ) : (
-                students.map((student) => {
+                students.map((student, idx) => {
                   const currentStatus = attendance[student.id] || 'Hadir';
                   return (
                     <tr key={student.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                      <td className="px-4 py-4 text-center text-sm font-bold text-slate-500 dark:text-slate-400 tabular-nums">
+                        {idx + 1}
+                      </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-between">
                           <div>

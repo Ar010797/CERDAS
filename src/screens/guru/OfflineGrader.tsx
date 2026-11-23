@@ -16,7 +16,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activity';
-import { ALL_AVAILABLE_CLASSES, getClassVariants } from '../../lib/schoolClasses';
+import { ALL_AVAILABLE_CLASSES, getClassVariants, sortStudentsAlphabetically } from '../../lib/schoolClasses';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -416,13 +416,9 @@ export default function OfflineGrader() {
           );
 
     const unsubStudents = onSnapshot(qStudents, (snap) => {
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Student));
-      list.sort((a, b) => {
-        const numA = parseInt(a.absen_number || '999', 10);
-        const numB = parseInt(b.absen_number || '999', 10);
-        if (numA !== numB) return numA - numB;
-        return a.name.localeCompare(b.name);
-      });
+      const list = sortStudentsAlphabetically(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() } as Student))
+      );
       setStudents(list);
       if (list.length > 0 && !list.some((s) => s.id === selectedStudentId)) {
         setSelectedStudentId(list[0].id);
@@ -1456,7 +1452,7 @@ export default function OfflineGrader() {
                         const isDone = gradedStudentIdsForCurrentTitle.has(s.id);
                         return (
                           <option key={s.id} value={s.id}>
-                            {s.absen_number ? `No. ${s.absen_number}` : `#${idx + 1}`} — {s.name}{' '}
+                            No. {idx + 1} — {s.name}{' '}
                             {isDone ? '(Sudah Dinilai)' : ''}
                           </option>
                         );
