@@ -66,10 +66,10 @@ export default function StudentsAdmin() {
 
       const updates: Array<{ id: string; nextAbsen: string }> = [];
       sorted.forEach((st, idx) => {
-        const expected = idx + 1;
-        const currentNum = parseInt(String(st.absen_number || '').trim(), 10);
-        if (currentNum !== expected) {
-          updates.push({ id: st.id, nextAbsen: String(expected) });
+        const expected = String(idx + 1);
+        const currentStr = String(st.absen_number || '').trim();
+        if (currentStr !== expected) {
+          updates.push({ id: st.id, nextAbsen: expected });
         }
       });
 
@@ -151,13 +151,30 @@ export default function StudentsAdmin() {
       setStudents(data);
       setLoading(false);
 
-      // Otomatis rapikan no. absen agar sesuai urutan abjad A-Z untuk kelas yang sedang dibuka
-      if (selectedClass !== 'Semua Kelas' && data.length > 0) {
-        const hasMismatch = data.some((st, idx) => parseInt(String(st.absen_number || '').trim(), 10) !== idx + 1);
-        const syncSig = `${selectedClass}:${data.map(d => d.id).join(',')}`;
-        if (hasMismatch && !autoSyncedClassKeysRef.current.has(syncSig)) {
-          autoSyncedClassKeysRef.current.add(syncSig);
-          syncClassAbsenNumbersAlphabetically([selectedClass]).catch(err =>
+      // Otomatis rapikan no. absen (1..N) agar sesuai urutan abjad A-Z di kelas masing-masing
+      if (data.length > 0) {
+        const byClass = new Map<string, Student[]>();
+        data.forEach((st) => {
+          const normCls = normalizeClassName(st.classId);
+          if (!byClass.has(normCls)) byClass.set(normCls, []);
+          byClass.get(normCls)!.push(st);
+        });
+
+        const classesToSync: string[] = [];
+        byClass.forEach((clsStudents, normCls) => {
+          const sortedCls = sortStudentsAlphabetically<Student>(clsStudents);
+          const hasMismatch = sortedCls.some(
+            (st, idx) => String(st.absen_number || '').trim() !== String(idx + 1)
+          );
+          const syncSig = `${normCls}:${sortedCls.map((d) => d.id).join(',')}`;
+          if (hasMismatch && !autoSyncedClassKeysRef.current.has(syncSig)) {
+            autoSyncedClassKeysRef.current.add(syncSig);
+            classesToSync.push(normCls);
+          }
+        });
+
+        if (classesToSync.length > 0) {
+          syncClassAbsenNumbersAlphabetically(classesToSync).catch((err) =>
             console.warn('Auto sync alphabetical absen failed:', err)
           );
         }
@@ -611,6 +628,23 @@ export default function StudentsAdmin() {
     }
   };
 
+  const computedAbsenMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    const byClass = new Map<string, Student[]>();
+    students.forEach((st) => {
+      const normCls = normalizeClassName(st.classId);
+      if (!byClass.has(normCls)) byClass.set(normCls, []);
+      byClass.get(normCls)!.push(st);
+    });
+    byClass.forEach((clsList) => {
+      const sortedCls = sortStudentsAlphabetically<Student>(clsList);
+      sortedCls.forEach((st, idx) => {
+        map[st.id] = String(idx + 1);
+      });
+    });
+    return map;
+  }, [students]);
+
   const filteredStudents = students.filter(s => 
     s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     s.nisn.includes(searchTerm)
@@ -737,7 +771,7 @@ export default function StudentsAdmin() {
               ) : (
                 filteredStudents.map((student) => (
                   <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-medium text-slate-700">{student.absen_number || '-'}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-slate-700">{computedAbsenMap[student.id] || student.absen_number || '-'}</td>
                     <td className="px-6 py-4 text-sm font-medium text-slate-700">{student.nisn}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">{student.name}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">

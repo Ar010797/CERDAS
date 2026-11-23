@@ -1,19 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { GraduationCap, Loader2, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAuth, UserData } from '../contexts/AuthContext';
 import ClassSelectWithCustom from '../components/ClassSelectWithCustom';
+import { CLASS_GROUPS, isClassMatch, normalizeClassName, sortStudentsAlphabetically } from '../lib/schoolClasses';
 
 type RoleOption = 'Admin' | 'Guru' | 'Wali Murid';
 
-const CLASSES_LIST = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6', 'Kelas 7', 'Kelas 8', 'Kelas 9'];
+const normalizeStudentName = (name: string) =>
+  name.trim().replace(/\s+/g, ' ').toLowerCase();
 
 export default function Login() {
   const [selectedRole, setSelectedRole] = useState<RoleOption>('Wali Murid');
+  const [studentClass, setStudentClass] = useState<string>('Semua Kelas');
+  const [registeredClasses, setRegisteredClasses] = useState<string[]>([]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -28,6 +32,33 @@ export default function Login() {
   
   const navigate = useNavigate();
   const { login } = useAuth();
+
+  useEffect(() => {
+    let active = true;
+    const loadRegisteredClasses = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'students'));
+        if (!active) return;
+        const unique = new Set<string>();
+        snap.forEach((d) => {
+          const rawCls = d.data()?.classId;
+          if (rawCls && typeof rawCls === 'string' && rawCls.trim()) {
+            unique.add(normalizeClassName(rawCls));
+          }
+        });
+        const sorted = Array.from(unique).sort((a, b) =>
+          a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' })
+        );
+        setRegisteredClasses(sorted);
+      } catch (err) {
+        console.warn('Could not preload classes for student login:', err);
+      }
+    };
+    loadRegisteredClasses();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,26 +203,98 @@ export default function Login() {
         throw new Error('Username atau Kata Sandi salah.');
 
       } else if (selectedRole === 'Wali Murid') {
-        // Simple Student Login logic (Wali Murid uses Name & Absen Number)
-        const studentsRef = collection(db, 'students');
-        const qStudent = query(studentsRef, where('name', '==', trimmedUsername), where('absen_number', '==', password));
-        const studentSnap = await getDocs(qStudent);
+        const targetName = normalizeStudentName(trimmedUsername);
+        const cleanPass = password.trim();
+        const parsedPassNum = /^\d+$/.test(cleanPass) ? parseInt(cleanPass, 10) : NaN;
 
-        if (!studentSnap.empty) {
-          const docData = studentSnap.docs[0].data();
-          foundUser = {
-            uid: studentSnap.docs[0].id,
-            username: docData.name,
-            name: `Wali Murid ${docData.name}`,
-            role: 'Wali Murid',
-            nisn: docData.nisn,
-            absen_number: docData.absen_number,
-            assigned_class: docData.classId,
-          };
-        } else {
-          setError('Data siswa tidak ditemukan.');
+        if (!targetName) {
+          setError('Masukkan nama asli siswa yang terdaftar di kelas.');
           return;
         }
+
+        if (Number.isNaN(parsedPassNum) || parsedPassNum <= 0) {
+          setError('Password harus berupa nomor urut absensi siswa (angka, contoh: 1, 2, 3).');
+          return;
+        }
+
+        // Ambil data seluruh siswa agar urutan absensi abjad A-Z per kelas selalu akurat
+        const studentsRef = collection(db, 'students');
+        const studentSnap = await getDocs(studentsRef);
+        const allStudents = studentSnap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+        }));
+
+        // Filter kandidat siswa berdasarkan nama asli (dan kelas jika dipilih)
+        const nameMatches = allStudents.filter((s) => {
+          const sameName = normalizeStudentName(String(s.name || '')) === targetName;
+          if (!sameName) return false;
+          if (studentClass !== 'Semua Kelas') {
+            return isClassMatch(s.classId, studentClass);
+          }
+          return true;
+        });
+
+        if (nameMatches.length === 0) {
+          setError(
+            studentClass !== 'Semua Kelas'
+              ? `Siswa dengan nama "${trimmedUsername}" tidak ditemukan di ${studentClass}. Pastikan ejaan nama asli sesuai daftar kelas.`
+              : `Siswa dengan nama "${trimmedUsername}" tidak ditemukan. Pastikan ejaan nama asli sesuai daftar kelas.`
+          );
+          return;
+        }
+
+        // Verifikasi nomor urut absensi berdasarkan urutan abjad A-Z di kelas masing-masing
+        const validMatches: Array<{ docData: any; alphabeticalAbsen: number }> = [];
+        for (const candidate of nameMatches) {
+          const classRoster = allStudents.filter((s) =>
+            candidate.classId
+              ? isClassMatch(s.classId, candidate.classId)
+              : normalizeClassName(s.classId) === normalizeClassName(candidate.classId)
+          );
+          const sortedRoster = sortStudentsAlphabetically(classRoster);
+          const idx = sortedRoster.findIndex((s) => s.id === candidate.id);
+          const alphabeticalAbsen = idx >= 0 ? idx + 1 : parseInt(String(candidate.absen_number || '').trim(), 10);
+
+          if (alphabeticalAbsen === parsedPassNum) {
+            validMatches.push({ docData: candidate, alphabeticalAbsen });
+          }
+        }
+
+        if (validMatches.length === 0) {
+          setError('Password (nomor urut absensi) salah. Periksa kembali nomor urut absen sesuai abjad di kelasnya.');
+          return;
+        }
+
+        if (validMatches.length > 1) {
+          const classesFound = Array.from(
+            new Set(validMatches.map((m) => normalizeClassName(m.docData.classId)))
+          ).join(', ');
+          setError(
+            `Ditemukan lebih dari satu siswa dengan nama dan nomor absen yang sama (${classesFound}). Silakan pilih Kelas siswa terlebih dahulu.`
+          );
+          return;
+        }
+
+        const { docData, alphabeticalAbsen } = validMatches[0];
+        const expectedAbsenStr = String(alphabeticalAbsen);
+        if (String(docData.absen_number || '').trim() !== expectedAbsenStr) {
+          try {
+            await updateDoc(doc(db, 'students', docData.id), { absen_number: expectedAbsenStr });
+          } catch (syncErr) {
+            console.warn('Could not sync student absen_number on login:', syncErr);
+          }
+        }
+
+        foundUser = {
+          uid: docData.id,
+          username: docData.name,
+          name: `Wali Murid ${docData.name}`,
+          role: 'Wali Murid',
+          nisn: docData.nisn,
+          absen_number: expectedAbsenStr,
+          assigned_class: docData.classId,
+        };
 
         if (foundUser) {
           login(foundUser);
@@ -324,9 +427,41 @@ export default function Login() {
               </div>
             )}
 
+            {selectedRole === 'Wali Murid' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Kelas Siswa
+                </label>
+                <select
+                  value={studentClass}
+                  onChange={(e) => setStudentClass(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-slate-800 font-medium cursor-pointer"
+                >
+                  <option value="Semua Kelas">Semua Kelas (Deteksi Otomatis)</option>
+                  {registeredClasses.length > 0 ? (
+                    registeredClasses.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {cls}
+                      </option>
+                    ))
+                  ) : (
+                    CLASS_GROUPS.map((group) => (
+                      <optgroup key={group.groupName} label={group.groupName}>
+                        {group.classes.map((cls) => (
+                          <option key={cls} value={cls}>
+                            {cls}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  )}
+                </select>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                {selectedRole === 'Wali Murid' ? 'Nama Siswa' : 'Username / ID Pengguna'}
+                {selectedRole === 'Wali Murid' ? 'Username (Nama Asli Siswa)' : 'Username / ID Pengguna'}
               </label>
               <input
                 id="login-username-field"
@@ -337,13 +472,13 @@ export default function Login() {
                 onChange={(e) => setUsername(e.target.value)}
                 required
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-slate-800 font-medium"
-                placeholder={selectedRole === 'Wali Murid' ? "Nama lengkap siswa" : "Username akun"}
+                placeholder={selectedRole === 'Wali Murid' ? "Nama lengkap siswa sesuai daftar kelas" : "Username akun"}
               />
             </div>
             
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                {selectedRole === 'Wali Murid' ? 'Nomor Absen Siswa' : 'Kata Sandi'}
+                {selectedRole === 'Wali Murid' ? 'Password (No. Urut Absensi)' : 'Kata Sandi'}
               </label>
               <div className="relative">
                 <input
@@ -357,7 +492,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none text-slate-800 font-medium"
-                  placeholder={selectedRole === 'Wali Murid' ? "Nomor absen siswa (contoh: 01)" : "••••••••"}
+                  placeholder={selectedRole === 'Wali Murid' ? "No. urut absen abjad di kelas (contoh: 1)" : "••••••••"}
                 />
                 <button
                   type="button"
@@ -374,7 +509,7 @@ export default function Login() {
               ) : (
                 <p className="text-xs text-slate-400 mt-2">
                   {selectedRole === 'Wali Murid' 
-                    ? '*Masukkan nomor absen siswa terdaftar' 
+                    ? '*Username menggunakan nama asli siswa & password menggunakan nomor urut absen sesuai abjad di kelasnya (1, 2, 3, ...)' 
                     : '*Gunakan kata sandi akun resmi yang telah didaftarkan'}
                 </p>
               )}
